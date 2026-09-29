@@ -1,27 +1,12 @@
-import os
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import SQLModel, Field
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlmodel.ext.asyncio.session import AsyncSession as AsyncSessionModel
+from sqlmodel import SQLModel
 
-load_dotenv()
+from database import engine
+import models  # noqa: F401  # 必須 import 才能讓 SQLModel 知道有哪些表
 
-# 資料庫連線
-DATABASE_URL = os.getenv("DATABASE_URL")
-engine = create_async_engine(DATABASE_URL, echo=True)
-
-# User 表
-class User(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    email: str = Field(unique=True, index=True)
-    hashed_password: str
-    created_at: str | None = None
-
-# 啟動時建立表
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
