@@ -1,5 +1,4 @@
-import { useRef, useState } from "react";
-
+import { useEffect, useRef, useState } from "react";
 const API = "http://localhost:8000";
 
 function App() {
@@ -16,6 +15,35 @@ function App() {
     tokenRef.current = t;
     setToken(t);
   };
+
+  const [isInitializing, setIsInitializing] = useState(true);
+const didInit = useRef(false);
+
+useEffect(() => {
+  // React 18 StrictMode 會跑兩次，用 ref 擋掉
+  if (didInit.current) return;
+  didInit.current = true;
+
+  const init = async () => {
+    try {
+      const res = await fetch(`${API}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        updateToken(data.access_token);
+      }
+    } catch {
+      // 沒登入過，正常
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  init();
+}, []);
+
 
   // 統一處理 401 的 fetch
   const apiFetch = async (url: string, options: RequestInit = {}) => {
@@ -108,6 +136,10 @@ function App() {
   };
 
   const canSubmit = email.trim() !== "" && password.length >= 8;
+
+  if (isInitializing) {
+  return <div style={{ padding: 40 }}>載入中...</div>;
+}
 
   return (
     <div style={{ padding: 40, maxWidth: 400 }}>
