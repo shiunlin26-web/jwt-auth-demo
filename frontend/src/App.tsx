@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 const API = "http://localhost:8000";
 
@@ -9,12 +9,55 @@ function App() {
   const [me, setMe] = useState<any>(null);
   const [message, setMessage] = useState("");
 
+  // 用 ref 讓 apiFetch 讀到最新 token
+  const tokenRef = useRef<string | null>(null);
+
+  const updateToken = (t: string | null) => {
+    tokenRef.current = t;
+    setToken(t);
+  };
+
+  // 統一處理 401 的 fetch
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const doFetch = (t: string | null) =>
+      fetch(url, {
+        ...options,
+        credentials: "include",
+        headers: {
+          ...options.headers,
+          ...(t ? { Authorization: `Bearer ${t}` } : {}),
+        },
+      });
+
+    let res = await doFetch(tokenRef.current);
+
+    if (res.status === 401) {
+      // 嘗試刷新
+      const refreshRes = await fetch(`${API}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (refreshRes.ok) {
+        const data = await refreshRes.json();
+        updateToken(data.access_token);
+        res = await doFetch(data.access_token);
+      } else {
+        // refresh 失敗 → 登出
+        updateToken(null);
+        setMe(null);
+        setMessage("登入已過期，請重新登入");
+      }
+    }
+
+    return res;
+  };
+
   const register = async () => {
     setMessage("");
     const res = await fetch(`${API}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
@@ -35,7 +78,7 @@ function App() {
     });
     const data = await res.json();
     if (res.ok) {
-      setToken(data.access_token);
+      updateToken(data.access_token);
       setMessage("登入成功");
     } else {
       setMessage(`登入失敗：${JSON.stringify(data.detail)}`);
@@ -48,17 +91,14 @@ function App() {
       method: "POST",
       credentials: "include",
     });
-    setToken(null);
+    updateToken(null);
     setMe(null);
     setMessage("已登出");
   };
 
   const fetchMe = async () => {
     setMessage("");
-    const res = await fetch(`${API}/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-      credentials: "include",
-    });
+    const res = await apiFetch(`${API}/me`);
     const data = await res.json();
     if (res.ok) {
       setMe(data);
