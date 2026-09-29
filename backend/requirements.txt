@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+asyncpg
+pyjwt
+passlib[bcrypt]
+python-dotenv
+python-multipart
