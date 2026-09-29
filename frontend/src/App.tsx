@@ -14,13 +14,14 @@ function App() {
     const res = await fetch(`${API}/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
     if (res.ok) {
       setMessage(`註冊成功：${data.email}`);
     } else {
-      setMessage(`註冊失敗：${data.detail}`);
+      setMessage(`註冊失敗：${JSON.stringify(data.detail)}`);
     }
   };
 
@@ -29,71 +30,81 @@ function App() {
     const res = await fetch(`${API}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
     if (res.ok) {
       setToken(data.access_token);
-      setMessage("登入成功，已拿到 token");
+      setMessage("登入成功");
     } else {
-      setMessage(`登入失敗：${data.detail}`);
+      setMessage(`登入失敗：${JSON.stringify(data.detail)}`);
     }
+  };
+
+  const logout = async () => {
+    setMessage("");
+    await fetch(`${API}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+    setToken(null);
+    setMe(null);
+    setMessage("已登出");
   };
 
   const fetchMe = async () => {
     setMessage("");
     const res = await fetch(`${API}/me`, {
       headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
     });
     const data = await res.json();
     if (res.ok) {
       setMe(data);
     } else {
-      setMessage(`取得資料失敗：${data.detail}`);
+      setMessage(`取得資料失敗：${JSON.stringify(data.detail)}`);
     }
   };
 
   const canSubmit = email.trim() !== "" && password.length >= 8;
 
-
-
   return (
     <div style={{ padding: 40, maxWidth: 400 }}>
       <h1>JWT Auth Demo</h1>
 
-      <div style={{ marginBottom: 16 }}>
-        <input
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ display: "block", width: "100%", marginBottom: 8, padding: 8 }}
-        />
-        <input
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ display: "block", width: "100%", marginBottom: 8, padding: 8 }}
-        />
-        {email && !email.includes("@") && (
-          <p style={{ color: "red", fontSize: 12 }}>Email 格式不對</p>
-        )}
-        {password && password.length < 8 && (
-          <p style={{ color: "red", fontSize: 12 }}>密碼至少 8 個字</p>
-        )}
-      </div>
+      {!token ? (
+        <>
+          <div style={{ marginBottom: 16 }}>
+            <input
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={{ display: "block", width: "100%", marginBottom: 8, padding: 8 }}
+            />
+            <input
+              placeholder="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={{ display: "block", width: "100%", marginBottom: 8, padding: 8 }}
+            />
+          </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button onClick={register} disabled={!canSubmit}>註冊</button>
-        <button onClick={login} disabled={!canSubmit}>登入</button>
-      </div>
-
-      {token && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <button onClick={register} disabled={!canSubmit}>註冊</button>
+            <button onClick={login} disabled={!canSubmit}>登入</button>
+          </div>
+        </>
+      ) : (
         <div style={{ marginBottom: 16 }}>
           <p style={{ fontSize: 12, wordBreak: "break-all" }}>
             Token: {token.slice(0, 40)}...
           </p>
-          <button onClick={fetchMe}>取得我的資料</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={fetchMe}>取得我的資料</button>
+            <button onClick={logout}>登出</button>
+          </div>
         </div>
       )}
 
