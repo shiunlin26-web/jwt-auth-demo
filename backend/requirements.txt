@@ -3,6 +3,6 @@ uvicorn[standard]
 sqlmodel
 asyncpg
 pyjwt
-passlib[bcrypt]
+bcrypt
 python-dotenv
 python-multipart

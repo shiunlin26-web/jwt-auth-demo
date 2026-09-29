@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
 from database import engine
-import models  # noqa: F401  # 必須 import 才能讓 SQLModel 知道有哪些表
+import models  # noqa: F401
+from routes import auth, users  # 改這行
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +23,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth.router)
+app.include_router(users.router)  # 新增這行
 
 @app.get("/ping")
 async def ping():
