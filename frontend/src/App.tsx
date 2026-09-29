@@ -53,6 +53,10 @@ function App() {
     }
   };
 
+  const canSubmit = email.trim() !== "" && password.length >= 8;
+
+
+
   return (
     <div style={{ padding: 40, maxWidth: 400 }}>
       <h1>JWT Auth Demo</h1>
@@ -71,11 +75,17 @@ function App() {
           onChange={(e) => setPassword(e.target.value)}
           style={{ display: "block", width: "100%", marginBottom: 8, padding: 8 }}
         />
+        {email && !email.includes("@") && (
+          <p style={{ color: "red", fontSize: 12 }}>Email 格式不對</p>
+        )}
+        {password && password.length < 8 && (
+          <p style={{ color: "red", fontSize: 12 }}>密碼至少 8 個字</p>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button onClick={register}>註冊</button>
-        <button onClick={login}>登入</button>
+        <button onClick={register} disabled={!canSubmit}>註冊</button>
+        <button onClick={login} disabled={!canSubmit}>登入</button>
       </div>
 
       {token && (
