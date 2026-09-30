@@ -4,6 +4,7 @@ from sqlalchemy import delete
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from config import settings
 from database import get_session
 from models import User, RefreshToken
 from schemas import UserCreate, UserLogin, UserRead, Token
@@ -27,8 +28,8 @@ def set_refresh_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=True,        # JS 讀不到
         samesite="lax",       # 防 CSRF
-        secure=False,         # 本機是 http，正式環境改 True
-        max_age=7 * 24 * 3600,  # 7 天（秒）
+        secure=settings.cookie_secure,  # 【關卡 2】改從設定讀：本機 http 用 False，正式環境 True
+        max_age=settings.refresh_token_expire_days * 24 * 3600,  # 天數換算成秒
         path="/auth",         # 只在 /auth/* 路徑帶上
     )
 

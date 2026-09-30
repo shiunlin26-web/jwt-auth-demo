@@ -35,7 +35,7 @@
 | --- | --- | --- | --- |
 | 0 | 密碼規則（修 bcrypt 72 bytes 的 bug） | Pydantic 驗證器、bytes 和字元的差別、註冊與登入分開驗證 | ✅ 完成 |
 | 1 | Refresh token 輪替 + 重複使用偵測 + DB 存雜湊 + 前端 single-flight | **refresh token 的核心觀念**（最重要） | ✅ 完成 |
-| 2 | 設定抽到 `.env`（pydantic-settings）、關 SQL echo、前端 `VITE_API_URL` | 設定管理 | ⬜ |
+| 2 | 設定抽到 `.env`（pydantic-settings）、關 SQL echo、前端 `VITE_API_URL` | 設定管理 | ✅ 完成 |
 | 3 | 「登出所有裝置」、改密碼時撤銷所有 token | 把第 1 關拿來應用 | ⬜ |
 | 4 | pytest 寫測試 | 學 Python 最好的方法，也能自動驗證前面幾關 | ⬜ |
 | 5 | Alembic 資料庫遷移 | 為什麼不能一直用 `create_all` | ⬜ |
@@ -270,12 +270,12 @@ Neon 後台 → Tables → `refreshtoken`。每重新整理一次頁面，就多
 
 **4. 前端 single-flight**
 
-1. 把 `backend/.env` 的 `JWT_EXPIRE_MINUTES` 改成 `0`，重啟後端（access token 一簽出來就過期，每次呼叫 `/me` 都會 401）
+1. 在 `backend/.env` 加上 `JWT_EXPIRE_MINUTES=0`，重啟後端（access token 一簽出來就過期，每次呼叫 `/me` 都會 401）
 2. 登入，打開 DevTools → Network，把節流（throttling）設成 **Slow 4G**，讓請求變慢，比較容易同時發生
 3. 快速連點「取得我的資料」三下
 4. Network 裡會看到 3 個 `/me` 401，但 **`/auth/refresh` 只有 1 個**，而且沒有被登出
 
-（retry 的 `/me` 還是 401，是因為新的 access token 也馬上過期了，正常。玩完記得把 `JWT_EXPIRE_MINUTES` 改回來。）
+（retry 的 `/me` 還是 401，是因為新的 access token 也馬上過期了，正常。玩完記得把這行刪掉。）
 
 ### 動手玩
 
@@ -336,9 +336,194 @@ refresh token 是 `secrets.token_urlsafe(32)` 產生的 256 bits 隨機值，就
 
 </details>
 
+### 補充觀念
+
+#### Set-Cookie：refresh token 怎麼進到瀏覽器
+
+`Set-Cookie` 是 HTTP 回應的標準 header。後端在回應裡寫「請幫我存這個 cookie」，瀏覽器收到後自動存起來，之後發請求到符合條件的網址時，也會**自動**帶上。前端 JS 完全不用碰它（`HttpOnly` 也讓它碰不到）。
+
+```http
+HTTP/1.1 200 OK
+Set-Cookie: refresh_token=P68V...; HttpOnly; Path=/auth; Max-Age=604800; SameSite=Lax
+
+{"access_token": "eyJhbGci...", "token_type": "bearer"}
+```
+
+refresh token 走 header（瀏覽器自動處理），access token 走 JSON 內容（前端 JS 讀出來放進記憶體）。
+
+前端（5173）和後端（8000）的 port 不同，瀏覽器視為不同來源，fetch 預設不處理 cookie，所以要加 `credentials: "include"`。
+
+#### 三個機制的關係
+
+```
+輪替（用一次換一張）
+   ↓ 好處
+重複使用偵測（舊的又出現 = 被偷）
+   ↓ 副作用：同時 refresh 會誤判自己人
+Single-flight（同一時間只送一次 refresh）
+```
+
+#### Access token 無法提前作廢
+
+後端驗證 access token 時**不查資料庫**，只檢查簽章對不對、有沒有過期（這叫 stateless，無狀態）。好處是快，壞處是**發出去之後就收不回來**：
+
+- 登出時，refresh token 被刪了，但手上的 access token **在過期前還是能用**
+- 這就是 access token 要設得很短（30 分鐘）的原因：萬一被偷，損失也有限
+
+想提前作廢就得查資料庫，那就失去 JWT 的意義了。這是 JWT 架構刻意接受的取捨。
+
+#### JWT 的內容任何人都讀得到
+
+JWT 是 `header.payload.signature` 三段，前兩段只是 Base64 編碼，**不是加密**。把 access token 貼到 <https://jwt.io>，就能看到裡面的 `sub`（使用者 id）和 `exp`（過期時間）。
+
+- **簽章**保證內容沒被竄改（改了一個字，簽章就對不上）
+- 但**內容不是秘密**，所以 payload 裡絕對不能放密碼之類的敏感資料
+- 能產生合法簽章的只有持有 `JWT_SECRET` 的人，所以 `JWT_SECRET` 外洩 = 任何人都能偽造任何使用者的 token
+
+
 ---
 
-## 關卡 2 ～ 7
+## 關卡 2：設定管理 ✅
+
+**改動的檔案**：`backend/config.py`（新增）、`backend/database.py`、`backend/security.py`、`backend/main.py`、`backend/routes/auth.py`、`backend/.env.example`、`backend/requirements.txt`、`frontend/src/App.tsx`、`frontend/.env.example`（新增）
+
+### 觀念
+
+**同一份程式碼，換個環境只要換設定，不用改程式。** 本機開發、正式環境用的資料庫、網址、安全設定都不一樣，這些差異應該放在環境變數（`.env`），而不是寫死在程式碼裡。
+
+原本的問題：
+
+| 問題 | 在哪裡 |
+| --- | --- |
+| 設定散落各處，每個檔案各自 `load_dotenv()` + `os.getenv()` | `database.py`、`security.py` |
+| 寫死在程式碼裡 | CORS 網址（`main.py`）、cookie `secure=False`（`auth.py`）、前端 API 網址（`App.tsx`） |
+| `JWT_SECRET` 沒填也能啟動，等到有人登入才爆 500 | `security.py` |
+| SQL echo 永遠開著，log 裡會出現 token 雜湊等敏感資料 | `database.py` |
+
+### ⚠️ 開始前（一次性）
+
+1. 安裝新套件：
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   ```
+2. **檢查 `backend/.env` 的 `JWT_SECRET` 有沒有至少 32 個字元。** 太短的話後端會起不來，用這行產生一個新的：
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+   換掉 `JWT_SECRET` 之後，舊的 access token 都會失效（簽章對不上），重新登入就好。
+
+### 程式怎麼寫
+
+#### 後端：`config.py`
+
+```python
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=Path(__file__).parent / ".env", extra="ignore")
+
+    database_url: str                          # 必填
+    jwt_secret: str = Field(min_length=32)     # 必填，至少 32 字元
+    jwt_expire_minutes: int = 30               # 選填，有預設值
+    cookie_secure: bool = False
+    ...
+
+settings = Settings()
+```
+
+- **`BaseSettings` 就是第 0 關學的 `BaseModel`**，差別只在資料來源：`BaseModel` 驗證 API 送來的 JSON，`BaseSettings` 驗證環境變數和 `.env`。寫法完全一樣：型別標註、`Field(...)`、預設值。
+- **沒有預設值 = 必填**，有預設值 = 選填。
+- **型別自動轉換**：`.env` 裡全部都是字串，`jwt_expire_minutes: int` 會自動把 `"30"` 轉成 `30`，`cookie_secure: bool` 會把 `"true"` 轉成 `True`。
+- **名稱不分大小寫**：`.env` 裡寫 `JWT_SECRET`，Python 這邊用 `jwt_secret`，會自動對上。
+- **`settings = Settings()`** 在 `config.py` 被第一次 import 時執行，建立的當下就讀 `.env` 並驗證。有錯就丟例外，後端直接起不來，這叫 **fail fast**：問題越早爆越好找。
+- 其他檔案用 `from config import settings`，然後 `settings.jwt_secret` 這樣取值。
+
+`@property` 是把方法變成「像屬性一樣取值」：`settings.cors_origin_list` 不用加括號，但背後是在執行函式，把 `"a,b"` 切成 `["a", "b"]`。
+
+#### 前端：`VITE_API_URL`
+
+```ts
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+```
+
+- `import.meta.env` 是 Vite 提供的，會讀 `frontend/.env`。
+- **只有 `VITE_` 開頭的變數才會給前端用。** 這是 Vite 的保護機制，避免不小心把其他秘密打包進網頁。
+- `??` 表示「左邊是 `undefined` 或 `null` 就用右邊」，所以沒設定也能跑。
+- ⚠️ **前端的環境變數會被直接寫進打包後的 JS，任何人打開 DevTools 都看得到。前端 `.env` 絕對不能放秘密。**
+
+### 所有設定一覽
+
+| 設定 | 預設值 | 說明 |
+| --- | --- | --- |
+| `DATABASE_URL` | （必填） | 資料庫連線字串 |
+| `JWT_SECRET` | （必填，≥ 32 字元） | JWT 簽章金鑰 |
+| `JWT_ALGORITHM` | `HS256` | JWT 簽章演算法 |
+| `JWT_EXPIRE_MINUTES` | `30` | access token 有效分鐘數 |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | refresh token 有效天數（DB 和 cookie 都用它） |
+| `CORS_ORIGINS` | `http://localhost:5173` | 允許的前端網址，逗號分隔 |
+| `COOKIE_SECURE` | `false` | cookie 只走 HTTPS |
+| `DB_ECHO` | `false` | terminal 印出 SQL |
+| `VITE_API_URL`（前端） | `http://localhost:8000` | 後端網址 |
+
+> 改了 `.env` 之後要**重啟**（後端 `Ctrl+C` 再啟動、前端 `Ctrl+C` 再 `npm run dev`）。`--reload` 只會偵測程式碼的變動，不會重讀 `.env`。
+
+### 驗證方式
+
+1. **fail fast**：把 `backend/.env` 的 `JWT_SECRET` 那行暫時註解掉（前面加 `#`），啟動後端。terminal 會看到：
+   ```
+   ValidationError: 1 validation error for Settings
+   jwt_secret
+     Field required
+   ```
+   後端直接起不來，而且告訴你是哪一個設定出問題。改回來再繼續。
+2. **SQL log**：在 `.env` 加上 `DB_ECHO=true`，重啟後登入，terminal 會印出一堆 `SELECT`、`INSERT`。刪掉那行，重啟後就安靜了。
+3. **cookie 有效期**：加上 `REFRESH_TOKEN_EXPIRE_DAYS=1`，重啟後登入，到 DevTools → Application → Cookies 看 `refresh_token` 的 Expires，會是明天。
+4. **CORS**：前端改用 5174 啟動：`npm run dev -- --port 5174`，打開 <http://localhost:5174> 登入，會看到 CORS 錯誤。在後端 `.env` 加上 `CORS_ORIGINS=http://localhost:5173,http://localhost:5174`，重啟後端，就能登入了。
+
+### 動手玩
+
+1. 在 `.env` 寫 `JWT_EXPIRE_MINUTES=abc`，看看啟動時的錯誤訊息長怎樣。
+2. 建立 `frontend/.env`，寫 `VITE_API_URL=http://localhost:9999`，重啟前端，試著登入。打開 Network 分頁看請求送到哪裡去了。玩完刪掉這個檔案。
+3. **自己加一個設定**（這題要動手寫，很短）：
+   - 在 `config.py` 的 `Settings` 裡加一行 `app_name: str = "JWT Auth Demo"`
+   - 在 `main.py` 的 `/ping` 改成 `return {"message": "pong", "app": settings.app_name}`
+   - 打開 <http://localhost:8000/ping> 確認
+   - 再到 `.env` 加 `APP_NAME=我的登入練習`，重啟後再看一次
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼 <code>.env</code> 不能 commit，<code>.env.example</code> 卻要 commit？</summary>
+
+`.env` 裡有真正的秘密（資料庫密碼、`JWT_SECRET`），推上 GitHub 就等於公開了，所以 `.gitignore` 把它排除。
+
+`.env.example` 是「範本」，只列出有哪些設定、格式長怎樣，值都是假的。別人（或未來的你）clone 專案後，複製一份改成自己的值就能跑。
+
+</details>
+
+<details>
+<summary>Q2：可以把 <code>JWT_SECRET</code> 放到 <code>frontend/.env</code>，讓前端自己驗證 token 嗎？</summary>
+
+絕對不行。前端的環境變數會被打包進 JS 檔，任何人都能看到。拿到 `JWT_SECRET` 就能偽造任何人的 token。**秘密只能放在後端。**
+
+</details>
+
+<details>
+<summary>Q3：為什麼「啟動時就失敗」比「登入時才失敗」好？</summary>
+
+啟動時失敗，你一執行就知道哪裡設定錯了，錯誤訊息也很清楚。登入時才失敗，可能要等使用者回報才發現，而且錯誤是一個看不出原因的 500，要翻 log 才找得到問題。
+
+</details>
+
+<details>
+<summary>Q4：如果系統環境變數和 <code>.env</code> 都設定了 <code>JWT_SECRET</code>，會用哪一個？</summary>
+
+**系統環境變數優先**，`.env` 只是補上沒設定的部分。正式環境通常不放 `.env` 檔，而是由雲端平台直接設定環境變數，程式碼完全不用改，這就是把設定抽出來的價值。
+
+</details>
+
+---
+
+## 關卡 3 ～ 7
 
 做到時再補上詳細內容。
 

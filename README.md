@@ -77,14 +77,15 @@ pip install -r requirements.txt
 cp .env.example .env              # Windows: copy .env.example .env
 ```
 
-編輯 `backend/.env`：
+編輯 `backend/.env`，**必填的只有兩個**：
 
 ```env
 DATABASE_URL=postgresql+asyncpg://...   # 第 1 步的連線字串
-JWT_SECRET=請換成一串隨機字串
-JWT_ALGORITHM=HS256
-JWT_EXPIRE_MINUTES=30
+JWT_SECRET=至少32個字元的隨機字串
 ```
+
+其他設定（token 有效期、CORS 網址、cookie、SQL log）都有預設值，要改的話看 `.env.example` 裡的說明。
+所有設定集中定義在 `backend/config.py`，少填或格式不對，後端啟動時就會直接報錯並指出是哪一個。
 
 產生隨機 `JWT_SECRET`：
 
@@ -116,7 +117,7 @@ npm run dev
 打開 <http://localhost:5173>。
 
 > ⚠️ **請用 `localhost`，不要用 `127.0.0.1`。**
-> 後端 CORS 只允許 `http://localhost:5173`，前端也寫死呼叫 `http://localhost:8000`。
+> 後端 CORS 預設只允許 `http://localhost:5173`（`backend/.env` 的 `CORS_ORIGINS`），前端預設呼叫 `http://localhost:8000`（`frontend/.env` 的 `VITE_API_URL`，不設定就用預設值）。
 > 如果用 `127.0.0.1:5173` 開頁面，CORS 會擋掉，refresh token cookie 也不會被帶上。
 
 ## 4. 試玩流程
@@ -129,7 +130,7 @@ npm run dev
 
 ### 想觀察 access token 過期後自動 refresh？
 
-在 `backend/.env` 把 `JWT_EXPIRE_MINUTES` 改成 `1`，重啟後端。登入後等一分鐘再按「取得我的資料」，
+在 `backend/.env` 加上 `JWT_EXPIRE_MINUTES=1`，重啟後端。登入後等一分鐘再按「取得我的資料」，
 打開瀏覽器 DevTools → Network，會看到：
 
 ```
@@ -154,7 +155,7 @@ GET  /me            → 200（用新 token 重試）
 | | Access Token | Refresh Token |
 | --- | --- | --- |
 | 格式 | JWT（HS256） | 隨機字串（`secrets.token_urlsafe`） |
-| 有效期 | `JWT_EXPIRE_MINUTES`（預設 30 分鐘） | 7 天 |
+| 有效期 | `JWT_EXPIRE_MINUTES`（預設 30 分鐘） | `REFRESH_TOKEN_EXPIRE_DAYS`（預設 7 天） |
 | 存放 | 前端記憶體（React state / ref） | httpOnly cookie（`path=/auth`），DB 只存 SHA-256 雜湊 |
 | 用途 | 呼叫受保護 API | 換新的 access token |
 | 輪替 | – | 每次 refresh 都發新的、舊的作廢；舊的被重複使用 → 該使用者所有 refresh token 全部撤銷 |
@@ -168,4 +169,4 @@ GET  /me            → 200（用新 token 重試）
 - **`TypeError: connect() got an unexpected keyword argument 'sslmode'` / 連不到 DB**：檢查 `DATABASE_URL` 開頭是不是 `postgresql+asyncpg://`，Neon 要用 `ssl=require` 而不是 `sslmode=require`。
 - **前端 console 出現 CORS 錯誤**：確認網址是 `http://localhost:5173`，而且後端有在 8000 port 跑。
 - **重新整理後沒有自動登入**：DevTools → Application → Cookies 看 `http://localhost:8000` 底下有沒有 `refresh_token`；如果剛剛是用 `127.0.0.1` 開的，換成 `localhost` 再登入一次。
-- **5173 被占用**：Vite 會自動改用 5174，但 CORS 只允許 5173，請先關掉占用的程式，或在 `backend/main.py` 的 `allow_origins` 加上新的網址。
+- **5173 被占用**：Vite 會自動改用 5174，但 CORS 預設只允許 5173，請先關掉占用的程式，或在 `backend/.env` 設定 `CORS_ORIGINS=http://localhost:5173,http://localhost:5174`。

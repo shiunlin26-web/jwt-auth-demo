@@ -1,18 +1,10 @@
-import os
 from datetime import datetime, timedelta, timezone
-from dotenv import load_dotenv
 import jwt
 import bcrypt
 import secrets
 import hashlib
 
-
-load_dotenv()
-
-JWT_SECRET = os.getenv("JWT_SECRET")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "30"))
-REFRESH_TOKEN_EXPIRE_DAYS = 7
+from config import settings
 
 
 def hash_password(password: str) -> str:
@@ -29,16 +21,16 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: int) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
     payload = {
         "sub": str(user_id),
         "exp": expire,
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
 def decode_access_token(token: str) -> dict:
-    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
 
 
 def create_refresh_token() -> str:
@@ -47,7 +39,7 @@ def create_refresh_token() -> str:
 
 
 def refresh_token_expiry() -> datetime:
-    return datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    return datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
 
 
 def hash_token(token: str) -> str:

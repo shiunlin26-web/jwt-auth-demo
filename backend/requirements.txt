@@ -4,6 +4,6 @@ sqlmodel
 asyncpg
 pyjwt
 bcrypt
-python-dotenv
 python-multipart
 email-validator
+pydantic-settings

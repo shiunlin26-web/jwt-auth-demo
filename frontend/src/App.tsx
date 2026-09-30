@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-const API = "http://localhost:8000";
+// 【關卡 2】API 網址改從環境變數讀（frontend/.env 的 VITE_API_URL），沒設定就用本機預設值
+// Vite 只會把「VITE_ 開頭」的變數給前端用，避免不小心把其他秘密打包進網頁
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 function App() {
   const [email, setEmail] = useState("");
