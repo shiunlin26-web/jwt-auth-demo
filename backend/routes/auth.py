@@ -6,7 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from database import get_session
 from models import User, RefreshToken
-from schemas import UserCreate, UserRead, Token
+from schemas import UserCreate, UserLogin, UserRead, Token
 from security import (
     hash_password,
     verify_password,
@@ -72,7 +72,7 @@ async def register(
 
 @router.post("/login", response_model=Token)
 async def login(
-    data: UserCreate,
+    data: UserLogin,  # 【關卡 0】登入改用 UserLogin，不套用註冊的密碼規則
     response: Response,
     session: AsyncSession = Depends(get_session),
 ):

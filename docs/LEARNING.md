@@ -33,7 +33,7 @@
 
 | 關卡 | 主題 | 會學到 | 狀態 |
 | --- | --- | --- | --- |
-| 0 | 修 bcrypt 72 bytes 的 bug | Pydantic 驗證器、bytes 和字元的差別 | ✅ 完成 |
+| 0 | 密碼規則（修 bcrypt 72 bytes 的 bug） | Pydantic 驗證器、bytes 和字元的差別、註冊與登入分開驗證 | ✅ 完成 |
 | 1 | Refresh token 輪替 + 重複使用偵測 + DB 存雜湊 + 前端 single-flight | **refresh token 的核心觀念**（最重要） | ✅ 完成 |
 | 2 | 設定抽到 `.env`（pydantic-settings）、關 SQL echo、前端 `VITE_API_URL` | 設定管理 | ⬜ |
 | 3 | 「登出所有裝置」、改密碼時撤銷所有 token | 把第 1 關拿來應用 | ⬜ |
@@ -44,13 +44,13 @@
 
 ---
 
-## 關卡 0：修 bcrypt 72 bytes 的 bug ✅
+## 關卡 0：密碼規則（修 bcrypt 72 bytes 的 bug）✅
 
-**改動的檔案**：`backend/schemas.py`
+**改動的檔案**：`backend/schemas.py`、`backend/security.py`、`backend/routes/auth.py`、`frontend/src/App.tsx`
 
-### 觀念
+### 起因：一個 500 的 bug
 
-bcrypt（密碼雜湊演算法）最多只能處理 **72 個 bytes**。原本的程式用 `Field(max_length=72)`，但它算的是**字元數**。
+bcrypt（密碼雜湊演算法）最多只能處理 **72 個 bytes**。原本的程式用 `Field(max_length=72)`，但它算的是**字元數**，而且沒有限制能用哪些字元：
 
 | 密碼 | 字元數 | bytes（UTF-8） |
 | --- | --- | --- |
@@ -58,51 +58,111 @@ bcrypt（密碼雜湊演算法）最多只能處理 **72 個 bytes**。原本的
 | `密碼密碼密碼密碼` | 8 | 24（中文 1 字 = 3 bytes） |
 | 30 個中文字 | 30 ✅ 通過 `max_length=72` | 90 ❌ 超過 bcrypt 上限 |
 
-結果就是 30 個中文字的密碼能通過驗證，bcrypt 卻丟出 `ValueError`，API 回 **500**（伺服器錯誤）。正確的行為應該是回 **422**（你送的資料不合格）。
+結果 30 個中文字的密碼能通過驗證，bcrypt 卻丟出 `ValueError`，API 回 **500**（伺服器錯誤），而不是 **422**（你送的資料不合格）。
 
-### 怎麼修
+> **bytes ≠ 字元** 這個觀念很重要，之後處理檔名長度、資料庫欄位長度、API 大小限制時都會遇到。
 
-用 Pydantic 的 `@field_validator` 寫一個自訂驗證函式，自己計算 bytes 長度：
+### 決策：密碼只允許可列印的 ASCII 字元
+
+修 bug 有兩個方向：
+
+| | A. 允許所有字元（NIST 建議） | **B. 只允許英數字與符號（採用）** |
+| --- | --- | --- |
+| 做法 | 改算 bytes 長度，再做 Unicode 正規化（NFKC） | 只接受可列印的 ASCII，長度 8～72 |
+| 優點 | 使用者自由度高 | 規則簡單；沒有輸入法、正規化問題；72 字元剛好 = 72 bytes |
+| 缺點 | 要處理正規化；換裝置或輸入法可能打不出密碼 | 使用者選擇較少 |
+
+這個專案之後要當其他專案的參考範本，所以選擇規則簡單明確的 **B**，台灣大部分網站也是這樣做。
+
+**規則**：8～72 個字元，只能是英文大小寫、數字、空白、鍵盤上的符號（`!@#$%^&*` 等）。
+
+### 程式怎麼寫
+
+**1. 註冊用 `UserCreate`，套用規則**（`schemas.py`）
 
 ```python
-@field_validator("password")
-@classmethod
-def check_password_bytes(cls, v: str) -> str:
-    if len(v.encode("utf-8")) > BCRYPT_MAX_BYTES:
-        raise ValueError("...")
-    return v
+PRINTABLE_ASCII = re.compile(r"^[\x20-\x7E]+$")
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def check_password_chars(cls, v: str) -> str:
+        if not PRINTABLE_ASCII.match(v):
+            raise ValueError("密碼只能包含英文字母、數字、空白與符號")
+        return v
 ```
 
-- `@xxx` 叫 **decorator（裝飾器）**，意思是「幫下面這個函式加上功能」。這裡是把它註冊成 password 欄位的驗證器。FastAPI 的 `@router.post(...)` 也是同一個東西。
-- 驗證器裡 `raise ValueError`，FastAPI 就會自動回 422。
-- 驗證通過一定要 `return v`。
+- `[\x20-\x7E]` 是正規表達式（regex），意思是「編號 0x20（空白）到 0x7E（`~`）之間的字元」，剛好就是鍵盤上打得出來的英數符號。
+- `@xxx` 叫 **decorator（裝飾器）**，意思是「幫下面這個函式加上功能」。這裡是把它註冊成 password 欄位的驗證器。
+- 驗證器裡 `raise ValueError`，FastAPI 就會自動回 422；驗證通過一定要 `return v`。
+
+**2. 登入用 `UserLogin`，不套用規則**（`schemas.py`、`routes/auth.py`）
+
+原本註冊和登入共用 `UserCreate`。現在把它分開：**規則只在「設定密碼」時檢查**。
+
+如果登入也檢查規則，那麼規則一改（像這次從「允許中文」改成「不允許」），用舊規則註冊的人就再也登不進來了。登入只需要判斷「密碼對不對」，交給 `verify_password` 就好。
+
+**3. `verify_password` 防呆**（`security.py`）
+
+登入不檢查長度了，那有人送 100 個中文字來登入呢？bcrypt 一樣會丟錯變成 500。所以在 `verify_password` 裡先檢查：超過 72 bytes 的密碼不可能是正確的密碼，直接回傳 `False`，API 回 401。
+
+**4. 前端即時提示**（`App.tsx`）
+
+前端用一樣的規則即時顯示提示，不符合時「註冊」按鈕不能按；「登入」按鈕只要有填就能按。
+
+> 前端檢查只是為了使用者體驗，**真正的把關在後端**。前端的檢查可以被繞過，例如直接用 curl 或 Swagger 打 API。
 
 ### 驗證方式
 
-1. 啟動後端，打開 <http://localhost:8000/docs>
-2. 用 `POST /auth/register`，password 填 30 個中文字，例如「密碼」重複 15 次
-3. 應該回 **422**，訊息是「密碼太長…」
-4. 換成 8 個中文字，應該註冊成功（201）
+在 <http://localhost:8000/docs> 用 `POST /auth/register` 試試：
+
+| password | 預期結果 |
+| --- | --- |
+| `abc1234`（7 字元） | 422 至少 8 個字元 |
+| `中文密碼中文密碼` | 422 密碼只能包含英文字母、數字、空白與符號 |
+| `abcdefgh😀` | 422（emoji 也不行） |
+| 73 個 `a` | 422 最多 72 個字元 |
+| `P@ss w0rd!~` | 201 成功（空白、符號都可以） |
+
+再到前端 <http://localhost:5173> 輸入密碼，觀察提示文字和按鈕狀態的變化。
 
 ### 動手玩
 
-1. 把 `return v` 那行刪掉，再註冊一次。會發生什麼事？（提示：看 terminal 的錯誤訊息）
-2. 把 `BCRYPT_MAX_BYTES` 改成 `10`，試試看英文密碼 `abcdefghijk`（11 個字元）。
-3. 在驗證器第一行加 `print("收到密碼：", v, "bytes 長度：", len(v.encode("utf-8")))`，註冊時看 uvicorn 的 terminal。
+1. 把 `check_password_chars` 裡的 `return v` 刪掉，再註冊一次。會發生什麼事？（提示：看 terminal 的錯誤訊息）
+2. 把 `routes/auth.py` 的 `login` 改回用 `UserCreate`，然後用一個 7 個字元的密碼登入，看看回的是 401 還是 422。想想哪一個比較好？
+3. 把 `security.py` 裡 `verify_password` 的 `if len(plain_bytes) > 72:` 那段註解掉，用 Swagger 送 30 個中文字去**登入**，看 terminal 出現什麼錯誤。
+4. 在前端把 `canLogin` 改成 `canRegister`，再用中文密碼試著登入，看看按鈕狀態怎麼變。
 
 ### 想一想
 
 <details>
-<summary>Q1：為什麼不直接在 hash_password 裡把密碼截斷成 72 bytes 就好？</summary>
+<summary>Q1：為什麼不直接把密碼截斷成 72 bytes 就好？</summary>
 
 bcrypt 的錯誤訊息確實建議 `my_password[:72]`，但截斷代表「前 72 bytes 一樣的兩個密碼會被當成同一個」。明確拒絕太長的密碼比偷偷截斷安全，也比較不會讓使用者困惑。
 
 </details>
 
 <details>
-<summary>Q2：回傳的 422 錯誤裡有一個 <code>input</code> 欄位，裡面是什麼？這在正式環境有什麼問題？</summary>
+<summary>Q2：登入時送 7 個字元的密碼，應該回 422 還是 401？</summary>
+
+401（帳號或密碼錯誤）比較好。回 422「密碼至少 8 個字元」等於告訴攻擊者你的密碼規則；而且規則一改，舊帳號就登不進來。登入時就只回答「對」或「不對」。
+
+</details>
+
+<details>
+<summary>Q3：回傳的 422 錯誤裡有一個 <code>input</code> 欄位，裡面是什麼？這在正式環境有什麼問題？</summary>
 
 `input` 會把使用者送來的原始密碼原封不動回傳。正式環境最好不要在錯誤訊息裡回傳密碼，因為它可能被 log 或監控工具記錄下來。可以留到之後的關卡處理（自訂 `RequestValidationError` 的 handler）。
+
+</details>
+
+<details>
+<summary>Q4：之前用中文密碼註冊的帳號怎麼辦？</summary>
+
+還是可以正常登入，因為登入不檢查規則（`UserLogin`），bcrypt 比對的是當初存的雜湊。只是這些人之後如果要「改密碼」，新密碼就得符合新規則。這也是為什麼「規則只在設定密碼時檢查」這麼重要。
 
 </details>
 

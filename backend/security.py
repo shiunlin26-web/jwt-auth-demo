@@ -20,7 +20,12 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    plain_bytes = plain.encode()
+    # 【關卡 0】bcrypt 遇到超過 72 bytes 會直接丟錯（→ 500）。
+    # 註冊時已經擋掉這種密碼，所以超過的一定是錯的密碼，直接回傳 False
+    if len(plain_bytes) > 72:
+        return False
+    return bcrypt.checkpw(plain_bytes, hashed.encode())
 
 
 def create_access_token(user_id: int) -> str:

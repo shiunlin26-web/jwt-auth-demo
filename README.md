@@ -121,7 +121,7 @@ npm run dev
 
 ## 4. 試玩流程
 
-1. 輸入 Email 與密碼（至少 8 碼）→ 按「註冊」
+1. 輸入 Email 與密碼（8～72 個英文字母、數字或符號）→ 按「註冊」
 2. 按「登入」→ 拿到 access token（存在記憶體），refresh token 以 httpOnly cookie 存在瀏覽器
 3. 按「取得我的資料」→ 帶 `Authorization: Bearer <token>` 呼叫 `/me`
 4. **重新整理頁面** → 前端啟動時呼叫 `/auth/refresh`，靠 cookie 自動恢復登入

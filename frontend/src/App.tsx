@@ -151,7 +151,20 @@ useEffect(() => {
     }
   };
 
-  const canSubmit = email.trim() !== "" && password.length >= 8;
+  // 【關卡 0】密碼規則要和後端 schemas.py 一致：8～72 個可列印 ASCII 字元
+  // 前端檢查是為了即時提示，真正的把關在後端（前端檢查可以被繞過）
+  const getPasswordError = (pw: string): string | null => {
+    if (!/^[\x20-\x7E]*$/.test(pw)) return "密碼只能包含英文字母、數字、空白與符號";
+    if (pw.length < 8) return "密碼至少 8 個字元";
+    if (pw.length > 72) return "密碼最多 72 個字元";
+    return null;
+  };
+  const passwordError = password === "" ? null : getPasswordError(password);
+
+  const hasEmail = email.trim() !== "";
+  // 註冊：要符合密碼規則；登入：有填就好（規則只在設定密碼時檢查）
+  const canRegister = hasEmail && password !== "" && passwordError === null;
+  const canLogin = hasEmail && password !== "";
 
   if (isInitializing) {
   return <div style={{ padding: 40 }}>載入中...</div>;
@@ -177,11 +190,14 @@ useEffect(() => {
               onChange={(e) => setPassword(e.target.value)}
               style={{ display: "block", width: "100%", marginBottom: 8, padding: 8 }}
             />
+            <p style={{ fontSize: 12, margin: 0, color: passwordError ? "crimson" : "gray" }}>
+              {passwordError ?? "8～72 個英文字母、數字或符號"}
+            </p>
           </div>
 
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <button onClick={register} disabled={!canSubmit}>註冊</button>
-            <button onClick={login} disabled={!canSubmit}>登入</button>
+            <button onClick={register} disabled={!canRegister}>註冊</button>
+            <button onClick={login} disabled={!canLogin}>登入</button>
           </div>
         </>
       ) : (
