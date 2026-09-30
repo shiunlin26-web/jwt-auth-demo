@@ -9,7 +9,11 @@ class User(SQLModel, table=True):
 
 class RefreshToken(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    token: str = Field(unique=True, index=True)
+    # 【關卡 1】DB 只存雜湊，不存原始 token（原本欄位叫 token）
+    token_hash: str = Field(unique=True, index=True)
     user_id: int = Field(foreign_key="user.id", index=True)
+    # 【關卡 1】用過（換過新 token）就設成 True。
+    # 不直接刪掉，是為了之後有人拿舊 token 來時，能認出「這是用過的」→ 偵測被盜用
+    revoked: bool = Field(default=False)
     expires_at: datetime
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

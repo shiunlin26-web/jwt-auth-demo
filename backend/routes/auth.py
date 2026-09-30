@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from sqlalchemy import delete
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -12,10 +13,38 @@ from security import (
     create_access_token,
     create_refresh_token,
     refresh_token_expiry,
+    hash_token,
 )
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def set_refresh_cookie(response: Response, token: str) -> None:
+    """【關卡 1】login 和 refresh 都要設 cookie，抽成共用函式"""
+    response.set_cookie(
+        key="refresh_token",
+        value=token,
+        httponly=True,        # JS 讀不到
+        samesite="lax",       # 防 CSRF
+        secure=False,         # 本機是 http，正式環境改 True
+        max_age=7 * 24 * 3600,  # 7 天（秒）
+        path="/auth",         # 只在 /auth/* 路徑帶上
+    )
+
+
+async def issue_refresh_token(session: AsyncSession, user_id: int) -> str:
+    """【關卡 1】產生新的 refresh token，DB 存雜湊，回傳原始字串（要放進 cookie）"""
+    token = create_refresh_token()
+    session.add(
+        RefreshToken(
+            token_hash=hash_token(token),
+            user_id=user_id,
+            expires_at=refresh_token_expiry(),
+        )
+    )
+    return token
+
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(
@@ -60,31 +89,16 @@ async def login(
     access_token = create_access_token(user.id)
 
     # 產生並儲存 refresh token
-    refresh_token_str = create_refresh_token()
-    rt = RefreshToken(
-        token=refresh_token_str,
-        user_id=user.id,
-        expires_at=refresh_token_expiry(),
-    )
-    session.add(rt)
+    refresh_token = await issue_refresh_token(session, user.id)
     await session.commit()
 
-    # 設 httpOnly cookie
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token_str,
-        httponly=True,        # JS 讀不到
-        samesite="lax",       # 防 CSRF
-        secure=False,         # 本機是 http，正式環境改 True
-        max_age=7 * 24 * 3600,  # 7 天（秒）
-        path="/auth",         # 只在 /auth/* 路徑帶上
-    )
-
+    set_refresh_cookie(response, refresh_token)
     return Token(access_token=access_token)
 
 
 @router.post("/refresh", response_model=Token)
 async def refresh(
+    response: Response,  # 【關卡 1】新增：要用它設定新的 cookie
     refresh_token: str | None = Cookie(default=None),
     session: AsyncSession = Depends(get_session),
 ):
@@ -94,9 +108,13 @@ async def refresh(
             detail="No refresh token",
         )
 
-    # 查 DB
+    # 查 DB：先雜湊再比對
+    # with_for_update() 會把這一列鎖住直到 commit，
+    # 同一個 token 同時來兩個請求時，第二個會等第一個做完才讀，不會兩個都換成功
     result = await session.exec(
-        select(RefreshToken).where(RefreshToken.token == refresh_token)
+        select(RefreshToken)
+        .where(RefreshToken.token_hash == hash_token(refresh_token))
+        .with_for_update()
     )
     rt = result.first()
 
@@ -104,6 +122,19 @@ async def refresh(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
+        )
+
+    # 【關卡 1】重複使用偵測：這個 token 已經換過了，卻又被拿來用
+    # → 可能被偷了（正常使用者手上只會有最新的那個）
+    # → 把這個使用者所有 refresh token 全刪掉，所有裝置都要重新登入
+    if rt.revoked:
+        await session.execute(
+            delete(RefreshToken).where(RefreshToken.user_id == rt.user_id)
+        )
+        await session.commit()  # 一定要在 raise 前 commit，raise 之後的程式碼不會執行
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token reused",
         )
 
     # 檢查過期
@@ -115,8 +146,19 @@ async def refresh(
             detail="Refresh token expired",
         )
 
+    # ⚠️ 先把 user_id 存到變數：commit() 之後 rt 的屬性會「過期」，
+    # 再讀 rt.user_id 會觸發重新查 DB，在 async 裡會丟 MissingGreenlet 錯誤（500）
+    user_id = rt.user_id
+
+    # 【關卡 1】輪替：舊的作廢、發一個新的
+    rt.revoked = True
+    new_refresh_token = await issue_refresh_token(session, user_id)
+    await session.commit()
+
+    set_refresh_cookie(response, new_refresh_token)
+
     # 簽新的 access token
-    access_token = create_access_token(rt.user_id)
+    access_token = create_access_token(user_id)
     return Token(access_token=access_token)
 
 
@@ -126,10 +168,10 @@ async def logout(
     refresh_token: str | None = Cookie(default=None),
     session: AsyncSession = Depends(get_session),
 ):
-    # 刪掉 DB 裡的 refresh token
+    # 刪掉 DB 裡的 refresh token（一樣先雜湊再查）
     if refresh_token:
         result = await session.exec(
-            select(RefreshToken).where(RefreshToken.token == refresh_token)
+            select(RefreshToken).where(RefreshToken.token_hash == hash_token(refresh_token))
         )
         rt = result.first()
         if rt:

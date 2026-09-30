@@ -16,23 +16,43 @@ function App() {
     setToken(t);
   };
 
+  // 【關卡 1】single-flight refresh
+  // 後端有輪替之後，同一個 refresh token 只能用一次。
+  // 如果 3 個請求同時 401、各自去 refresh，第 2、3 個會拿著已作廢的舊 token，
+  // 被後端當成「重複使用」→ 全部登出。
+  // 所以把「進行中的 refresh」存起來，後來的人直接等同一個 Promise。
+  const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
+
+  const refreshAccessToken = (): Promise<string | null> => {
+    if (!refreshPromiseRef.current) {
+      refreshPromiseRef.current = fetch(`${API}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      })
+        .then(async (res) => (res.ok ? (await res.json()).access_token : null))
+        .catch(() => null) // 網路錯誤也當作 refresh 失敗
+        .finally(() => {
+          refreshPromiseRef.current = null; // 結束後清掉，下次才會重新發
+        });
+    }
+    return refreshPromiseRef.current;
+  };
+
   const [isInitializing, setIsInitializing] = useState(true);
 const didInit = useRef(false);
 
 useEffect(() => {
-  // React 18 StrictMode 會跑兩次，用 ref 擋掉
+  // React StrictMode 在開發模式會把 effect 跑兩次，用 ref 擋掉
+  // 【關卡 1】有了輪替，同一個 token 送兩次會觸發重複使用偵測。
+  // 現在 refreshAccessToken 本身已是 single-flight，這裡算是雙重保險。
   if (didInit.current) return;
   didInit.current = true;
 
   const init = async () => {
     try {
-      const res = await fetch(`${API}/auth/refresh`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        updateToken(data.access_token);
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        updateToken(newToken);
       }
     } catch {
       // 沒登入過，正常
@@ -60,16 +80,12 @@ useEffect(() => {
     let res = await doFetch(tokenRef.current);
 
     if (res.status === 401) {
-      // 嘗試刷新
-      const refreshRes = await fetch(`${API}/auth/refresh`, {
-        method: "POST",
-        credentials: "include",
-      });
+      // 嘗試刷新（多個請求同時 401 時，只會真的發出一次 refresh）
+      const newToken = await refreshAccessToken();
 
-      if (refreshRes.ok) {
-        const data = await refreshRes.json();
-        updateToken(data.access_token);
-        res = await doFetch(data.access_token);
+      if (newToken) {
+        updateToken(newToken);
+        res = await doFetch(newToken);
       } else {
         // refresh 失敗 → 登出
         updateToken(null);

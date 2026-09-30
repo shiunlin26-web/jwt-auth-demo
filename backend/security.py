@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import jwt
 import bcrypt
 import secrets
+import hashlib
 
 
 load_dotenv()
@@ -42,3 +43,11 @@ def create_refresh_token() -> str:
 
 def refresh_token_expiry() -> datetime:
     return datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+
+def hash_token(token: str) -> str:
+    """【關卡 1】refresh token 存進 DB 前先做 SHA-256 雜湊。
+    DB 外洩時，攻擊者只拿到雜湊值，無法反推出原本的 token 拿去用。
+    （token 本身是 32 bytes 隨機字串，猜不到，所以用快速的 SHA-256 就夠，不需要 bcrypt）
+    """
+    return hashlib.sha256(token.encode()).hexdigest()

@@ -145,7 +145,7 @@ GET  /me            → 200（用新 token 重試）
 | GET | `/ping` | 健康檢查 | – |
 | POST | `/auth/register` | 註冊 `{ email, password }` | – |
 | POST | `/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie | – |
-| POST | `/auth/refresh` | 用 cookie 裡的 refresh token 換新的 access token | Cookie |
+| POST | `/auth/refresh` | 用 cookie 裡的 refresh token 換新的 access token（同時輪替 refresh token） | Cookie |
 | POST | `/auth/logout` | 刪除 refresh token 並清 cookie | Cookie |
 | GET | `/me` | 取得目前使用者 | Bearer |
 
@@ -155,8 +155,13 @@ GET  /me            → 200（用新 token 重試）
 | --- | --- | --- |
 | 格式 | JWT（HS256） | 隨機字串（`secrets.token_urlsafe`） |
 | 有效期 | `JWT_EXPIRE_MINUTES`（預設 30 分鐘） | 7 天 |
-| 存放 | 前端記憶體（React state / ref） | httpOnly cookie（`path=/auth`），DB 也存一份 |
+| 存放 | 前端記憶體（React state / ref） | httpOnly cookie（`path=/auth`），DB 只存 SHA-256 雜湊 |
 | 用途 | 呼叫受保護 API | 換新的 access token |
+| 輪替 | – | 每次 refresh 都發新的、舊的作廢；舊的被重複使用 → 該使用者所有 refresh token 全部撤銷 |
+
+## 學習路線
+
+一步步把這個專案練到接近生產級的過程，記錄在 [`docs/LEARNING.md`](docs/LEARNING.md)。
 
 ## 常見問題
 

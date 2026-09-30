@@ -34,7 +34,7 @@
 | 關卡 | 主題 | 會學到 | 狀態 |
 | --- | --- | --- | --- |
 | 0 | 修 bcrypt 72 bytes 的 bug | Pydantic 驗證器、bytes 和字元的差別 | ✅ 完成 |
-| 1 | Refresh token 輪替 + 重複使用偵測 + DB 存雜湊 + 前端 single-flight | **refresh token 的核心觀念**（最重要） | ⬜ |
+| 1 | Refresh token 輪替 + 重複使用偵測 + DB 存雜湊 + 前端 single-flight | **refresh token 的核心觀念**（最重要） | ✅ 完成 |
 | 2 | 設定抽到 `.env`（pydantic-settings）、關 SQL echo、前端 `VITE_API_URL` | 設定管理 | ⬜ |
 | 3 | 「登出所有裝置」、改密碼時撤銷所有 token | 把第 1 關拿來應用 | ⬜ |
 | 4 | pytest 寫測試 | 學 Python 最好的方法，也能自動驗證前面幾關 | ⬜ |
@@ -108,9 +108,9 @@ bcrypt 的錯誤訊息確實建議 `my_password[:72]`，但截斷代表「前 72
 
 ---
 
-## 關卡 1：Refresh Token 輪替 ⬜
+## 關卡 1：Refresh Token 輪替 ✅
 
-**預計改動**：`backend/security.py`、`backend/models.py`、`backend/routes/auth.py`、`frontend/src/App.tsx`
+**改動的檔案**：`backend/security.py`、`backend/models.py`、`backend/routes/auth.py`、`frontend/src/App.tsx`
 
 ### 觀念
 
@@ -132,11 +132,149 @@ bcrypt 的錯誤訊息確實建議 `my_password[:72]`，但截斷代表「前 72
 
 **前端 single-flight**：有了輪替之後，如果畫面同時發出 3 個請求、同時收到 401，會各自去 refresh。第一個把 A 換成 B，後兩個拿著 A 再去換，就被當成重複使用，使用者會被強制登出。所以同一時間只能有一個 refresh 請求，其他人等同一個結果。
 
-### 預告：這關會遇到的坑
+### ⚠️ 開始前：升級資料表（一次性）
 
-`create_all` 只會建立**不存在**的表，**不會修改已經存在的表**。這關要替 `refreshtoken` 表加欄位，所以得先手動刪表（Neon SQL Editor 執行 `DROP TABLE refreshtoken;`）。這個麻煩就是第 5 關要學 Alembic 的原因。
+`create_all` 只會建立**不存在**的表，**不會修改已經存在的表**。這關把 `token` 欄位改名為 `token_hash`，又新增了 `revoked` 欄位，所以要先手動刪表：
 
-（詳細的驗證方式、動手玩、想一想，會在這關完成時補上）
+1. 到 Neon 後台 → **SQL Editor**，執行：
+   ```sql
+   DROP TABLE refreshtoken;
+   ```
+2. 重新啟動後端（`Ctrl+C` 後再 `uvicorn main:app --reload`），表會用新欄位自動重建
+3. 原本登入中的狀態會失效，重新登入一次即可（`user` 表不受影響，帳號都還在）
+
+這個麻煩就是第 5 關要學 Alembic 的原因，先記住這種感覺。
+
+### 改了哪些檔案
+
+| 檔案 | 改動 |
+| --- | --- |
+| `backend/security.py` | 新增 `hash_token()`：SHA-256 雜湊 |
+| `backend/models.py` | `token` → `token_hash`，新增 `revoked` 欄位 |
+| `backend/routes/auth.py` | 抽出 `set_refresh_cookie()`、`issue_refresh_token()`；`/refresh` 加上輪替與重複使用偵測；全部改用雜湊查詢 |
+| `frontend/src/App.tsx` | 新增 `refreshAccessToken()`（single-flight），`init` 和 `apiFetch` 都改用它 |
+
+### 建議閱讀順序
+
+1. `security.py` 最下面的 `hash_token`，只有一行
+2. `models.py` 的 `RefreshToken`，看兩個欄位的註解
+3. `routes/auth.py`：
+   - 先看最上面兩個小函式 `set_refresh_cookie`、`issue_refresh_token`
+   - 再看 `login` 怎麼用它們（比原本短很多）
+   - **重點是 `refresh`**，對照下面的流程圖一段一段看
+4. `App.tsx` 的 `refreshAccessToken`，再看 `init` 和 `apiFetch` 哪裡呼叫它
+
+### `/auth/refresh` 流程
+
+```
+收到 cookie 裡的 refresh token
+  │
+  ├─ 沒有 cookie ────────────────────────▶ 401 No refresh token
+  │
+  ├─ hash 後在 DB 找不到 ────────────────▶ 401 Invalid refresh token
+  │
+  ├─ 找到了，但 revoked = True（用過了！）
+  │     └─ 刪掉這個使用者「所有」refresh token ─▶ 401 Refresh token reused
+  │
+  ├─ 過期 ─── 刪掉這筆 ──────────────────▶ 401 Refresh token expired
+  │
+  └─ 正常
+        ├─ 舊的標記 revoked = True
+        ├─ 產生新的 token，DB 存它的 hash
+        ├─ commit
+        ├─ Set-Cookie: 新的 token
+        └─ 200 + 新的 access token
+```
+
+### 驗證方式
+
+**1. 輪替：cookie 每次都會換**
+
+登入後打開 DevTools → Application → Cookies → `http://localhost:8000`，記下 `refresh_token` 的值。重新整理頁面（前端會自動呼叫 refresh），值應該**變了**。
+
+**2. 重複使用偵測**
+
+把剛剛記下的**舊值**拿來用，在 PowerShell 執行：
+
+```powershell
+curl.exe -X POST http://localhost:8000/auth/refresh -b "refresh_token=舊的值"
+```
+
+應該回 `{"detail":"Refresh token reused"}`。這時重新整理瀏覽器，**也被登出了**，因為這個使用者所有的 refresh token 都被刪掉了。
+
+> PowerShell 裡的 `curl` 其實是 `Invoke-WebRequest` 的別名，要打 `curl.exe` 才是真正的 curl。
+
+**3. 看資料庫**
+
+Neon 後台 → Tables → `refreshtoken`。每重新整理一次頁面，就多一筆 `revoked = false` 的新資料，上一筆變成 `true`。`token_hash` 欄位是一串 64 字元的雜湊，和 cookie 裡的值完全不一樣。
+
+**4. 前端 single-flight**
+
+1. 把 `backend/.env` 的 `JWT_EXPIRE_MINUTES` 改成 `0`，重啟後端（access token 一簽出來就過期，每次呼叫 `/me` 都會 401）
+2. 登入，打開 DevTools → Network，把節流（throttling）設成 **Slow 4G**，讓請求變慢，比較容易同時發生
+3. 快速連點「取得我的資料」三下
+4. Network 裡會看到 3 個 `/me` 401，但 **`/auth/refresh` 只有 1 個**，而且沒有被登出
+
+（retry 的 `/me` 還是 401，是因為新的 access token 也馬上過期了，正常。玩完記得把 `JWT_EXPIRE_MINUTES` 改回來。）
+
+### 動手玩
+
+1. **拿掉 single-flight，看使用者被踢出去**
+   在 `App.tsx` 的 `refreshAccessToken` 裡，把 `if (!refreshPromiseRef.current) {` 改成 `if (true) {`，再做一次上面的「驗證 4」。你會看到 3 個 `/auth/refresh`：一個 200，兩個 401 `Refresh token reused`，然後被登出。
+
+2. **重現開發時真的踩到的 bug**
+   在 `routes/auth.py` 的 `refresh` 最後，把 `create_access_token(user_id)` 改成 `create_access_token(rt.user_id)`，重新整理頁面。後端會回 500，terminal 顯示 `MissingGreenlet` 錯誤。
+   原因：`commit()` 之後，SQLAlchemy 會把 `rt` 的屬性標成「過期」，下次讀取時要重新查 DB。但在 async 裡，這種「偷偷去查 DB」的動作不被允許。所以要在 commit **之前**先把 `user_id` 存到變數。**這是 async SQLAlchemy 最常見的坑之一。**
+
+3. **拿掉 commit，看刪除會不會生效**
+   把重複使用偵測那段的 `await session.commit()` 註解掉，再做一次「驗證 2」。回應一樣是 401，但去 Neon 看，token **沒有被刪掉**。因為 `raise` 之後的程式碼不會執行，而沒有 commit 的修改會被丟棄（rollback）。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼用過的 token 要標記 <code>revoked</code>，不直接刪掉？</summary>
+
+如果直接刪掉，之後有人拿舊 token 來，後端只會查到「不存在」，分不出它是**被偷的舊 token**，還是**亂打的假 token**。留著並標記 `revoked`，才認得出「這是真的、但已經用過的」，也才能觸發重複使用偵測。
+
+</details>
+
+<details>
+<summary>Q2：開兩個分頁，同時按重新整理，會發生什麼事？</summary>
+
+兩個分頁共用同一個 cookie，會**同時**拿同一個 token 去 refresh。前端的 single-flight 只在同一個分頁內有效，所以其中一個會被判定為重複使用，結果兩個分頁都被登出。
+
+這是輪替機制已知的取捨。實務上的解法有：
+- **寬限期**：舊 token 作廢後的幾秒內再被使用，不算重複使用
+- 用 `BroadcastChannel` 讓分頁之間協調，只讓一個分頁去 refresh
+
+練習專案先知道有這回事就好。
+
+</details>
+
+<details>
+<summary>Q3：<code>revoked = True</code> 的資料會一直累積，要怎麼處理？</summary>
+
+可以定期刪除 `expires_at < 現在` 的資料。過期的 token 無論如何都不能用了，留著沒有意義。可以在第 3 關順便做。
+
+</details>
+
+<details>
+<summary>Q4：<code>refresh</code> 裡查詢時加的 <code>.with_for_update()</code> 是做什麼的？</summary>
+
+它會把查到的那一列**鎖住**，直到 commit 為止。如果同一個 token 同時來了兩個請求：
+- 沒有鎖：兩個請求可能都讀到 `revoked = False`，兩個都換成功，等於一個 token 被用了兩次
+- 有鎖：第二個請求要等第一個 commit 後才讀得到資料，這時已經是 `revoked = True`，就會觸發重複使用偵測
+
+</details>
+
+<details>
+<summary>Q5：refresh token 為什麼可以只用 SHA-256，密碼卻一定要用 bcrypt？</summary>
+
+密碼是人想的，範圍很小，攻擊者可以拿常見密碼一個一個試。bcrypt 故意設計得很慢，就是為了讓這種暴力嘗試變得不划算。
+
+refresh token 是 `secrets.token_urlsafe(32)` 產生的 256 bits 隨機值，就算雜湊再快也不可能猜中，所以用快速的 SHA-256 就夠了，每次 refresh 也不用多花時間。
+
+</details>
 
 ---
 
