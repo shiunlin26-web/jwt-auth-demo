@@ -19,7 +19,10 @@ jwt-auth-demo/
 │   ├── routes/
 │   │   ├── auth.py        # /auth/register、/auth/login、/auth/refresh、/auth/logout
 │   │   └── users.py       # /me（需要登入）
+│   ├── config.py          # 所有設定集中在這裡（讀 .env）
+│   ├── tests/             # pytest 自動化測試
 │   ├── requirements.txt
+│   ├── requirements-dev.txt  # 測試用套件
 │   └── .env.example
 └── frontend/
     └── src/App.tsx        # 登入畫面、apiFetch（401 自動 refresh）、啟動時恢復登入
@@ -138,6 +141,22 @@ GET  /me            → 401
 POST /auth/refresh  → 200（拿到新的 access token）
 GET  /me            → 200（用新 token 重試）
 ```
+
+## 5. 跑測試（選用）
+
+測試會清空資料表，所以要用**另一個資料庫**。在 Neon 的 SQL Editor 執行 `CREATE DATABASE jwtdemo_test;`，再到 `backend/.env` 加上：
+
+```env
+TEST_DATABASE_URL=postgresql+asyncpg://...（資料庫名稱改成 jwtdemo_test）
+```
+
+```bash
+cd backend
+python -m pip install -r requirements-dev.txt
+python -m pytest
+```
+
+詳細說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 4。
 
 ## API 一覽
 

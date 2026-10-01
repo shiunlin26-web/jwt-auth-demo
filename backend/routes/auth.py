@@ -53,14 +53,14 @@ async def revoke_all_refresh_tokens(session: AsyncSession, user_id: int) -> None
     （重複使用偵測、登出所有裝置、改密碼都會用到，所以抽成共用函式）
     注意：只有排進待辦，呼叫的人要自己 commit
     """
-    await session.execute(delete(RefreshToken).where(RefreshToken.user_id == user_id))
+    await session.exec(delete(RefreshToken).where(RefreshToken.user_id == user_id))
 
 
 async def delete_expired_refresh_tokens(session: AsyncSession, user_id: int) -> None:
     """【關卡 3】清掉某個使用者已過期的 refresh token
     過期的 token 不管有沒有 revoked 都不能用了，留著只是佔空間
     """
-    await session.execute(
+    await session.exec(
         delete(RefreshToken).where(
             RefreshToken.user_id == user_id,
             RefreshToken.expires_at < datetime.now(timezone.utc),

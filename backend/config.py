@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # refresh token cookie 是否只在 HTTPS 傳送。本機是 http 所以預設 False，正式環境要 True
     cookie_secure: bool = False
 
+    # 【關卡 4】跑測試用的資料庫。測試會清空資料表，所以一定要和 DATABASE_URL 不同！
+    # 只有跑 pytest 才需要，平常啟動後端不用設定
+    test_database_url: str | None = None
+
     # 是否把每一句 SQL 印在 terminal。學習時可以打開看，平常關掉（會印出 token 雜湊等敏感資料）
     db_echo: bool = False
 

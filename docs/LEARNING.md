@@ -37,7 +37,7 @@
 | 1 | Refresh token 輪替 + 重複使用偵測 + DB 存雜湊 + 前端 single-flight | **refresh token 的核心觀念**（最重要） | ✅ 完成 |
 | 2 | 設定抽到 `.env`（pydantic-settings）、關 SQL echo、前端 `VITE_API_URL` | 設定管理 | ✅ 完成 |
 | 3 | 「登出所有裝置」、改密碼時撤銷所有 token、清理過期 token | 把第 1 關拿來應用 | ✅ 完成 |
-| 4 | pytest 寫測試 | 學 Python 最好的方法，也能自動驗證前面幾關 | ⬜ |
+| 4 | pytest 寫測試 | 學 Python 最好的方法，也能自動驗證前面幾關 | ✅ 完成 |
 | 5 | Alembic 資料庫遷移 | 為什麼不能一直用 `create_all` | ⬜ |
 | 6 | 前端拆成 `api.ts` + `AuthContext` | 之後其他專案可以直接複製這一套 | ⬜ |
 | 7（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
@@ -733,7 +733,257 @@ async def logout_all(
 
 ---
 
-## 關卡 4 ～ 7
+## 關卡 4：自動化測試（pytest）✅
+
+**改動的檔案**：`backend/tests/`（新增：`conftest.py`、`helpers.py`、`test_rules.py`、`test_auth.py`）、`backend/pytest.ini`（新增）、`backend/requirements-dev.txt`（新增）、`backend/config.py`、`backend/.env.example`、`backend/routes/auth.py`
+
+### 觀念
+
+到第 3 關為止，每一關都是用 curl 和瀏覽器**手動**驗證。問題是：
+
+- 改了第 3 關的程式，你會回頭把第 0～2 關全部重新手動測一次嗎？通常不會。
+- 不小心改壞了舊功能，可能好幾天後才發現。
+
+**自動化測試就是把「手動驗證的步驟」寫成程式**，以後一行指令就能把所有情境跑一遍：
+
+```
+python -m pytest
+...
+34 passed in 15s
+```
+
+全部通過 = 之前做好的功能都還正常。有失敗 = 剛剛的修改弄壞了某個東西，而且會直接告訴你是哪一個。
+
+#### 兩種測試
+
+| | 單元測試（`test_rules.py`） | 整合測試（`test_auth.py`） |
+| --- | --- | --- |
+| 測什麼 | 單一函式，例如 `check_password_chars` | 完整的 API 流程，例如「登入 → refresh → 重複使用」 |
+| 需要資料庫嗎 | 不用 | 要（測試專用的） |
+| 速度 | 很快 | 比較慢 |
+
+### ⚠️ 開始前（一次性）
+
+**1. 建立測試專用資料庫**
+
+測試每次執行都會**清空資料表**，所以絕對不能用你平常的資料庫。在 Neon 建一個新的：
+
+- Neon 後台 → **SQL Editor**，執行：
+  ```sql
+  CREATE DATABASE jwtdemo_test;
+  ```
+- 複製你原本的 `DATABASE_URL`，**只把最後的資料庫名稱**換成 `jwtdemo_test`：
+  ```
+  原本：postgresql+asyncpg://xxx:yyy@ep-xxx.neon.tech/neondb?ssl=require
+  測試：postgresql+asyncpg://xxx:yyy@ep-xxx.neon.tech/jwtdemo_test?ssl=require
+  ```
+- 加到 `backend/.env`：
+  ```env
+  TEST_DATABASE_URL=postgresql+asyncpg://xxx:yyy@ep-xxx.neon.tech/jwtdemo_test?ssl=require
+  ```
+
+> 測試程式有安全檢查：`TEST_DATABASE_URL` 沒設定，或跟 `DATABASE_URL` 一樣，就會直接停止，不會動到任何資料。
+
+**2. 安裝測試用套件**
+
+```bash
+cd backend
+python -m pip install -r requirements-dev.txt
+```
+
+`requirements-dev.txt` 是「開發時才需要」的套件（pytest 等），跟執行後端需要的 `requirements.txt` 分開，正式環境就不用裝這些。
+
+**3. 執行**
+
+```bash
+cd backend
+python -m pytest
+```
+
+看到 `34 passed` 就成功了。Neon 在遠端，每個測試都要連網路，大約需要幾十秒。
+
+**常用選項**
+
+| 指令 | 作用 |
+| --- | --- |
+| `python -m pytest -v` | 列出每個測試的名稱和結果 |
+| `python -m pytest -k 登出` | 只跑名稱包含「登出」的測試 |
+| `python -m pytest tests/test_rules.py` | 只跑某個檔案 |
+| `python -m pytest -x` | 遇到第一個失敗就停下來 |
+
+### 檔案結構
+
+```
+backend/
+├── pytest.ini            pytest 的設定
+├── requirements-dev.txt  測試用套件
+└── tests/
+    ├── conftest.py       共用設定：測試資料庫、client（pytest 自動載入）
+    ├── helpers.py        共用小工具：register()、login()、auth_header()
+    ├── test_rules.py     單元測試：密碼規則、雜湊
+    └── test_auth.py      整合測試：所有 API 流程
+```
+
+pytest 會自動找 `tests/` 裡 `test_` 開頭的檔案，以及裡面 `test_` 開頭的函式，每一個函式就是一個測試。
+
+### 讀懂一個測試
+
+```python
+async def test_舊的refresh_token再被使用會撤銷全部(client, make_client):
+    # 1. 準備：註冊、登入、refresh 一次
+    await register(client)
+    await login(client)
+    old_cookie = client.cookies.get("refresh_token")
+    await client.post("/auth/refresh")        # old_cookie 被作廢
+
+    # 2. 執行：小偷拿舊的 cookie 來 refresh
+    thief = make_client(cookies={"refresh_token": old_cookie})
+    res = await thief.post("/auth/refresh")
+
+    # 3. 檢查
+    assert res.status_code == 401
+    assert res.json()["detail"] == "Refresh token reused"
+    assert await count_refresh_tokens() == 0
+```
+
+- **函式名稱就是說明**：Python 允許中文函式名稱，所以直接用中文寫「這個測試在驗證什麼」，失敗時一眼就看得懂。
+- **三段式**：準備 → 執行 → 檢查（Arrange → Act → Assert）。幾乎所有測試都是這個結構。
+- **`assert 條件`**：條件是 `False` 就測試失敗。相當於 JS 測試的 `expect(...).toBe(...)`。
+- **`client`、`make_client` 參數**：這是 **fixture**，下面說明。
+
+### Fixture：測試前幫你準備好的東西
+
+測試函式的參數寫 `client`，pytest 就會去 `conftest.py` 找同名的 fixture，執行它，把結果傳進來：
+
+```python
+@pytest.fixture
+async def client():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+```
+
+- **`client`** = 一台裝置（一個瀏覽器）。它會像瀏覽器一樣**自動保存 cookie**，所以登入後再 refresh，cookie 會自動帶上。
+- **`make_client`** = 需要好幾台裝置時用，每呼叫一次就多一台，cookie 各自獨立。可以傳 `cookies={...}` 模擬「手上拿著某個 cookie 的人」。
+- **`ASGITransport`**：請求直接送進 FastAPI，**不需要啟動 uvicorn**。
+- **`yield`**：`yield` 前面是「測試前」要做的事，後面是「測試後」的收尾。
+
+### `conftest.py` 做的三件事
+
+**1. 安全檢查**：`TEST_DATABASE_URL` 沒設定或跟 `DATABASE_URL` 相同，就用 `pytest.exit(...)` 直接停止。
+
+**2. 每個測試前清空資料庫**
+
+```python
+@pytest.fixture(autouse=True)
+async def clean_database():
+    ...
+    await conn.execute(text('TRUNCATE TABLE refreshtoken, "user" RESTART IDENTITY CASCADE'))
+```
+
+- `autouse=True`：**每個測試都自動執行**，不用寫在參數裡。
+- 每個測試都從**空的資料庫**開始，彼此不會互相影響。不然上一個測試註冊的帳號，會讓下一個測試的「註冊成功」變成「重複註冊」。
+- 第一次執行時會砍掉重建所有資料表，所以 `models.py` 改了欄位也不用手動處理（測試資料庫可以隨便砍）。
+
+**3. 讓 API 改連測試資料庫**
+
+```python
+app.dependency_overrides[get_session] = get_test_session
+```
+
+所有 API 都用 `Depends(get_session)` 拿資料庫連線。**`dependency_overrides` 是 FastAPI 提供的測試功能**，意思是「把 `get_session` 換成 `get_test_session`」。一行就讓整個 app 改用測試資料庫，正式程式碼完全不用改。
+
+### 單元測試的兩個技巧（`test_rules.py`）
+
+**`@pytest.mark.parametrize`：同一個測試，換不同資料跑好幾次**
+
+```python
+@pytest.mark.parametrize("password, ok", [
+    ("a" * 7, False),   # 太短
+    ("a" * 8, True),    # 剛好最短
+    ("a" * 72, True),   # 剛好最長
+    ("a" * 73, False),  # 太長
+])
+def test_註冊密碼長度限制(password, ok):
+    ...
+```
+
+這會產生 4 個測試。注意這 4 組資料都在「邊界」上（7/8、72/73），**bug 最常出現在邊界**。
+
+**`pytest.raises`：預期「會丟出錯誤」**
+
+```python
+with pytest.raises(ValueError):
+    check_password_chars("中文密碼中文密碼")
+```
+
+有丟出 `ValueError` 才算通過；沒丟，測試反而失敗。
+
+### 測試涵蓋了什麼
+
+| 關卡 | 測試 |
+| --- | --- |
+| 0 | 密碼字元規則、長度邊界、登入不套規則、超過 72 bytes 不會 500 |
+| 1 | refresh 輪替、重複使用偵測、同時 refresh 只有一個成功、DB 只存雜湊 |
+| 3 | 登出只影響自己、登出所有裝置、access token 在撤銷後仍可用（限制）、改密碼的各種情況、登入時清理過期 token |
+| 基本 | 註冊、登入、`/me`、沒帶 token 回 401 |
+
+### 這關順便修的一個地方
+
+第一次跑測試時出現了 `DeprecationWarning`（棄用警告）：SQLModel 新版建議刪除資料時用 `session.exec(delete(...))`，不要用 `session.execute(...)`。`routes/auth.py` 的兩個共用函式已經改好了。
+
+**這就是測試的另一個好處：它會跑過所有程式碼，連平常不會注意到的警告都會浮出來。**
+
+### 驗證方式
+
+1. 照「開始前」設定好，執行 `python -m pytest`，應該看到 `34 passed`
+2. 執行 `python -m pytest -v`，看看每個測試的名稱
+3. 到 Neon 確認：**平常用的資料庫**裡的資料完全沒變；`jwtdemo_test` 裡有 `user`、`refreshtoken` 兩張表（測試結束時可能有最後一個測試留下的資料，下次跑會再清空）
+
+### 動手玩
+
+1. **弄壞程式，看測試抓不抓得到**：把 `routes/auth.py` 裡 `refresh` 的 `rt.revoked = True` 這行註解掉，跑 `python -m pytest`。應該會有 2 個測試失敗，讀讀看錯誤訊息，想想為什麼是這兩個。改回來。
+2. **重現第 1 關的坑**：把 `refresh` 最後的 `create_access_token(user_id)` 改成 `create_access_token(rt.user_id)`，跑測試，會看到好幾個 `MissingGreenlet` 失敗。改回來。
+3. **自己寫一個測試**（很短，照著別的測試改就好）：在 `test_auth.py` 最下面加上：
+   ```python
+   async def test_email格式錯誤回422(client):
+       res = await register(client, email="not-an-email")
+       assert res.status_code == 422
+   ```
+   執行 `python -m pytest -k email`。再試試把 `422` 改成 `400`，看看失敗時的訊息長怎樣。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼每個測試前都要清空資料庫？</summary>
+
+讓每個測試都**獨立**。如果不清空，測試的結果會取決於「前面跑了哪些測試」：單獨跑會過、一起跑就失敗，或是換個順序就失敗，這種測試很難除錯。每個測試從空的資料庫開始，結果才穩定。
+
+</details>
+
+<details>
+<summary>Q2：已經有單元測試測過密碼規則了，為什麼整合測試還要再測一次「中文密碼註冊回 422」？</summary>
+
+單元測試證明 `check_password_chars` 這個函式是對的。但它有沒有被**正確地接到 API 上**，是另一件事。例如有人不小心把 `UserCreate` 的 `@field_validator` 刪掉，單元測試還是會過，只有整合測試會失敗。兩種測試檢查的是不同層次。
+
+</details>
+
+<details>
+<summary>Q3：為什麼用 <code>dependency_overrides</code>，不直接把 <code>DATABASE_URL</code> 改成測試資料庫？</summary>
+
+改 `DATABASE_URL` 要嘛去改 `.env`（很容易忘記改回來，結果開發時連到測試資料庫，或反過來），要嘛在測試啟動前動環境變數（順序很難控制）。`dependency_overrides` 只在測試裡生效，正式程式碼、`.env` 都不用動，也不可能影響到平常跑的後端。
+
+</details>
+
+<details>
+<summary>Q4：測試全部通過，就代表程式沒有 bug 嗎？</summary>
+
+不代表。測試只能證明「**有寫到的情境**」是對的，沒寫到的情境照樣可能有 bug。例如目前沒有測試「兩個分頁同時重新整理」（第 1 關 Q2 的限制）。測試的價值在於：**已經驗證過的東西，以後不會在不知不覺中被改壞。**
+
+</details>
+
+---
+
+## 關卡 5 ～ 7
 
 做到時再補上詳細內容。
 
