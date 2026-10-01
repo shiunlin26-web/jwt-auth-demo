@@ -36,7 +36,7 @@
 | 0 | 密碼規則（修 bcrypt 72 bytes 的 bug） | Pydantic 驗證器、bytes 和字元的差別、註冊與登入分開驗證 | ✅ 完成 |
 | 1 | Refresh token 輪替 + 重複使用偵測 + DB 存雜湊 + 前端 single-flight | **refresh token 的核心觀念**（最重要） | ✅ 完成 |
 | 2 | 設定抽到 `.env`（pydantic-settings）、關 SQL echo、前端 `VITE_API_URL` | 設定管理 | ✅ 完成 |
-| 3 | 「登出所有裝置」、改密碼時撤銷所有 token | 把第 1 關拿來應用 | ⬜ |
+| 3 | 「登出所有裝置」、改密碼時撤銷所有 token、清理過期 token | 把第 1 關拿來應用 | ✅ 完成 |
 | 4 | pytest 寫測試 | 學 Python 最好的方法，也能自動驗證前面幾關 | ⬜ |
 | 5 | Alembic 資料庫遷移 | 為什麼不能一直用 `create_all` | ⬜ |
 | 6 | 前端拆成 `api.ts` + `AuthContext` | 之後其他專案可以直接複製這一套 | ⬜ |
@@ -523,7 +523,217 @@ const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 ---
 
-## 關卡 3 ～ 7
+## 關卡 3：登出所有裝置、改密碼 ✅
+
+**改動的檔案**：`backend/schemas.py`、`backend/routes/auth.py`、`frontend/src/App.tsx`
+
+這關沒有新的大觀念，而是**把第 0～2 關學到的東西組合起來用**。
+
+### 觀念
+
+第 1 關的「重複使用偵測」裡，有一個動作是「刪掉這個使用者所有 refresh token」，效果是所有裝置都得重新登入。這個動作在其他情境也很有用：
+
+| 情境 | 為什麼要讓所有裝置登出 |
+| --- | --- |
+| 重複使用偵測（第 1 關） | token 可能被偷了 |
+| **登出所有裝置**（這關） | 在網咖登入忘了登出、手機掉了 |
+| **改密碼**（這關） | 密碼可能就是因為外洩才改的，舊的登入狀態都不該再信任 |
+
+所以這關先把它抽成共用函式 `revoke_all_refresh_tokens`，再拿來做兩個新功能。
+
+### ⚠️ 一定要知道的限制
+
+**撤銷 refresh token 之後，其他裝置不會「立刻」被登出。** 它們手上的 access token 在過期前（預設最多 30 分鐘）還是能用，因為驗證 access token 不查資料庫（第 1 關補充觀念：access token 無法提前作廢）。
+
+```
+手機：access token 還有 20 分鐘 → 這 20 分鐘內呼叫 API 都正常
+      ↓ 20 分鐘後過期
+      去 refresh → refresh token 已經被刪了 → 401 → 被登出
+```
+
+這就是為什麼 access token 要設得很短。重新整理頁面會立刻 refresh，所以重新整理就能馬上看到被登出。
+
+### 程式怎麼寫
+
+#### 1. 密碼規則抽成共用函式（`schemas.py`）
+
+原本規則寫在 `UserCreate` 的驗證器裡面。現在改密碼也要套用同一套規則，所以把它搬出來變成一般函式，兩邊都呼叫它：
+
+```python
+def check_password_chars(v: str) -> str:
+    if not PRINTABLE_ASCII.match(v):
+        raise ValueError("密碼只能包含英文字母、數字、空白與符號")
+    return v
+
+class UserCreate(BaseModel):
+    ...
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return check_password_chars(v)
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str                                  # 不套規則（跟登入一樣的理由）
+    new_password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        return check_password_chars(v)
+```
+
+**同一條規則只寫一次**，以後要改規則只改一個地方（第 2 關「同一件事只能有一個來源」的觀念）。
+
+`current_password` 不套規則，理由跟第 0 關的 `UserLogin` 一樣：舊密碼可能是舊規則設的，只要判斷對不對就好。
+
+#### 2. 兩個共用的小函式（`routes/auth.py`）
+
+```python
+async def revoke_all_refresh_tokens(session, user_id):
+    await session.execute(delete(RefreshToken).where(RefreshToken.user_id == user_id))
+
+async def delete_expired_refresh_tokens(session, user_id):
+    await session.execute(delete(RefreshToken).where(
+        RefreshToken.user_id == user_id,
+        RefreshToken.expires_at < datetime.now(timezone.utc),
+    ))
+```
+
+- 第 1 關 `refresh` 裡的重複使用偵測，改成呼叫 `revoke_all_refresh_tokens`。
+- `.where(A, B)` 傳兩個條件，代表「A **而且** B」，相當於 SQL 的 `WHERE A AND B`。
+- 這兩個函式都**只是排進待辦，沒有 commit**，由呼叫的人決定什麼時候 commit。這樣就能把多個動作放在同一次 commit 裡，要嘛全部成功、要嘛全部失敗。
+
+#### 3. 登入時順便清掉過期的 token
+
+第 1 關「想一想」Q3 提過：`revoked = True` 的資料會一直累積。現在每次登入時，順便刪掉這個使用者已經過期的 refresh token：
+
+```python
+await delete_expired_refresh_tokens(session, user.id)
+refresh_token = await issue_refresh_token(session, user.id)
+await session.commit()
+```
+
+**為什麼只刪「過期的」，不刪「`revoked` 的」？** `revoked` 但還沒過期的 token 要留著做重複使用偵測（第 1 關 Q1）。過期之後就算被拿來用也會被擋，留著沒有意義了。
+
+#### 4. `POST /auth/logout-all`
+
+```python
+@router.post("/logout-all", status_code=204)
+async def logout_all(
+    response: Response,
+    current_user: User = Depends(get_current_user),   # ← 需要 access token
+    session: AsyncSession = Depends(get_session),
+):
+    await revoke_all_refresh_tokens(session, current_user.id)
+    await session.commit()
+    response.delete_cookie(key="refresh_token", path="/auth")
+```
+
+**`current_user: User = Depends(get_current_user)`** 是這關第一次在 `auth.py` 用到的東西，它在 `dependencies.py`，`/me` 一直都在用：
+
+1. 從 `Authorization: Bearer xxx` header 拿出 access token
+2. 驗證簽章和有效期
+3. 從 token 裡的 `sub` 找出使用者
+4. 任何一步失敗就回 401，函式**不會執行**
+
+所以函式裡拿到的 `current_user` 一定是已登入的使用者。**要求登入的 API，加上這個參數就好。**
+
+> 為什麼 `logout` 不用 access token，`logout-all` 卻要？
+> `logout` 只刪「自己手上這張」refresh token，有 cookie 就能證明你持有它。
+> `logout-all` 會影響**所有裝置**，是比較重大的操作，所以要求有效的 access token，確認是本人。
+
+#### 5. `POST /auth/change-password`
+
+```
+1. 目前密碼對嗎？         錯 → 400「目前密碼錯誤」
+2. 新舊密碼一樣嗎？        一樣 → 400
+3. 更新密碼雜湊
+4. 撤銷所有 refresh token  → 其他裝置之後都會被登出
+5. 幫「這台」發新的 refresh token + access token → 使用者不用重新登入
+6. 一次 commit
+```
+
+幾個細節：
+
+**為什麼「目前密碼錯誤」回 400，不是 401？**
+
+401 的意思是「你沒登入，或 token 失效了」。前端的 `apiFetch` 看到 401，會以為 access token 過期，自動去 refresh 再重試，但這裡的問題根本不是 token。**狀態碼要用對，前端才不會誤判。**
+
+**為什麼要 `user_id = current_user.id`？**
+
+就是第 1 關踩過的坑：commit 之後物件的屬性會過期，再讀就會出錯（`MissingGreenlet`），所以在 commit 前先把 id 存成變數。
+
+**為什麼改完密碼，自己這台不用重新登入？**
+
+這是 UX 的選擇。撤銷全部之後，再幫目前這台發一組新的 token，使用者體驗比較好。很多網站也會選擇「全部登出、重新登入」，兩種都可以。
+
+#### 6. 前端（`App.tsx`）
+
+- 登入後多了「登出所有裝置」按鈕，和「修改密碼」表單
+- 兩個都用 `apiFetch` 呼叫，因為需要帶 access token
+- 新密碼的提示共用第 0 關的 `getPasswordError`
+- 改密碼成功後，用回傳的新 access token 呼叫 `updateToken`
+
+### 驗證方式
+
+**用兩個瀏覽器模擬兩台裝置**：一個用一般視窗，另一個用**無痕視窗**（`Ctrl+Shift+N`）。無痕視窗的 cookie 是分開的，等於另一台裝置。
+
+1. **改密碼**
+   - 兩個視窗都登入同一個帳號
+   - 在一般視窗修改密碼 → 顯示「密碼已更新，其他裝置都已登出」，自己還是登入狀態
+   - 無痕視窗按「取得我的資料」→ **還能用**（access token 還沒過期，這就是上面講的限制）
+   - 無痕視窗**重新整理** → 被登出了（refresh 失敗）
+   - 用舊密碼登入 → 失敗；用新密碼 → 成功
+2. **登出所有裝置**
+   - 兩個視窗都登入
+   - 在一般視窗按「登出所有裝置」→ 自己被登出
+   - 無痕視窗重新整理 → 也被登出了
+3. **錯誤情況**：改密碼時故意打錯目前密碼、新舊密碼一樣、新密碼用中文，看看各自的錯誤訊息。
+4. **過期 token 清理**：在 Neon 的 `refreshtoken` 表裡，觀察 `expires_at` 已經過去的資料，登入一次之後就不見了。（想馬上看到效果，可以在 `.env` 設 `REFRESH_TOKEN_EXPIRE_DAYS=0`，登入幾次，再改回來登入一次。）
+
+### 動手玩
+
+1. 在 `.env` 設 `JWT_EXPIRE_MINUTES=1`，重做「驗證 1」。改完密碼後，無痕視窗不要重新整理，等一分鐘再按「取得我的資料」，觀察它什麼時候被登出。
+2. 把 `change_password` 裡「目前密碼錯誤」的狀態碼改成 `401`，打開 Network 分頁再故意打錯一次。你會看到前端多送了一次 `/auth/refresh` 和一次重試，這就是狀態碼用錯造成的誤判。
+3. 把 `change_password` 裡的 `user_id = current_user.id` 刪掉，後面的 `user_id` 都改成 `current_user.id`，再改一次密碼，看看會發生什麼（提示：第 1 關動手玩 2）。
+
+### 想一想
+
+<details>
+<summary>Q1：改密碼時為什麼要求輸入「目前密碼」？已經登入了不是嗎？</summary>
+
+如果有人趁你離開座位用你的電腦，或偷到你的 access token，沒有這道檢查的話，他就能直接改掉你的密碼，把你鎖在帳號外面。要求目前密碼，確保是「知道密碼的本人」在操作。
+
+</details>
+
+<details>
+<summary>Q2：如果想做到「改密碼後，其他裝置立刻被登出」，該怎麼做？</summary>
+
+驗證 access token 時就得查資料庫。常見做法是在 `user` 表加一個 `token_version` 欄位，簽 JWT 時把它放進去；改密碼時把版本號 +1；`get_current_user` 驗證時比對 JWT 裡的版本和資料庫裡的版本，不一樣就拒絕。
+
+代價是每個 API 請求都要多查一次資料庫，失去 JWT「不查資料庫」的優點。所以大部分系統接受「最多延遲 access token 有效期」這個取捨。
+
+</details>
+
+<details>
+<summary>Q3：<code>revoke_all_refresh_tokens</code> 為什麼不在函式裡直接 commit？</summary>
+
+因為呼叫它的人，常常還有其他事要在**同一次 commit** 裡完成。例如改密碼時：更新密碼、撤銷所有 token、發新 token，這三件事要嘛全部成功、要嘛全部失敗。如果撤銷完就先 commit，接著發新 token 時出錯，就會變成「密碼沒改，但所有裝置都被登出了」這種半套狀態。
+
+</details>
+
+<details>
+<summary>Q4：為什麼 <code>delete_expired_refresh_tokens</code> 放在登入時執行？還有別的做法嗎？</summary>
+
+登入時順便清理，好處是簡單，不需要額外的排程程式，而且只清這個使用者的資料，量很小。缺點是從來不再登入的使用者，他的舊資料永遠不會被清掉。
+
+正式環境常見的做法是用**排程工作**（cron job）每天跑一次，刪除所有過期的資料。這需要額外的設定，練習專案用登入時清理就夠了。
+
+</details>
+
+---
+
+## 關卡 4 ～ 7
 
 做到時再補上詳細內容。
 

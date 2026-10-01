@@ -12,6 +12,15 @@ PASSWORD_MAX_LENGTH = 72
 PRINTABLE_ASCII = re.compile(r"^[\x20-\x7E]+$")  # \x20 是空白，\x7E 是 ~
 
 
+def check_password_chars(v: str) -> str:
+    """【關卡 3】密碼字元規則抽成共用函式：註冊、改密碼都用同一套規則"""
+    # re.match 比對成功回傳物件、失敗回傳 None；not None → True
+    if not PRINTABLE_ASCII.match(v):
+        # raise ValueError → FastAPI 自動回 422，並把訊息放在 detail 裡
+        raise ValueError("密碼只能包含英文字母、數字、空白與符號")
+    return v  # 驗證通過要把值回傳，否則欄位會變成 None
+
+
 class UserCreate(BaseModel):
     """註冊用：套用完整的密碼規則"""
     email: EmailStr
@@ -19,12 +28,8 @@ class UserCreate(BaseModel):
 
     @field_validator("password")  # 這個函式負責驗證 password 欄位
     @classmethod                  # Pydantic 規定驗證器要是 classmethod
-    def check_password_chars(cls, v: str) -> str:
-        # re.match 比對成功回傳物件、失敗回傳 None；not None → True
-        if not PRINTABLE_ASCII.match(v):
-            # raise ValueError → FastAPI 自動回 422，並把訊息放在 detail 裡
-            raise ValueError("密碼只能包含英文字母、數字、空白與符號")
-        return v  # 驗證通過要把值回傳，否則欄位會變成 None
+    def validate_password(cls, v: str) -> str:
+        return check_password_chars(v)
 
 
 class UserLogin(BaseModel):
@@ -36,6 +41,21 @@ class UserLogin(BaseModel):
     """
     email: EmailStr
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    """【關卡 3】改密碼用
+
+    - current_password：目前的密碼，不套用規則（理由和 UserLogin 一樣：舊密碼可能是舊規則設的）
+    - new_password：新密碼，套用和註冊一樣的規則
+    """
+    current_password: str
+    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        return check_password_chars(v)
 
 
 class UserRead(BaseModel):

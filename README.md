@@ -148,6 +148,8 @@ GET  /me            → 200（用新 token 重試）
 | POST | `/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie | – |
 | POST | `/auth/refresh` | 用 cookie 裡的 refresh token 換新的 access token（同時輪替 refresh token） | Cookie |
 | POST | `/auth/logout` | 刪除 refresh token 並清 cookie | Cookie |
+| POST | `/auth/logout-all` | 登出所有裝置（刪除此使用者所有 refresh token） | Bearer |
+| POST | `/auth/change-password` | 修改密碼 `{ current_password, new_password }`，其他裝置全部登出，目前裝置拿到新 token | Bearer |
 | GET | `/me` | 取得目前使用者 | Bearer |
 
 ## Token 設計

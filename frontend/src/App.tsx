@@ -9,6 +9,9 @@ function App() {
   const [token, setToken] = useState<string | null>(null);
   const [me, setMe] = useState<any>(null);
   const [message, setMessage] = useState("");
+  // 【關卡 3】改密碼表單
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
 
   // 用 ref 讓 apiFetch 讀到最新 token
   const tokenRef = useRef<string | null>(null);
@@ -142,6 +145,41 @@ useEffect(() => {
     setMessage("已登出");
   };
 
+  // 【關卡 3】登出所有裝置：需要 access token，所以用 apiFetch
+  const logoutAll = async () => {
+    setMessage("");
+    const res = await apiFetch(`${API}/auth/logout-all`, { method: "POST" });
+    if (res.ok) {
+      updateToken(null);
+      setMe(null);
+      setMessage("已登出所有裝置");
+    } else {
+      setMessage("登出所有裝置失敗");
+    }
+  };
+
+  // 【關卡 3】改密碼：成功後後端會發新的 token 給這台裝置，其他裝置全部登出
+  const changePassword = async () => {
+    setMessage("");
+    const res = await apiFetch(`${API}/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      updateToken(data.access_token); // 換上新的 access token
+      setCurrentPassword("");
+      setNewPassword("");
+      setMessage("密碼已更新，其他裝置都已登出");
+    } else {
+      setMessage(`改密碼失敗：${JSON.stringify(data.detail)}`);
+    }
+  };
+
   const fetchMe = async () => {
     setMessage("");
     const res = await apiFetch(`${API}/me`);
@@ -167,6 +205,10 @@ useEffect(() => {
   // 註冊：要符合密碼規則；登入：有填就好（規則只在設定密碼時檢查）
   const canRegister = hasEmail && password !== "" && passwordError === null;
   const canLogin = hasEmail && password !== "";
+
+  // 【關卡 3】新密碼套用同一套規則（getPasswordError 共用）
+  const newPasswordError = newPassword === "" ? null : getPasswordError(newPassword);
+  const canChangePassword = currentPassword !== "" && newPassword !== "" && newPasswordError === null;
 
   if (isInitializing) {
   return <div style={{ padding: 40 }}>載入中...</div>;
@@ -207,10 +249,31 @@ useEffect(() => {
           <p style={{ fontSize: 12, wordBreak: "break-all" }}>
             Token: {token.slice(0, 40)}...
           </p>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={fetchMe}>取得我的資料</button>
             <button onClick={logout}>登出</button>
+            <button onClick={logoutAll}>登出所有裝置</button>
           </div>
+
+          <h3 style={{ marginTop: 24 }}>修改密碼</h3>
+          <input
+            placeholder="目前密碼"
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            style={{ display: "block", width: "100%", marginBottom: 8, padding: 8 }}
+          />
+          <input
+            placeholder="新密碼"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            style={{ display: "block", width: "100%", marginBottom: 8, padding: 8 }}
+          />
+          <p style={{ fontSize: 12, margin: "0 0 8px", color: newPasswordError ? "crimson" : "gray" }}>
+            {newPasswordError ?? "8～72 個英文字母、數字或符號"}
+          </p>
+          <button onClick={changePassword} disabled={!canChangePassword}>修改密碼</button>
         </div>
       )}
 
