@@ -1085,6 +1085,8 @@ backend/
 
 **`alembic.ini`**、**`script.py.mako`** 是 Alembic 的設定和範本，跟 `pytest.ini` 一樣，知道它們是做什麼的就好，不用搞懂每一行。
 
+> ⚠️ 這兩個檔案的註解是英文，因為 **Alembic 讀 `alembic.ini` 時用的是系統預設編碼**，Windows 繁體中文環境不是 UTF-8，裡面有中文就會出現 `UnicodeDecodeError`。所以這兩個檔案只能用英文和半形符號。`.py` 檔不受影響，Python 原始碼一律用 UTF-8 讀取，可以放心寫中文。
+
 **`migrations/env.py`** 是 `alembic init` 產生的範本，我只改了兩個地方：
 
 ```python

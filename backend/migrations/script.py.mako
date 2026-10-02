@@ -9,7 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-import sqlmodel  # SQLModel 的欄位型別（例如 AutoString）需要它
+import sqlmodel  # needed for SQLModel column types such as AutoString
 ${imports if imports else ""}
 
 # revision identifiers, used by Alembic.
