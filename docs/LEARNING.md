@@ -949,7 +949,16 @@ with pytest.raises(ValueError):
        res = await register(client, email="not-an-email")
        assert res.status_code == 422
    ```
-   執行 `python -m pytest -k email`。再試試把 `422` 改成 `400`，看看失敗時的訊息長怎樣。
+   然後只跑這一個測試：
+   ```bash
+   python -m pytest -k email
+   ```
+   - **`-k` 的意思是「只跑名稱裡包含這個字的測試」**，用測試函式的名稱來篩選，不用把 34 個全部跑一遍。
+   - **`email` 從哪來？** 就是你剛新增的函式名稱 `test_email格式錯誤回422` 裡的那個 `email`。原本的 34 個測試名稱裡都沒有 `email`，所以只會選到你新增的這一個。
+   - 寫名稱裡的任何一段都可以，例如 `-k 格式錯誤`。如果你把測試改名成 `test_信箱格式錯誤回422`，就要改用 `-k 信箱`。
+   - 跟 `helpers.py` 裡的 `EMAIL = "test@example.com"` 無關，那是測試用的帳號，只是剛好拼法一樣。`-k` 只看 `def test_...` 的名稱。
+
+   通過之後，再把 `422` 改成 `400`，重跑一次，看看失敗時的訊息長怎樣。
 
 ### 想一想
 
