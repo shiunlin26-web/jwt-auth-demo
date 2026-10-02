@@ -62,6 +62,7 @@ class UserRead(BaseModel):
     id: int
     email: str
     created_at: datetime
+    last_login_at: datetime | None  # 【關卡 5】
 
 
 class Token(BaseModel):

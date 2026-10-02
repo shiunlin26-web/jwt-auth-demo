@@ -80,6 +80,16 @@ async def test_帶access_token可以取得自己的資料(client):
     assert res.json()["email"] == EMAIL
 
 
+async def test_登入後會記錄最後登入時間(client):
+    # 關卡 5：用 Alembic 新增的 last_login_at 欄位
+    await register(client)
+    token = (await login(client)).json()["access_token"]
+
+    res = await client.get("/me", headers=auth_header(token))
+
+    assert res.json()["last_login_at"] is not None
+
+
 async def test_沒帶access_token回401(client):
     res = await client.get("/me")
     assert res.status_code == 401

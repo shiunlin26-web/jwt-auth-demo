@@ -6,6 +6,9 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True)
     hashed_password: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # 【關卡 5】最後登入時間。用 Alembic 遷移新增的欄位（0002），不用刪表重建
+    # 舊資料沒有這個值，所以要允許 None（資料庫裡是 NULL）
+    last_login_at: datetime | None = None
 
 class RefreshToken(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)

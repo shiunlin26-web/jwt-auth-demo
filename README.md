@@ -20,6 +20,8 @@ jwt-auth-demo/
 │   │   ├── auth.py        # /auth/register、/auth/login、/auth/refresh、/auth/logout
 │   │   └── users.py       # /me（需要登入）
 │   ├── config.py          # 所有設定集中在這裡（讀 .env）
+│   ├── alembic.ini        # Alembic（資料庫遷移）設定
+│   ├── migrations/        # 資料庫遷移檔，記錄資料表結構的每一次變更
 │   ├── tests/             # pytest 自動化測試
 │   ├── requirements.txt
 │   ├── requirements-dev.txt  # 測試用套件
@@ -62,7 +64,7 @@ docker run -d --name jwt-demo-db \
 postgresql+asyncpg://postgres:postgres@localhost:5432/jwtdemo
 ```
 
-> 資料表不用手動建，後端啟動時會自動 `create_all`。
+> 資料表會在下一步用 `alembic upgrade head` 建立。
 
 ## 2. 啟動後端
 
@@ -94,6 +96,12 @@ JWT_SECRET=至少32個字元的隨機字串
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+建立資料表（第一次，以及之後每次 `git pull` 有新的遷移檔時都要跑）：
+
+```bash
+alembic upgrade head
 ```
 
 啟動：
@@ -188,6 +196,7 @@ python -m pytest
 ## 常見問題
 
 - **`TypeError: connect() got an unexpected keyword argument 'sslmode'` / 連不到 DB**：檢查 `DATABASE_URL` 開頭是不是 `postgresql+asyncpg://`，Neon 要用 `ssl=require` 而不是 `sslmode=require`。
+- **`relation "user" does not exist` / `column ... does not exist`**：資料表還沒建立或不是最新版本，在 `backend` 執行 `alembic upgrade head`。
 - **前端 console 出現 CORS 錯誤**：確認網址是 `http://localhost:5173`，而且後端有在 8000 port 跑。
 - **重新整理後沒有自動登入**：DevTools → Application → Cookies 看 `http://localhost:8000` 底下有沒有 `refresh_token`；如果剛剛是用 `127.0.0.1` 開的，換成 `localhost` 再登入一次。
 - **5173 被占用**：Vite 會自動改用 5174，但 CORS 預設只允許 5173，請先關掉占用的程式，或在 `backend/.env` 設定 `CORS_ORIGINS=http://localhost:5173,http://localhost:5174`。

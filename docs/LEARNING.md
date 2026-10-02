@@ -38,7 +38,7 @@
 | 2 | 設定抽到 `.env`（pydantic-settings）、關 SQL echo、前端 `VITE_API_URL` | 設定管理 | ✅ 完成 |
 | 3 | 「登出所有裝置」、改密碼時撤銷所有 token、清理過期 token | 把第 1 關拿來應用 | ✅ 完成 |
 | 4 | pytest 寫測試 | 學 Python 最好的方法，也能自動驗證前面幾關 | ✅ 完成 |
-| 5 | Alembic 資料庫遷移 | 為什麼不能一直用 `create_all` | ⬜ |
+| 5 | Alembic 資料庫遷移 | 為什麼不能一直用 `create_all` | ✅ 完成 |
 | 6 | 前端拆成 `api.ts` + `AuthContext` | 之後其他專案可以直接複製這一套 | ⬜ |
 | 7（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
 
@@ -203,7 +203,7 @@ bcrypt 的錯誤訊息確實建議 `my_password[:72]`，但截斷代表「前 72
 2. 重新啟動後端（`Ctrl+C` 後再 `uvicorn main:app --reload`），表會用新欄位自動重建
 3. 原本登入中的狀態會失效，重新登入一次即可（`user` 表不受影響，帳號都還在）
 
-這個麻煩就是第 5 關要學 Alembic 的原因，先記住這種感覺。
+這個麻煩就是第 5 關要學 Alembic 的原因，先記住這種感覺。（第 5 關之後，改欄位改用 Alembic 遷移，不用再刪表）
 
 ### 改了哪些檔案
 
@@ -992,7 +992,254 @@ with pytest.raises(ValueError):
 
 ---
 
-## 關卡 5 ～ 7
+## 關卡 5：資料庫遷移（Alembic）✅
+
+**改動的檔案**：`backend/alembic.ini`（新增）、`backend/migrations/`（新增）、`backend/main.py`、`backend/models.py`、`backend/schemas.py`、`backend/routes/auth.py`、`backend/requirements.txt`、`backend/tests/test_auth.py`
+
+### 一句話
+
+**用「遷移檔」記錄資料表的每一次變更，改欄位時不用再刪表。**
+
+### 為什麼需要
+
+還記得第 1 關嗎？`refreshtoken` 表改了欄位，你得去 Neon 手動 `DROP TABLE`，結果還遇到登入 500。原因是：
+
+> `create_all` 只會建立**不存在**的表，**不會修改已經存在的表**。
+
+刪表重建在練習時還好，但正式環境不行，因為**資料會全部消失**。
+
+### Alembic 是什麼
+
+**Alembic 是「資料表結構的 git」。**
+
+| git | Alembic |
+| --- | --- |
+| 每次改程式碼，就產生一個 commit | 每次改資料表結構，就產生一個**遷移檔** |
+| commit 記錄「改了哪些行」 | 遷移檔記錄「新增了哪個欄位、建了哪張表」 |
+| `git checkout` 切到某個版本 | `alembic upgrade` / `downgrade` 升級或降級資料庫 |
+
+每個遷移檔都有兩個函式：
+
+- **`upgrade()`**：往前，要做的變更（例如新增欄位）
+- **`downgrade()`**：往回，撤銷這個變更（例如刪掉那個欄位）
+
+Alembic 會在資料庫裡建一張小表 `alembic_version`，記住「**這個資料庫目前在哪一版**」，所以它知道還有哪些遷移沒套用。
+
+### ⚠️ 開始前：你的資料庫要做的事（一次性）
+
+你的 Neon 資料庫**已經有** `user` 和 `refreshtoken` 兩張表（以前 `create_all` 建的）。所以不能直接「從頭建立」，否則會出現「表已經存在」的錯誤。在 `backend` 資料夾、確認有 `(venv)` 之後，依序執行：
+
+**1. 安裝 Alembic**
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+`requirements.txt` 多了 `alembic`。
+
+**2. 告訴 Alembic「這個資料庫已經是 0001 版」**
+
+```powershell
+alembic stamp 0001
+```
+
+- `stamp` 是「蓋章」：**只在 `alembic_version` 表記錄版本號，不會動任何資料表**。
+- `0001` 是第一個遷移檔的編號，內容就是「建立 `user` 和 `refreshtoken`」，剛好是你資料庫現在的樣子。
+
+**3. 升級到最新版**
+
+```powershell
+alembic upgrade head
+```
+
+- `upgrade` 是「套用還沒套用的遷移」。
+- `head` 是「最新版」，就像 git 的 `HEAD`。
+- 這會執行 `0002`：在 `user` 表**新增** `last_login_at` 欄位，**原本的帳號都還在**。
+
+**4. 確認資料庫和程式一致**
+
+```powershell
+alembic check
+```
+
+看到 `No new upgrade operations detected.` 就完成了。意思是「資料庫結構和 `models.py` 完全一樣，沒有需要再遷移的東西」。
+
+> 如果第 4 步列出了差異，代表你的資料庫跟預期不一樣（可能是很早期建立的表），把訊息貼給我看。
+
+**之後：** 每次 `git pull` 拿到新的遷移檔，只要再跑一次 `alembic upgrade head`。
+
+### 改了什麼
+
+#### 新增的檔案
+
+```
+backend/
+├── alembic.ini                 Alembic 的設定檔（不用動）
+└── migrations/
+    ├── env.py                  Alembic 執行時的進入點：連資料庫、讀 models.py
+    ├── script.py.mako          產生新遷移檔用的範本（不用動）
+    └── versions/               遷移檔都放這裡，依編號排序
+        ├── 0001_create_user_and_refreshtoken_tables.py
+        └── 0002_add_user_last_login_at.py
+```
+
+**`alembic.ini`**、**`script.py.mako`** 是 Alembic 的設定和範本，跟 `pytest.ini` 一樣，知道它們是做什麼的就好，不用搞懂每一行。
+
+**`migrations/env.py`** 是 `alembic init` 產生的範本，我只改了兩個地方：
+
+```python
+target_metadata = SQLModel.metadata    # 「資料表應該長怎樣」→ 看 models.py
+
+engine = create_async_engine(settings.database_url, ...)   # 連線 → 用 .env 的 DATABASE_URL
+```
+
+#### 遷移檔長怎樣（以 0002 為例）
+
+```python
+revision = '0002'          # 我是 0002
+down_revision = '0001'     # 我的上一版是 0001（像 git commit 指向上一個 commit）
+
+def upgrade() -> None:
+    op.add_column('user', sa.Column('last_login_at', ..., nullable=True))
+
+def downgrade() -> None:
+    op.drop_column('user', 'last_login_at')
+```
+
+- `op.add_column`：新增欄位，相當於 SQL 的 `ALTER TABLE user ADD COLUMN ...`
+- `op.drop_column`：刪掉欄位
+- **這兩個遷移檔都是 Alembic 自動產生的**（`--autogenerate`），我只加了中文註解
+
+#### `main.py`：拿掉 `create_all`
+
+原本後端啟動時會自動執行 `create_all`。現在資料表交給 Alembic 管理，這段就刪掉了。
+
+**所以以後資料表要用 `alembic upgrade head` 建立，後端不會自己建。** 如果忘了，會看到 `relation "user" does not exist` 之類的錯誤。
+
+#### 示範用的新欄位：`last_login_at`（最後登入時間）
+
+這關需要一個「實際改資料表」的例子，所以加了這個欄位：
+
+| 檔案 | 改動 |
+| --- | --- |
+| `models.py` | `User` 加上 `last_login_at: datetime \| None = None` |
+| `routes/auth.py` | 登入成功時，把 `last_login_at` 設成現在時間 |
+| `schemas.py` | `UserRead` 加上 `last_login_at`，`/me` 就會回傳它 |
+| `tests/test_auth.py` | 新增「登入後會記錄最後登入時間」的測試（現在共 35 個） |
+
+為什麼是 `datetime | None`（可以是空的）？因為**舊的帳號沒有這個值**。新增欄位時，資料庫裡已經存在的資料，這個欄位只能先是空的（`NULL`）。
+
+### 以後要改資料表的固定流程
+
+這是這關最重要的東西，以後其他專案也一樣：
+
+```
+1. 改 models.py（例如加一個欄位）
+
+2. alembic revision --autogenerate --rev-id 0003 -m "add user nickname"
+   → Alembic 比對 models.py 和資料庫，自動產生 migrations/versions/0003_add_user_nickname.py
+
+3. 打開產生的遷移檔看一眼，確認內容是你要的
+
+4. alembic upgrade head
+   → 套用到資料庫
+
+5. 把遷移檔跟程式碼一起 commit
+```
+
+`revision` 指令的參數：
+
+| 參數 | 意思 |
+| --- | --- |
+| `--autogenerate` | 自動比對、自動產生內容。不加的話，會產生一個空的遷移檔，要自己寫 |
+| `--rev-id 0003` | 指定版本編號。不指定的話 Alembic 會給一串亂數，例如 `6207fa150a72`，不好讀 |
+| `-m "add user nickname"` | 這次變更的說明，會變成檔名的一部分（建議用英文，檔名比較不會出問題） |
+
+### 常用指令一覽
+
+都要在 `backend` 資料夾、有 `(venv)` 的狀態下執行：
+
+| 指令 | 作用 |
+| --- | --- |
+| `alembic upgrade head` | 升級到最新版（最常用） |
+| `alembic current` | 看資料庫現在在哪一版 |
+| `alembic history` | 列出所有遷移檔 |
+| `alembic check` | 檢查資料庫和 `models.py` 是否一致 |
+| `alembic downgrade -1` | 退回上一版（`-1` 是「往回一步」） |
+| `alembic stamp 版本號` | 只記錄版本號，不動資料表（只有接手舊資料庫時才會用到） |
+
+### 測試呢？
+
+`tests/conftest.py` 還是用 `create_all` 建測試資料表。測試資料庫每次都會整個砍掉重建，沒有「保留舊資料」的需求，用 `create_all` 最簡單。
+
+### 驗證方式
+
+1. 做完上面「開始前」的 4 個步驟
+2. 啟動後端和前端，登入後按「取得我的資料」，回傳的 JSON 裡多了 `last_login_at`
+3. 到 Neon 打開 `user` 表，看到 `last_login_at` 欄位，而且原本的帳號都還在
+4. Neon 多了一張 `alembic_version` 表，裡面只有一筆資料：`0002`
+5. `python -m pytest` 應該是 `35 passed`
+
+### 動手玩
+
+1. **退回再升級**
+   - 執行 `alembic downgrade -1`，到 Neon 看 `user` 表，`last_login_at` 欄位不見了；`alembic current` 顯示 `0001`
+   - 這時啟動後端登入，會出錯，因為程式需要這個欄位但資料庫沒有
+   - 執行 `alembic upgrade head` 加回來，一切恢復正常
+2. **讓 `alembic check` 抓到差異**
+   - 在 `models.py` 的 `User` 加一行 `nickname: str | None = None`，**先不要產生遷移檔**
+   - 執行 `alembic check`，它會告訴你「`user.nickname` 這個欄位資料庫裡還沒有」
+   - 把那行刪掉，再 `alembic check` 一次，又恢復一致
+3. **自己完整做一次遷移**（照著「以後要改資料表的固定流程」）
+   - 在 `User` 加上 `nickname: str | None = None`
+   - `alembic revision --autogenerate --rev-id 0003 -m "add user nickname"`
+   - 打開 `migrations/versions/0003_add_user_nickname.py` 看看內容
+   - `alembic upgrade head`，到 Neon 確認多了 `nickname` 欄位
+   - **玩完要還原**（順序很重要）：先 `alembic downgrade -1`（把欄位從資料庫刪掉），再刪除 `0003_add_user_nickname.py` 檔案，最後把 `models.py` 那行刪掉
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼你的資料庫要用 <code>stamp 0001</code>，不能直接 <code>upgrade head</code>？</summary>
+
+`upgrade head` 會從頭開始套用所有遷移，第一個就是 0001「建立 `user` 表」。但你的資料庫已經有這張表了，就會出現「表已經存在」的錯誤。
+
+`stamp 0001` 是告訴 Alembic「0001 做的事，這個資料庫早就有了，不用再做」。之後 `upgrade head` 就只會從 0002 開始。
+
+全新的資料庫（例如別人 clone 專案）就不用 stamp，直接 `upgrade head` 從 0001 開始建。
+
+</details>
+
+<details>
+<summary>Q2：新增欄位時，為什麼通常要允許空值（<code>None</code>）？</summary>
+
+資料表裡已經有資料了。新增一個「不能是空的」欄位，舊資料在這個欄位要填什麼？資料庫不知道，就會拒絕這個變更。
+
+所以新欄位通常先設成可以是空的，或者給一個預設值。
+
+</details>
+
+<details>
+<summary>Q3：遷移檔為什麼要 commit 進 git？</summary>
+
+遷移檔是「資料表結構的歷史紀錄」。別人（或另一台電腦的你）clone 專案後，只要 `alembic upgrade head`，就能把資料庫建成一模一樣的結構。正式環境更新時也一樣。沒有 commit，其他地方就不知道資料表改了什麼。
+
+</details>
+
+<details>
+<summary>Q4：遷移檔已經套用了，發現寫錯，可以直接改那個檔案嗎？</summary>
+
+**已經套用到資料庫、或已經 push 給別人的遷移檔，不要改。** Alembic 只看版本號，已經是 0002 的資料庫不會再執行一次 0002，改了也沒用，而且會造成不同資料庫的結構不一致。
+
+正確做法是**再產生一個新的遷移檔**（0003）來修正，就像 git 不會去改舊的 commit，而是再 commit 一次。
+
+還沒套用、也還沒 push 的話，可以 `downgrade` 回去、刪掉檔案重新產生。
+
+</details>
+
+---
+
+## 關卡 6 ～ 7
 
 做到時再補上詳細內容。
 

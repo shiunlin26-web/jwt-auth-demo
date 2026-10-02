@@ -110,6 +110,9 @@ async def login(
     # 簽 access token
     access_token = create_access_token(user.id)
 
+    # 【關卡 5】記錄最後登入時間（下面 commit 時一起寫入）
+    user.last_login_at = datetime.now(timezone.utc)
+
     # 【關卡 3】順便清掉這個使用者過期的 refresh token，避免資料表一直變大
     await delete_expired_refresh_tokens(session, user.id)
 

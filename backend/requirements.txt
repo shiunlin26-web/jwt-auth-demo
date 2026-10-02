@@ -7,3 +7,4 @@ bcrypt
 python-multipart
 email-validator
 pydantic-settings
+alembic
