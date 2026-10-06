@@ -1498,7 +1498,18 @@ export async function getPosts(): Promise<Post[]> {
    }
    ```
    然後在 `App.tsx` 已登入的區塊裡加上 `<Greeting />`（記得在上方 `import { Greeting } from "./components/Greeting";`）。不用傳任何 props，就拿得到使用者資料，這就是 Context 的好處。
-3. **確認 single-flight 還在**：照第 1 關「驗證 4」的方式（`.env` 設 `JWT_EXPIRE_MINUTES=0`、Network 調成 Slow 4G），快速連點三下「重新取得我的資料」，`/auth/refresh` 應該只有一個。玩完把 `.env` 那行刪掉。
+3. **確認 single-flight 還在**（同時送三個請求，只會 refresh 一次）：
+   1. `backend/.env` 加上 `JWT_EXPIRE_MINUTES=1`，重啟後端（access token 1 分鐘就過期）
+      > 不要設成 `0`：token 一發出來就過期，連登入後取得使用者資料都會失敗。
+   2. 登入，然後**等 1 分鐘以上**，讓 access token 過期
+   3. 打開 DevTools，先切到 **Network** 分頁，再切到 **Console** 分頁，貼上這行按 Enter：
+      ```js
+      const m = await import("/src/api/auth.ts"); await Promise.all([m.getMe(), m.getMe(), m.getMe()]);
+      ```
+      意思是「拿到 `api/auth.ts` 這個模組，**同時**呼叫三次 `getMe()`」。`Promise.all` 會讓三個請求一起送出。
+   4. 回到 **Network** 分頁，應該看到：3 個 `me` 401 → **只有 1 個** `refresh` 200 → 3 個 `me` 200
+   5. **對照組**：把 `api/client.ts` 裡的 `if (!refreshPromise) {` 改成 `if (true) {`，存檔，重新登入、等 1 分鐘、再貼一次同一行。這次會看到 3 個 `refresh`，後兩個是 401，而且畫面跳出「登入已過期」，這就是沒有 single-flight 時會發生的事。**記得改回來。**
+   6. 玩完把 `.env` 的 `JWT_EXPIRE_MINUTES=1` 刪掉，重啟後端
 
 ### 想一想
 
