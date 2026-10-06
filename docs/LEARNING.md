@@ -39,7 +39,7 @@
 | 3 | 「登出所有裝置」、改密碼時撤銷所有 token、清理過期 token | 把第 1 關拿來應用 | ✅ 完成 |
 | 4 | pytest 寫測試 | 學 Python 最好的方法，也能自動驗證前面幾關 | ✅ 完成 |
 | 5 | Alembic 資料庫遷移 | 為什麼不能一直用 `create_all` | ✅ 完成 |
-| 6 | 前端拆成 `api.ts` + `AuthContext` | 之後其他專案可以直接複製這一套 | ⬜ |
+| 6 | 前端拆成 `api/` + `auth/` + `components/` | 之後其他專案可以直接複製這一套 | ✅ 完成 |
 | 7（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
 
 ---
@@ -1241,7 +1241,305 @@ def downgrade() -> None:
 
 ---
 
-## 關卡 6 ～ 7
+## 關卡 6：前端整理（api / auth / components）✅
+
+**改動的檔案**：`frontend/src/` 底下（新增 `api/`、`auth/`、`components/`、`utils/`，改寫 `App.tsx`、`main.tsx`，刪掉沒用到的 `App.css` 和 `assets/` 範本檔）
+
+### 一句話
+
+**把 290 行、什麼都擠在一起的 `App.tsx`，拆成分工清楚的幾個檔案，變成之後其他專案可以直接複製的登入範本。**
+
+### 為什麼要拆
+
+原本的 `App.tsx` 同時在做這些事：
+
+- 存 access token
+- refresh、single-flight
+- 遇到 401 自動重試
+- 呼叫每一個 API
+- 管理登入狀態
+- 註冊表單、登入表單、改密碼表單、使用者資料的畫面
+
+想把「登入功能」搬到另一個專案時，很難分清楚哪些要帶走、哪些是這個頁面專用的。
+
+### 新的結構
+
+```
+frontend/src/
+├── api/                      跟後端溝通（不是 React，一般的 TS）
+│   ├── client.ts             底層：token 存放、refresh、apiFetch、錯誤處理
+│   └── auth.ts               每個登入相關的 API 一個函式：login()、getMe()……
+├── auth/                     登入狀態（React）
+│   ├── AuthContext.ts        定義登入狀態長什麼樣子
+│   ├── AuthProvider.tsx      登入狀態的「大腦」：保存狀態、提供 login/logout 等動作
+│   └── useAuth.ts            元件用來取得登入狀態的 hook
+├── components/               畫面
+│   ├── LoginForm.tsx         註冊與登入表單
+│   ├── UserPanel.tsx         使用者資料、登出按鈕
+│   ├── ChangePasswordForm.tsx 修改密碼表單
+│   └── styles.ts             共用樣式
+├── utils/
+│   └── password.ts           密碼規則（註冊和改密碼共用）
+├── App.tsx                   依登入狀態決定顯示哪個畫面（只剩 30 行）
+└── main.tsx                  用 <AuthProvider> 包住整個 App
+```
+
+### 誰呼叫誰
+
+```
+components（畫面）
+   │  const { login, user } = useAuth()
+   ▼
+auth/（登入狀態）
+   │  await authApi.login(email, password)
+   ▼
+api/auth.ts（每個 API 一個函式）
+   │  fetch(...) 或 apiFetch(...)
+   ▼
+api/client.ts（token、refresh、401 重試）
+   │
+   ▼
+後端
+```
+
+**每一層只跟下一層說話。** 畫面不知道網址是什麼，也不知道 token 存在哪；`api/` 不知道有哪些畫面。所以要換畫面、換專案時，`api/` 和 `auth/` 可以原封不動帶走。
+
+### 每個檔案在做什麼
+
+#### `api/client.ts`：底層
+
+原本散在 `App.tsx` 裡的四塊邏輯，搬到這裡：
+
+| 區塊 | 做什麼 | 原本在 `App.tsx` 的樣子 |
+| --- | --- | --- |
+| token 存放 | `getAccessToken()`、`setAccessToken()` | `useState` + `useRef` |
+| refresh | `refreshAccessToken()`，single-flight | `refreshPromiseRef` |
+| 呼叫需要登入的 API | `apiFetch()`，401 時自動 refresh 再重試 | `apiFetch` |
+| 錯誤處理 | `readJson()`：失敗時丟出 `ApiError`，訊息整理成看得懂的文字 | `JSON.stringify(data.detail)` |
+
+**為什麼 token 從 `useRef` 改成模組裡的變數？**
+
+```ts
+let accessToken: string | null = null;   // 模組層級的變數
+```
+
+這個檔案不是 React 元件，只是一般的 TS 模組。模組裡的變數**整個 App 只有一份**，不會因為元件重新渲染而改變，任何地方 import 進來讀到的都是最新的值。原本用 `useRef` 就是為了達到同樣的效果，現在直接用一般變數更簡單。
+
+**畫面怎麼知道 token 變了？** 用「訂閱」：
+
+```ts
+setAccessToken(token)              // 改 token 時，通知所有訂閱者
+subscribeAccessToken(listener)     // 訂閱：token 一變就呼叫 listener
+```
+
+`AuthProvider` 會訂閱它，token 一變就更新 React 的 state，畫面跟著重新渲染。就像 DOM 的 `addEventListener`。
+
+#### `api/auth.ts`：每個 API 一個函式
+
+```ts
+export async function getMe(): Promise<User> {
+  return readJson<User>(await apiFetch("/me"));
+}
+```
+
+元件不再自己寫 `fetch`，而是呼叫 `getMe()`。網址、HTTP 方法、要不要帶 token，都集中在這裡。
+
+**有些用 `fetch`，有些用 `apiFetch`，差在哪？**
+
+| 用一般 `fetch` | 用 `apiFetch` |
+| --- | --- |
+| `register`、`login`、`logout` | `getMe`、`logoutAll`、`changePassword` |
+| 不需要 access token | 需要 access token |
+
+**登入一定不能用 `apiFetch`。** 密碼錯誤時後端回 401，`apiFetch` 看到 401 會以為是 token 過期，跑去 refresh。跟第 3 關「目前密碼錯誤要回 400 不能回 401」是同一個道理。
+
+還有一個 `User` 型別，對應後端的 `UserRead`。原本寫的是 `useState<any>`，lint 一直報錯，現在有正確的型別，那個錯誤也沒了。
+
+#### `auth/`：登入狀態
+
+**Context 是什麼？** React 內建的功能，讓**很深層的元件**也能拿到共用的資料，不用一層一層用 props 往下傳。
+
+```tsx
+// main.tsx：最外層包起來
+<AuthProvider>
+  <App />
+</AuthProvider>
+
+// 任何元件裡
+const { status, user, login, logout } = useAuth();
+```
+
+三個檔案的分工：
+
+| 檔案 | 內容 |
+| --- | --- |
+| `AuthContext.ts` | 定義登入狀態有哪些東西（型別），建立 Context |
+| `AuthProvider.tsx` | 真正保存狀態、實作 login / logout 等動作 |
+| `useAuth.ts` | 元件用來拿登入狀態的 hook；忘記包 `<AuthProvider>` 時會給清楚的錯誤訊息 |
+
+> 為什麼要拆成三個檔案？Vite 的「熱更新」（存檔後畫面立刻更新、不用重新整理）要求一個 `.tsx` 檔只匯出元件。把 Context 和 hook 放在同一個檔案，lint 會警告，熱更新也可能失效。
+
+**`AuthProvider` 提供的東西：**
+
+| 名稱 | 說明 |
+| --- | --- |
+| `status` | `"loading"`（啟動中）、`"authenticated"`（已登入）、`"unauthenticated"`（未登入） |
+| `user` | 目前登入的使用者資料 |
+| `notice` | 狀態變化的提示：「登入成功」「已登出」「登入已過期」…… |
+| `login()`、`logout()`、`logoutAll()`、`changePassword()`、`reloadUser()` | 動作 |
+
+**幾個重點：**
+
+- **App 啟動時**：自動用 refresh token 換 access token，換到就順便取得使用者資料。這段邏輯從 `App.tsx` 搬過來，`didInit` 也一起搬過來了。
+- **`status` 是算出來的，不是存起來的**：
+  ```ts
+  const status = initializing ? "loading" : accessToken ? "authenticated" : "unauthenticated";
+  ```
+  有 token 就是已登入，沒有就是未登入。不另外存一個狀態，就不會發生「token 已經清掉了，畫面還顯示已登入」這種對不上的情況。
+- **登入過期**：`apiFetch` 的 refresh 也失敗時，會呼叫 `setSessionExpiredHandler` 設定的函式，`AuthProvider` 就顯示「登入已過期，請重新登入」，畫面自動回到登入表單。
+
+#### `components/`：畫面
+
+每個元件只管自己的輸入框和錯誤訊息，需要登入功能就呼叫 `useAuth()`：
+
+```tsx
+const { login } = useAuth();
+...
+await login(email, password);   // 成功後 AuthProvider 更新狀態，App 自動切換畫面
+```
+
+`LoginForm` 和 `ChangePasswordForm` 改用 `<form onSubmit>`，在輸入框**按 Enter 就能送出**。
+
+#### `App.tsx`：只剩 30 行
+
+```tsx
+const { status, notice } = useAuth();
+
+if (status === "loading") return <div>載入中...</div>;
+
+return status === "authenticated"
+  ? <><UserPanel /><ChangePasswordForm /></>
+  : <LoginForm />;
+```
+
+### 使用上有什麼不一樣
+
+功能都一樣，只有幾個小改變：
+
+| 原本 | 現在 |
+| --- | --- |
+| 登入後要按「取得我的資料」才看得到資料 | 登入後**自動**取得；按鈕改名「重新取得我的資料」 |
+| 錯誤訊息是 JSON：`["value_error", ...]` | 整理成文字：`密碼只能包含英文字母、數字、空白與符號` |
+| 只能點按鈕送出 | 輸入框按 Enter 也能送出 |
+| 已登入時只看到 token | 多顯示「已登入：email」 |
+
+### ⭐ 之後其他專案怎麼用
+
+這關最重要的目的。新專案要做登入時：
+
+**1. 複製這幾個檔案過去**
+
+```
+src/api/client.ts
+src/api/auth.ts
+src/auth/AuthContext.ts
+src/auth/AuthProvider.tsx
+src/auth/useAuth.ts
+```
+
+**2. 在 `main.tsx` 包起來**
+
+```tsx
+<AuthProvider>
+  <App />
+</AuthProvider>
+```
+
+**3. 在任何元件裡使用**
+
+```tsx
+const { status, user, login, logout } = useAuth();
+```
+
+**4. 新專案自己的 API，照 `auth.ts` 的寫法加**
+
+例如新專案有「文章列表」：
+
+```ts
+// src/api/posts.ts
+import { apiFetch, readJson } from "./client";
+
+export type Post = { id: number; title: string };
+
+export async function getPosts(): Promise<Post[]> {
+  return readJson<Post[]>(await apiFetch("/posts"));
+}
+```
+
+用 `apiFetch`，就**自動**帶上 token、自動處理 refresh，完全不用再想 token 的事。
+
+### 驗證方式
+
+1. 啟動前後端，打開 <http://localhost:5173>
+2. 照以前的方式玩一遍：註冊 → 登入 → 重新整理（保持登入）→ 改密碼 → 登出所有裝置
+3. 試試錯誤情況：密碼打錯、重複註冊、改密碼時目前密碼打錯，錯誤訊息應該都是看得懂的文字
+4. 前端資料夾執行 `npm run lint`，應該**沒有任何錯誤**（以前一直有一個 `any` 的錯誤）
+
+### 動手玩
+
+1. **忘記包 `AuthProvider` 會怎樣？** 在 `main.tsx` 把 `<AuthProvider>` 和 `</AuthProvider>` 兩行刪掉，存檔看畫面和 DevTools 的 Console，會看到 `useAuth 必須在 <AuthProvider> 裡面使用`。這就是 `useAuth.ts` 裡那段檢查的作用。改回來。
+2. **自己寫一個用 `useAuth` 的元件**（很短）：在 `components/` 新增 `Greeting.tsx`：
+   ```tsx
+   import { useAuth } from "../auth/useAuth";
+
+   export function Greeting() {
+     const { user } = useAuth();
+     return <p>嗨，{user?.email}！</p>;
+   }
+   ```
+   然後在 `App.tsx` 已登入的區塊裡加上 `<Greeting />`（記得在上方 `import { Greeting } from "./components/Greeting";`）。不用傳任何 props，就拿得到使用者資料，這就是 Context 的好處。
+3. **確認 single-flight 還在**：照第 1 關「驗證 4」的方式（`.env` 設 `JWT_EXPIRE_MINUTES=0`、Network 調成 Slow 4G），快速連點三下「重新取得我的資料」，`/auth/refresh` 應該只有一個。玩完把 `.env` 那行刪掉。
+
+### 想一想
+
+<details>
+<summary>Q1：access token 為什麼存在 <code>client.ts</code> 的變數裡，不是 React 的 state？</summary>
+
+`apiFetch` 不是 React 元件，用不了 state。而且 state 有「這一次渲染看到的是舊值」的問題，原本的程式就是為了這個才另外用 `useRef`。
+
+現在 token 的「正本」放在模組變數，`apiFetch` 隨時讀到最新的；`AuthProvider` 再透過訂閱，把它同步到 state 給畫面用。正本只有一份，畫面只是跟著顯示。
+
+</details>
+
+<details>
+<summary>Q2：為什麼 <code>login</code> 不能用 <code>apiFetch</code>？</summary>
+
+`apiFetch` 遇到 401 會以為 access token 過期，自動去 refresh。但登入時的 401 代表「密碼錯誤」，跟 token 無關。用了 `apiFetch` 會多送一次沒意義的 refresh。更糟的是，如果瀏覽器還留著上一次登入的 refresh token cookie，refresh 會成功，`apiFetch` 就把那個 token 存起來，結果「密碼打錯」反而讓畫面變成已登入（而且是上一次登入的那個帳號）。
+
+</details>
+
+<details>
+<summary>Q3：為什麼不直接把 <code>status</code> 存成一個 state？</summary>
+
+如果 `status` 和 `accessToken` 分開存，每個會改 token 的地方都要記得一起改 `status`，漏掉一個就會對不上，例如 `apiFetch` 裡 refresh 失敗清掉了 token，卻沒人去改 `status`。從 token 推算出 `status`，就不可能對不上。
+
+**能算出來的東西，就不要另外存。** 這是寫 React 很重要的原則。
+
+</details>
+
+<details>
+<summary>Q4：這個範本有什麼限制？</summary>
+
+- 第 1 關 Q2 提過的「兩個分頁同時重新整理」，其中一個可能被判定成重複使用，結果兩邊都被登出。single-flight 只在同一個分頁內有效。
+- 一個分頁登出了，其他分頁不會馬上知道，要等它們下次呼叫 API 才發現。
+
+要解決可以用瀏覽器的 `BroadcastChannel` 讓分頁之間互相通知。練習專案知道有這回事就好。
+
+</details>
+
+---
+
+## 關卡 7（選做）
 
 做到時再補上詳細內容。
 

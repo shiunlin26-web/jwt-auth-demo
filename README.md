@@ -10,14 +10,14 @@
 ```
 jwt-auth-demo/
 ├── backend/
-│   ├── main.py            # FastAPI 入口、CORS、啟動時自動建表
+│   ├── main.py            # FastAPI 入口、CORS
 │   ├── database.py        # DB 連線（讀 DATABASE_URL）
 │   ├── models.py          # User、RefreshToken 資料表
 │   ├── schemas.py         # 請求 / 回應格式
 │   ├── security.py        # 密碼雜湊、JWT 簽發與驗證、refresh token 產生
 │   ├── dependencies.py    # get_current_user（驗 Bearer token）
 │   ├── routes/
-│   │   ├── auth.py        # /auth/register、/auth/login、/auth/refresh、/auth/logout
+│   │   ├── auth.py        # 註冊、登入、refresh、登出、登出所有裝置、修改密碼
 │   │   └── users.py       # /me（需要登入）
 │   ├── config.py          # 所有設定集中在這裡（讀 .env）
 │   ├── alembic.ini        # Alembic（資料庫遷移）設定
@@ -26,8 +26,13 @@ jwt-auth-demo/
 │   ├── requirements.txt
 │   ├── requirements-dev.txt  # 測試用套件
 │   └── .env.example
-└── frontend/
-    └── src/App.tsx        # 登入畫面、apiFetch（401 自動 refresh）、啟動時恢復登入
+└── frontend/src/
+    ├── api/
+    │   ├── client.ts      # token 存放、refresh（single-flight）、apiFetch（401 自動 refresh）
+    │   └── auth.ts        # 每個登入相關 API 一個函式：login()、getMe()……
+    ├── auth/              # 登入狀態：AuthProvider（啟動時恢復登入）、useAuth()
+    ├── components/        # 畫面：登入表單、使用者資料、修改密碼
+    └── App.tsx            # 依登入狀態切換畫面
 ```
 
 ## 需要先安裝
