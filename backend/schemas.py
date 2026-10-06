@@ -63,7 +63,6 @@ class UserRead(BaseModel):
     email: str
     created_at: datetime
     last_login_at: datetime | None  # 【關卡 5】
-    nickname: str | None
 
 
 class Token(BaseModel):
