@@ -18,7 +18,6 @@ import { createBrowserRouter } from "react-router";
 import { GuestOnly } from "../auth/GuestOnly";
 import { RequireAuth } from "../auth/RequireAuth";
 import { HomePage } from "../pages/HomePage";
-import { About } from "../pages/About";
 import { LoginPage } from "../pages/LoginPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { RegisterPage } from "../pages/RegisterPage";
@@ -41,7 +40,6 @@ export const router = createBrowserRouter([
         children: [
           { path: "/", element: <HomePage /> },
           { path: "/settings", element: <SettingsPage /> },
-          { path: "/about", element: <About /> },
         ],
       },
       { path: "*", element: <NotFoundPage /> },
