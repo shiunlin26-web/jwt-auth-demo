@@ -41,7 +41,7 @@
 | 5 | Alembic 資料庫遷移 | 為什麼不能一直用 `create_all` | ✅ 完成 |
 | 6 | 前端拆成 `api/` + `auth/` + `components/` | 之後其他專案可以直接複製這一套 | ✅ 完成 |
 | 7 | React Router：多頁面、需要登入的頁面 | 路由、守門員元件 | ✅ 完成 |
-| 8 | Zustand + axios | 用套件取代手寫的登入狀態與 apiFetch | ⬜ |
+| 8 | Zustand + axios | 用套件取代手寫的登入狀態與 apiFetch | ✅ 完成 |
 | 9 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ⬜ |
 | 10 | Zod + React Hook Form | 表單驗證 | ⬜ |
 | 11 | Tailwind CSS | 樣式 | ⬜ |
@@ -1441,6 +1441,8 @@ return status === "authenticated"
 
 ### ⭐ 之後其他專案怎麼用
 
+> **第 8 關之後檔案有變**：要複製的是 `src/api/`（`client.ts`、`auth.ts`）和 `src/auth/`（`authStore.ts`、`authService.ts`、`useAuth.ts`、`RequireAuth.tsx`、`GuestOnly.tsx`），並在 `main.tsx` 呼叫 `initializeAuth()`，**不需要再包 `<AuthProvider>`**。新的 API 用 `api.get(...)`、`api.post(...)`（axios）呼叫。下面是第 6 關當時的版本。
+
 這關最重要的目的。新專案要做登入時：
 
 **1. 複製這幾個檔案過去**
@@ -1790,7 +1792,220 @@ App 剛啟動時，還在用 refresh token 確認是否登入過，這時候 `st
 
 ---
 
-## 關卡 8 ～ 13
+## 關卡 8：Zustand + axios ✅
+
+**改動的檔案**：`frontend/package.json`（新增 `zustand`、`axios`）、`frontend/src/`：新增 `auth/authStore.ts`、`auth/authService.ts`，改寫 `api/client.ts`、`api/auth.ts`、`auth/useAuth.ts`、`main.tsx`，刪除 `auth/AuthContext.ts`、`auth/AuthProvider.tsx`
+
+### 一句話
+
+**把第 6 關手寫的「登入狀態」和「apiFetch」，換成業界最常用的兩個套件。原理完全一樣，程式變短、變好讀。**
+
+### 換了什麼
+
+| 第 6 關手寫 | 第 8 關套件 | 套件幫你做了什麼 |
+| --- | --- | --- |
+| `let accessToken` + 手寫訂閱（`subscribeAccessToken`） | **Zustand** store | 資料一變，用到它的元件自動更新 |
+| `AuthContext` + `AuthProvider` + `useState` | **Zustand** store | 不需要 Provider 包起來，React 外面也能讀寫 |
+| `apiFetch`（自動帶 token、401 重試） | **axios** 攔截器 | 每個請求自動經過「送出前」和「收到後」兩道關卡 |
+| `readJson`、`ApiError`、`JSON.stringify` | **axios** | 自動轉 JSON；4xx、5xx 自動丟出錯誤 |
+| single-flight | **保留手寫** | axios 不會幫你做，所以這段照抄第 6 關 |
+
+**元件一行都沒改。** `useAuth()` 的用法跟以前一模一樣，只是背後換了實作。這就是第 6 關分層的好處：換掉底層，上面的畫面完全不受影響。
+
+### 用情境看懂
+
+延續第 6 關的比喻，角色換了人，但工作內容一樣：
+
+| 角色 | 第 6 關 | 第 8 關 |
+| --- | --- | --- |
+| **店長的筆記本**（記住誰登入了） | `AuthProvider` 的 useState | `authStore.ts`（Zustand） |
+| **店長的工作手冊**（登入、登出怎麼做） | `AuthProvider` 裡的函式 | `authService.ts` |
+| **跑腿小弟**（送請求、過期自己換） | `apiFetch` | axios 攔截器 |
+
+**情境：過了 30 分鐘，按「重新取得我的資料」**
+
+```
+UserPanel → reloadUser() → authApi.getMe() → api.get("/me")
+
+axios 請求攔截器：「送出前，從筆記本（store）拿 token 貼上去。」
+後端：「token 過期，401。」
+axios 回應攔截器：「401？我去換一張。」
+  → refreshAccessToken()（single-flight）→ 拿到新 token
+  → 寫進筆記本（store）→ 用到 token 的畫面自動更新
+  → 用新 token 重送 /me → 200
+```
+
+跟第 6 關一模一樣，只是「跑腿小弟」從手寫的 `apiFetch` 換成了 axios 攔截器。
+
+### 新的檔案分工
+
+```
+auth/
+├── authStore.ts     資料：token、user、notice（Zustand）
+├── authService.ts   動作：initializeAuth、login、logout……（一般函式）
+├── useAuth.ts       給元件用的 hook，把上面兩個包在一起
+├── RequireAuth.tsx  （不變）
+└── GuestOnly.tsx    （不變）
+
+api/
+├── client.ts        axios 設定、攔截器、refresh、錯誤訊息
+└── auth.ts          每個 API 一個函式（改用 axios，變短了）
+```
+
+### Zustand 怎麼用（`auth/authStore.ts`）
+
+```ts
+export const useAuthStore = create<AuthState>()((set) => ({
+  accessToken: null,
+  user: null,
+  ...
+  setAccessToken: (accessToken) => set({ accessToken }),
+  clearSession: (notice) => set({ accessToken: null, user: null, notice }),
+}));
+```
+
+- **`create`**：建立 store，裡面放「資料」和「改資料的函式」
+- **`set({...})`**：只改有寫到的欄位，其他不動（跟 React 的 `setState` 一樣）
+
+**兩種讀寫方式：**
+
+| 在哪裡 | 怎麼寫 | 資料變了會怎樣 |
+| --- | --- | --- |
+| 元件裡 | `useAuthStore((s) => s.user)` | 元件自動重新渲染 |
+| 元件外（axios、service） | `useAuthStore.getState().accessToken` | 只是讀一次當下的值 |
+
+**第二種就是 Zustand 最大的好處**：axios 攔截器不是元件，用不了 Context，但可以直接 `getState()` 拿 token。第 6 關為了這件事，手寫了「模組變數 + 訂閱機制」，現在 Zustand 一個 store 就解決了。
+
+**`useShallow`**（在 `useAuth.ts`）：一次挑好幾個欄位組成物件時要加。不加的話，每次都會產生「新的物件」，React 以為資料變了，元件就會一直重新渲染。
+
+### axios 怎麼用（`api/client.ts`）
+
+**兩個 axios 實例：**
+
+```ts
+export const publicApi = axios.create({ baseURL: API_URL, withCredentials: true });  // 不需要登入
+export const api = axios.create({ baseURL: API_URL, withCredentials: true });        // 需要登入，有攔截器
+```
+
+- **`baseURL`**：自動加在路徑前面，`api.get("/me")` 會送到 `http://localhost:8000/me`
+- **`withCredentials: true`**：帶上 cookie，等於 fetch 的 `credentials: "include"`
+- 對應第 6 關的「一般 fetch」和「apiFetch」：**登入一定要用 `publicApi`**，不然密碼錯誤的 401 會被當成 token 過期
+
+**請求攔截器：每個請求送出前執行**
+
+```ts
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().accessToken;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+```
+
+**回應攔截器：每個回應回來後執行**
+
+```ts
+api.interceptors.response.use(
+  (response) => response,                  // 成功：原封不動
+  async (error) => {                       // 失敗：
+    if (不是 401 || 已經重送過) throw error;  //   不處理
+    original._retry = true;                //   標記「重送過了」
+    const newToken = await refreshAccessToken();
+    if (!newToken) { 清掉登入狀態; throw error; }
+    設定新 token;
+    return api(original);                  //   重送原本的請求
+  },
+);
+```
+
+**`_retry` 是新加的保護**：如果重送後還是 401（例如新 token 又有問題），不會再 refresh 一次，避免無限循環。
+
+**呼叫 API 變短了（`api/auth.ts`）：**
+
+```ts
+// 第 6 關
+const res = await apiFetch("/auth/change-password", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ current_password: ..., new_password: ... }),
+});
+return readJson<TokenResponse>(res);
+
+// 第 8 關
+const { data } = await api.post<TokenResponse>("/auth/change-password", {
+  current_password: ..., new_password: ...,
+});
+return data;
+```
+
+axios 自動把物件轉成 JSON、自動加 `Content-Type`、自動把回應轉成物件放在 `.data`，失敗時自動丟出錯誤。
+
+### `main.tsx` 的變化
+
+```tsx
+initializeAuth()   // 啟動時檢查一次登入狀態
+
+createRoot(...).render(
+  <StrictMode>
+    <RouterProvider router={router} />   // 不用再包 <AuthProvider>
+  </StrictMode>,
+)
+```
+
+- **不用包 Provider 了**：Zustand 的 store 是獨立的，不需要放進 React 的樹裡
+- **`initializeAuth()` 直接在外面呼叫**：第 6 關放在 `useEffect` 裡，還得用 `didInit` 擋掉 StrictMode 跑兩次的問題；現在是一般函式，只會執行一次
+
+### 驗證方式
+
+功能跟第 7 關完全一樣，照第 7 關的驗證方式玩一遍就好。另外可以試：
+
+1. **single-flight 還在**：照第 6 關動手玩 3 的方法（`JWT_EXPIRE_MINUTES=1`、等 1 分鐘、在 Console 同時呼叫三次 `getMe()`），Network 裡應該只有一個 `refresh`
+2. **前端資料夾** `npm run lint`、`npm run build` 都要通過
+
+### 動手玩
+
+1. **在 Console 直接看 store 裡的資料**：登入後在 Console 輸入：
+   ```js
+   const { useAuthStore } = await import("/src/auth/authStore.ts"); useAuthStore.getState();
+   ```
+   會看到 `accessToken`、`user`、`notice` 等目前的值。這就是 Zustand「在 React 外面也能讀」的效果。
+2. **從外面改 store，畫面會跟著變**：接著輸入：
+   ```js
+   useAuthStore.getState().setNotice("我從 Console 改的！");
+   ```
+   畫面上方的提示文字會立刻變成這句話。**你沒有碰任何元件，只改了 store，畫面就自動更新了。**
+3. **拿掉 `_retry` 會怎樣（想一想就好，不用真的改）**：如果後端出問題，每次都回 401，攔截器會不斷 refresh、重送、又 401、又 refresh……沒有 `_retry` 就停不下來。
+
+### 想一想
+
+<details>
+<summary>Q1：既然 Zustand 這麼方便，為什麼第 6 關還要手寫？</summary>
+
+手寫一次，才知道套件幫你做了什麼。現在看到 `useAuthStore.getState()`，你知道它就是第 6 關的 `getAccessToken()`；看到元件自動更新，你知道背後就是第 6 關的「訂閱」。遇到問題時，你知道該往哪裡找。
+
+</details>
+
+<details>
+<summary>Q2：為什麼要分 <code>authStore.ts</code> 和 <code>authService.ts</code>，不全部寫在 store 裡？</summary>
+
+`client.ts`（axios）需要讀 store 拿 token；如果 store 裡也要呼叫 API（就會 import `client.ts`），兩個檔案就會**互相 import**，容易出現難以追查的錯誤。
+
+拆開後方向是單向的：`authService` → `api` → `authStore`，store 只放資料，不依賴任何人。
+
+</details>
+
+<details>
+<summary>Q3：Zustand 和 Context 該怎麼選？</summary>
+
+- **Context**：React 內建，適合「很少改變」的資料，例如主題顏色、語言設定
+- **Zustand**：適合「常常改變」或「React 外面也要用」的資料，例如登入狀態（axios 要讀 token）
+
+登入狀態兩個條件都符合，所以 Zustand 更合適。
+
+</details>
+
+---
+
+## 關卡 9 ～ 13
 
 做到時再補上詳細內容。
 

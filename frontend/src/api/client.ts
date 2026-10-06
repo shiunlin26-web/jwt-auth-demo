@@ -1,135 +1,101 @@
 /**
- * 【關卡 6】API 的底層：所有跟後端溝通的共用邏輯都在這裡
+ * 【關卡 8】API 的底層，改用 axios
  *
- * 這個檔案「不是 React」，只是一般的 TypeScript 模組。
- * 好處：不受元件重新渲染影響，任何地方（元件、hook、其他模組）都能直接 import 使用。
+ * 第 6 關手寫的 apiFetch，換成 axios 的「攔截器（interceptor）」：
+ * - 請求攔截器：每個請求送出前，自動加上 Authorization header
+ * - 回應攔截器：收到 401 時，自動 refresh 再重送一次
  *
- * 裡面有四塊：
- * 1. access token 的存放（記憶體）
- * 2. refreshAccessToken：用 refresh token 換新的 access token（single-flight）
- * 3. apiFetch：呼叫需要登入的 API，遇到 401 自動 refresh 再重試
- * 4. 錯誤處理：把後端的錯誤統一轉成 ApiError
+ * 有兩個 axios 實例（instance）：
+ * - publicApi：不需要登入的 API（登入、註冊、refresh、登出），沒有攔截器
+ * - api：需要登入的 API，有攔截器
+ * 對應第 6 關的「一般 fetch」和「apiFetch」。
  */
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
+import { useAuthStore } from "../auth/authStore";
 
 // 【關卡 2】後端網址從環境變數讀，沒設定就用本機預設值
 export const API_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-
-// ============================================================
-// 1. access token 存放在記憶體（模組裡的變數）
-// ============================================================
-// 不放 localStorage：被 XSS 注入的惡意 JS 一行就能偷走。
-// 放在記憶體：重新整理就消失，所以 App 啟動時要用 refresh token 換回來（見 AuthProvider）。
-
-let accessToken: string | null = null;
-const tokenListeners = new Set<(token: string | null) => void>();
-
-export function getAccessToken(): string | null {
-  return accessToken;
-}
-
-export function setAccessToken(token: string | null): void {
-  accessToken = token;
-  // 通知所有訂閱者（AuthProvider 會訂閱，用來更新畫面上的登入狀態）
-  tokenListeners.forEach((listener) => listener(token));
-}
-
-/** 訂閱 access token 的變化；回傳「取消訂閱」的函式（給 useEffect 的 cleanup 用） */
-export function subscribeAccessToken(listener: (token: string | null) => void): () => void {
-  tokenListeners.add(listener);
-  return () => {
-    tokenListeners.delete(listener);
-  };
-}
-
-// ============================================================
-// 2. refresh：用 cookie 裡的 refresh token 換新的 access token
-// ============================================================
-// 【關卡 1】single-flight：同一時間只送出一個 refresh 請求。
-// 後端有輪替，同一個 refresh token 只能用一次；如果同時送兩次，
-// 第二次會被當成「重複使用」而把使用者整個登出。
-// 原本存在 useRef 裡，現在放在模組變數，效果一樣，但不用依附在某個元件上。
-
-let refreshPromise: Promise<string | null> | null = null;
-
-export function refreshAccessToken(): Promise<string | null> {
-  if (!refreshPromise) {
-    refreshPromise = fetch(`${API_URL}/auth/refresh`, {
-      method: "POST",
-      credentials: "include", // 讓瀏覽器帶上 refresh token cookie
-    })
-      .then(async (res) => (res.ok ? ((await res.json()) as TokenResponse).access_token : null))
-      .catch(() => null) // 網路錯誤也當作 refresh 失敗
-      .finally(() => {
-        refreshPromise = null; // 結束後清掉，下次才會重新發
-      });
-  }
-  return refreshPromise;
-}
-
-// ============================================================
-// 3. apiFetch：呼叫「需要登入」的 API
-// ============================================================
-
-// refresh 也失敗（refresh token 過期或被撤銷）時要通知誰
-let sessionExpiredHandler: (() => void) | null = null;
-
-export function setSessionExpiredHandler(handler: (() => void) | null): void {
-  sessionExpiredHandler = handler;
-}
-
-/**
- * 自動帶上 Authorization header；遇到 401 時：
- *   refresh 成功 → 換上新 token，重送一次
- *   refresh 失敗 → 清掉 token，通知「登入已過期」
- *
- * ⚠️ 只用在需要登入的 API。登入、註冊這類 API 要用一般的 fetch，
- *    不然「密碼錯誤」的 401 會被誤以為是 token 過期，跑去 refresh。
- */
-export async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  const send = (token: string | null) =>
-    fetch(`${API_URL}${path}`, {
-      ...options,
-      credentials: "include",
-      headers: {
-        ...options.headers,
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-
-  let res = await send(getAccessToken());
-
-  if (res.status === 401) {
-    const newToken = await refreshAccessToken();
-    if (newToken) {
-      setAccessToken(newToken);
-      res = await send(newToken);
-    } else {
-      setAccessToken(null);
-      sessionExpiredHandler?.();
-    }
-  }
-
-  return res;
-}
-
-// ============================================================
-// 4. 錯誤處理
-// ============================================================
 
 export type TokenResponse = {
   access_token: string;
   token_type: string;
 };
 
-/** 後端回傳錯誤（status 不是 2xx）時丟出的錯誤，帶著狀態碼和整理過的訊息 */
-export class ApiError extends Error {
-  status: number;
+// axios.create：建立一個有預設設定的 axios，之後呼叫時只要寫路徑
+//   baseURL：自動加在路徑前面，api.get("/me") 會送到 http://localhost:8000/me
+//   withCredentials：跨網域時也帶上 cookie（等於 fetch 的 credentials: "include"）
+// axios 會自動把物件轉成 JSON 送出、把回應的 JSON 轉成物件，也不用自己寫 Content-Type
+export const publicApi = axios.create({ baseURL: API_URL, withCredentials: true });
+export const api = axios.create({ baseURL: API_URL, withCredentials: true });
 
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
+// ============================================================
+// refresh：用 cookie 裡的 refresh token 換新的 access token
+// ============================================================
+// 【關卡 1】single-flight：同一時間只送出一個 refresh 請求。
+// 這個 axios 不會幫你做，所以保留手寫的版本（邏輯跟第 6 關一模一樣）。
+
+let refreshPromise: Promise<string | null> | null = null;
+
+export function refreshAccessToken(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = publicApi
+      .post<TokenResponse>("/auth/refresh")
+      .then((res) => res.data.access_token)
+      .catch(() => null) // 401 或網路錯誤都當作 refresh 失敗
+      .finally(() => {
+        refreshPromise = null;
+      });
   }
+  return refreshPromise;
 }
+
+// ============================================================
+// 請求攔截器：送出前自動帶上 access token
+// ============================================================
+api.interceptors.request.use((config) => {
+  // 在 React 外面讀 Zustand store：getState()
+  const token = useAuthStore.getState().accessToken;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ============================================================
+// 回應攔截器：401 → refresh → 重送
+// ============================================================
+// _retry：標記「這個請求已經重送過了」，避免重送後又 401 時無限循環
+type RetryableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
+
+api.interceptors.response.use(
+  // 成功的回應：原封不動交出去
+  (response) => response,
+  // 失敗的回應（axios 遇到 4xx、5xx 會自動當成錯誤）
+  async (error: AxiosError) => {
+    const original = error.config as RetryableConfig | undefined;
+
+    // 不是 401，或已經重送過了 → 不處理，把錯誤往外丟
+    if (error.response?.status !== 401 || !original || original._retry) {
+      throw error;
+    }
+    original._retry = true;
+
+    const newToken = await refreshAccessToken();
+    if (!newToken) {
+      // refresh 也失敗（refresh token 過期或被撤銷）→ 登入過期
+      useAuthStore.getState().clearSession("登入已過期，請重新登入");
+      throw error;
+    }
+
+    useAuthStore.getState().setAccessToken(newToken);
+    original.headers.Authorization = `Bearer ${newToken}`;
+    return api(original); // 用新 token 重送原本的請求
+  },
+);
+
+// ============================================================
+// 錯誤訊息
+// ============================================================
 
 /**
  * 把後端的 detail 整理成人看得懂的文字
@@ -146,20 +112,14 @@ function formatDetail(detail: unknown): string {
   return "發生未知錯誤";
 }
 
-/** 讀取回應的 JSON；status 不是 2xx 就丟出 ApiError */
-export async function readJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, formatDetail(body.detail));
-  }
-  if (res.status === 204) {
-    return undefined as T; // 204 No Content：沒有內容可以讀
-  }
-  return (await res.json()) as T;
-}
-
 /** 從任何錯誤取出要顯示給使用者的文字 */
 export function getErrorMessage(error: unknown): string {
+  // axios 的錯誤：後端有回應的話，從回應內容的 detail 取訊息
+  if (axios.isAxiosError<{ detail?: unknown }>(error)) {
+    const detail = error.response?.data?.detail;
+    if (detail !== undefined) return formatDetail(detail);
+    return error.message; // 沒有回應（例如網路斷線、後端沒開）
+  }
   if (error instanceof Error) return error.message;
   return String(error);
 }

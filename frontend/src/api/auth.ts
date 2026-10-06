@@ -1,11 +1,12 @@
 /**
  * 【關卡 6】所有跟登入有關的 API，一個後端端點對應一個函式
+ * 【關卡 8】改用 axios：不用自己寫 JSON.stringify、res.json()、判斷 res.ok
  *
- * 元件不直接寫 fetch，而是呼叫這裡的函式：
- *   const user = await getMe();
- * 好處：網址、HTTP 方法、要不要帶 token，都集中在這裡管理；元件只關心「拿到什麼資料」。
+ * axios 回傳的是一個物件，後端給的資料在 .data 裡：
+ *   const { data } = await api.get<User>("/me");   // data 的型別就是 User
+ * 後端回 4xx、5xx 時，axios 會直接丟出錯誤，交給呼叫的地方 catch。
  */
-import { API_URL, apiFetch, readJson, type TokenResponse } from "./client";
+import { api, publicApi, type TokenResponse } from "./client";
 
 // 對應後端 schemas.py 的 UserRead
 export type User = {
@@ -15,49 +16,39 @@ export type User = {
   last_login_at: string | null;
 };
 
-const jsonHeaders = { "Content-Type": "application/json" };
-
-// ---------- 不需要登入的 API：用一般的 fetch ----------
+// ---------- 不需要登入的 API：用 publicApi ----------
+// 登入一定要用 publicApi：密碼錯誤的 401 不能被當成 token 過期而跑去 refresh
 
 export async function register(email: string, password: string): Promise<User> {
-  const res = await fetch(`${API_URL}/auth/register`, {
-    method: "POST",
-    headers: jsonHeaders,
-    body: JSON.stringify({ email, password }),
-  });
-  return readJson<User>(res);
+  const { data } = await publicApi.post<User>("/auth/register", { email, password });
+  return data;
 }
 
 export async function login(email: string, password: string): Promise<TokenResponse> {
-  const res = await fetch(`${API_URL}/auth/login`, {
-    method: "POST",
-    headers: jsonHeaders,
-    credentials: "include", // 讓瀏覽器存下後端回傳的 refresh token cookie
-    body: JSON.stringify({ email, password }),
-  });
-  return readJson<TokenResponse>(res);
+  const { data } = await publicApi.post<TokenResponse>("/auth/login", { email, password });
+  return data;
 }
 
 export async function logout(): Promise<void> {
   // 靠 cookie 找到要刪的 refresh token，不需要 access token
-  await fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include" });
+  await publicApi.post("/auth/logout");
 }
 
-// ---------- 需要登入的 API：用 apiFetch（自動帶 token、自動 refresh）----------
+// ---------- 需要登入的 API：用 api（自動帶 token、自動 refresh）----------
 
 export async function getMe(): Promise<User> {
-  return readJson<User>(await apiFetch("/me"));
+  const { data } = await api.get<User>("/me");
+  return data;
 }
 
 export async function logoutAll(): Promise<void> {
-  return readJson<void>(await apiFetch("/auth/logout-all", { method: "POST" }));
+  await api.post("/auth/logout-all");
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<TokenResponse> {
-  const res = await apiFetch("/auth/change-password", {
-    method: "POST",
-    headers: jsonHeaders,
-    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  const { data } = await api.post<TokenResponse>("/auth/change-password", {
+    current_password: currentPassword,
+    new_password: newPassword,
   });
-  return readJson<TokenResponse>(res);
+  return data;
 }

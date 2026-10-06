@@ -10,7 +10,7 @@ export function UserPanel() {
   const handleReload = async () => {
     setMessage("");
     try {
-      // 走 apiFetch：token 過期時會自動 refresh，可以在 Network 觀察
+      // 走 api（axios 攔截器）：token 過期時會自動 refresh，可以在 Network 觀察
       await reloadUser();
     } catch (error) {
       setMessage(getErrorMessage(error));

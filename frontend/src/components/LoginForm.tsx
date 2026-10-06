@@ -19,7 +19,7 @@ export function LoginForm({ defaultEmail = "" }: { defaultEmail?: string }) {
     if (!canLogin) return;
     setMessage("");
     try {
-      // 成功後 AuthProvider 更新狀態 → GuestOnly 發現已登入，自動導到首頁（或原本想去的頁面）
+      // 成功後 store 更新為已登入 → GuestOnly 發現已登入，自動導到首頁（或原本想去的頁面）
       await login(email, password);
     } catch (error) {
       setMessage(`登入失敗：${getErrorMessage(error)}`);

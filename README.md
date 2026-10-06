@@ -32,9 +32,9 @@ jwt-auth-demo/
     │   └── AppLayout.tsx  # 所有頁面共用的導覽列
     ├── pages/             # 每個網址一個頁面：登入、註冊、首頁、帳號設定、404
     ├── api/
-    │   ├── client.ts      # token 存放、refresh（single-flight）、apiFetch（401 自動 refresh）
+    │   ├── client.ts      # axios 設定：自動帶 token、401 自動 refresh（single-flight）
     │   └── auth.ts        # 每個登入相關 API 一個函式：login()、getMe()……
-    ├── auth/              # 登入狀態（AuthProvider、useAuth）與守門員（RequireAuth、GuestOnly）
+    ├── auth/              # 登入狀態（Zustand store、useAuth）與守門員（RequireAuth、GuestOnly）
     └── components/        # 頁面裡的零件：登入表單、註冊表單、修改密碼……
 ```
 
