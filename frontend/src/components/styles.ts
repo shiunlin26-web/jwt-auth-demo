@@ -9,8 +9,6 @@ export const inputStyle: CSSProperties = {
   boxSizing: "border-box",
 };
 
-export const rowStyle: CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap" };
-
 export function hintStyle(isError: boolean): CSSProperties {
   return { fontSize: 12, margin: "0 0 8px", color: isError ? "crimson" : "gray" };
 }

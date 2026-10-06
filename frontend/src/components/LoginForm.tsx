@@ -1,32 +1,17 @@
-/** 【關卡 6】未登入時顯示：註冊與登入表單 */
+/** 【關卡 6】登入表單（關卡 7：註冊拆到 RegisterForm，各自一個頁面） */
 import { useState, type FormEvent } from "react";
-import { register } from "../api/auth";
 import { getErrorMessage } from "../api/client";
 import { useAuth } from "../auth/useAuth";
-import { getPasswordError, PASSWORD_HINT } from "../utils/password";
-import { hintStyle, inputStyle, rowStyle } from "./styles";
+import { inputStyle } from "./styles";
 
-export function LoginForm() {
+export function LoginForm({ defaultEmail = "" }: { defaultEmail?: string }) {
   const { login } = useAuth();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(defaultEmail);
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
 
-  const passwordError = password === "" ? null : getPasswordError(password);
-  const hasEmail = email.trim() !== "";
-  // 註冊：要符合密碼規則；登入：有填就好（規則只在設定密碼時檢查）
-  const canRegister = hasEmail && password !== "" && passwordError === null;
-  const canLogin = hasEmail && password !== "";
-
-  const handleRegister = async () => {
-    setMessage("");
-    try {
-      const user = await register(email, password);
-      setMessage(`註冊成功：${user.email}，可以登入了`);
-    } catch (error) {
-      setMessage(`註冊失敗：${getErrorMessage(error)}`);
-    }
-  };
+  // 登入只要有填就好（密碼規則只在設定密碼時檢查，關卡 0）
+  const canLogin = email.trim() !== "" && password !== "";
 
   // 用 <form> 的 onSubmit，在密碼框按 Enter 也能登入
   const handleLogin = async (event: FormEvent) => {
@@ -34,7 +19,8 @@ export function LoginForm() {
     if (!canLogin) return;
     setMessage("");
     try {
-      await login(email, password); // 成功後 AuthProvider 會更新狀態，App 自動切換畫面
+      // 成功後 AuthProvider 更新狀態 → GuestOnly 發現已登入，自動導到首頁（或原本想去的頁面）
+      await login(email, password);
     } catch (error) {
       setMessage(`登入失敗：${getErrorMessage(error)}`);
     }
@@ -50,17 +36,9 @@ export function LoginForm() {
         onChange={(e) => setPassword(e.target.value)}
         style={inputStyle}
       />
-      <p style={hintStyle(passwordError !== null)}>{passwordError ?? PASSWORD_HINT}</p>
-
-      <div style={rowStyle}>
-        <button type="button" onClick={handleRegister} disabled={!canRegister}>
-          註冊
-        </button>
-        <button type="submit" disabled={!canLogin}>
-          登入
-        </button>
-      </div>
-
+      <button type="submit" disabled={!canLogin}>
+        登入
+      </button>
       {message && <p style={{ color: "crimson" }}>{message}</p>}
     </form>
   );

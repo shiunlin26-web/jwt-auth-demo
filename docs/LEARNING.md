@@ -40,7 +40,13 @@
 | 4 | pytest 寫測試 | 學 Python 最好的方法，也能自動驗證前面幾關 | ✅ 完成 |
 | 5 | Alembic 資料庫遷移 | 為什麼不能一直用 `create_all` | ✅ 完成 |
 | 6 | 前端拆成 `api/` + `auth/` + `components/` | 之後其他專案可以直接複製這一套 | ✅ 完成 |
-| 7（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
+| 7 | React Router：多頁面、需要登入的頁面 | 路由、守門員元件 | ✅ 完成 |
+| 8 | Zustand + axios | 用套件取代手寫的登入狀態與 apiFetch | ⬜ |
+| 9 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ⬜ |
+| 10 | Zod + React Hook Form | 表單驗證 | ⬜ |
+| 11 | Tailwind CSS | 樣式 | ⬜ |
+| 12 | Vitest + MSW | 前端自動化測試 | ⬜ |
+| 13（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
 
 ---
 
@@ -1550,7 +1556,241 @@ export async function getPosts(): Promise<Post[]> {
 
 ---
 
-## 關卡 7（選做）
+## 關卡 7：多頁面與保護路由（React Router）✅
+
+**改動的檔案**：`frontend/package.json`（新增 `react-router`）、`frontend/src/`：新增 `app/`、`pages/`、`auth/RequireAuth.tsx`、`auth/GuestOnly.tsx`、`components/RegisterForm.tsx`，改寫 `main.tsx`、`LoginForm.tsx`、`UserPanel.tsx`，刪除 `App.tsx`
+
+### 一句話
+
+**從「只有一頁」變成「有網址的多個頁面」，而且沒登入的人進不去需要登入的頁面。**
+
+### 前端模板路線（關卡 7 起）
+
+從這關開始，一關加一個業界常用的套件，把前端變成之後所有專案的基礎模板。每一關都會對照「手寫版 vs 套件版」，原理是前面幾關學過的。
+
+| 關卡 | 套件 | 取代 / 新增 |
+| --- | --- | --- |
+| **7** | **React Router** | 多頁面、需要登入的頁面 |
+| 8 | Zustand + axios | 取代手寫的 AuthContext、apiFetch |
+| 9 | TanStack Query | 管理從後端拿來的資料（快取、loading、錯誤） |
+| 10 | Zod + React Hook Form | 取代手寫的表單驗證 |
+| 11 | Tailwind CSS | 取代 inline style |
+| 12 | Vitest + MSW | 前端自動化測試 |
+
+### 用情境看懂
+
+**情境 1：沒登入，直接打開 `http://localhost:5173/settings`**
+
+```
+React Router：「/settings 歸 RequireAuth 管。」
+RequireAuth：「這個人沒登入，送他去 /login，順便記下他原本要去 /settings。」
+→ 畫面變成登入頁
+```
+
+**情境 2：在登入頁登入成功**
+
+```
+LoginForm：呼叫 login()，登入成功 → AuthProvider 的狀態變成「已登入」
+GuestOnly（管登入頁的守門員）：「已登入的人不該待在登入頁，他原本要去 /settings，送他過去。」
+→ 畫面變成帳號設定頁
+```
+
+**LoginForm 完全沒寫「登入後跳到哪一頁」**，是守門員看到狀態改變後自動處理的。
+
+**情境 3：在帳號設定頁按「登出所有裝置」**
+
+```
+SettingsPage：呼叫 logoutAll() → 狀態變成「未登入」
+RequireAuth：「這個人沒登入了，送他去 /login。」
+```
+
+一樣，SettingsPage 也沒寫跳轉。**只要登入狀態一變，守門員就會把人送到該去的地方**。登入過期（第 6 關情境 5）也是同樣的機制。
+
+**情境 4：註冊成功**
+
+```
+RegisterForm：註冊成功 → 呼叫 RegisterPage 給它的 onSuccess
+RegisterPage：navigate("/login", { state: { registeredEmail: email } })
+LoginPage：從 state 拿到 email → 自動填進 email 欄位，顯示「註冊成功，請登入」
+```
+
+### 頁面一覽
+
+| 網址 | 頁面 | 誰能進 |
+| --- | --- | --- |
+| `/login` | 登入 | 只有未登入的人（已登入會被送回首頁） |
+| `/register` | 註冊 | 只有未登入的人 |
+| `/` | 首頁：問候、使用者資料 | 需要登入 |
+| `/settings` | 帳號設定：修改密碼、登出所有裝置 | 需要登入 |
+| 其他 | 404 找不到頁面 | 所有人 |
+
+導覽列（上方）在每一頁都會出現：已登入時顯示「首頁、帳號設定、email、登出」，未登入時顯示「登入、註冊」。
+
+### 新的檔案結構
+
+```
+frontend/src/
+├── app/
+│   ├── router.tsx        ⭐ 路由表：哪個網址顯示哪個頁面
+│   └── AppLayout.tsx     所有頁面共用的外框：導覽列 + 提示訊息
+├── pages/                ⭐ 每個網址一個頁面
+│   ├── LoginPage.tsx
+│   ├── RegisterPage.tsx
+│   ├── HomePage.tsx
+│   ├── SettingsPage.tsx
+│   └── NotFoundPage.tsx
+├── auth/
+│   ├── RequireAuth.tsx   ⭐ 守門員：需要登入
+│   ├── GuestOnly.tsx     ⭐ 守門員：只給未登入的人
+│   └── （AuthContext、AuthProvider、useAuth 不變）
+├── components/           頁面裡用到的零件
+│   ├── LoginForm.tsx     （拆成只有登入）
+│   ├── RegisterForm.tsx  （從 LoginForm 拆出來）
+│   ├── UserPanel.tsx
+│   └── ChangePasswordForm.tsx
+└── main.tsx              用 RouterProvider 取代原本的 <App />
+```
+
+**`pages/` 和 `components/` 的差別**：`pages/` 是「一個網址對應的整個頁面」，`components/` 是「頁面裡的零件」，同一個零件可以放在不同頁面。
+
+### 程式怎麼寫
+
+#### 路由表 `app/router.tsx`
+
+```tsx
+export const router = createBrowserRouter([
+  {
+    element: <AppLayout />,              // 外框（導覽列）
+    children: [
+      {
+        element: <GuestOnly />,          // 守門員：只給未登入的人
+        children: [
+          { path: "/login", element: <LoginPage /> },
+          { path: "/register", element: <RegisterPage /> },
+        ],
+      },
+      {
+        element: <RequireAuth />,        // 守門員：需要登入
+        children: [
+          { path: "/", element: <HomePage /> },
+          { path: "/settings", element: <SettingsPage /> },
+        ],
+      },
+      { path: "*", element: <NotFoundPage /> },   // * = 其他所有網址
+    ],
+  },
+]);
+```
+
+**讀法**：外層的 `element` 會**包住**裡面的 `children`。打開 `/settings` 時，畫面是一層一層包起來的：
+
+```
+AppLayout（導覽列）
+  └ RequireAuth（檢查登入）
+      └ SettingsPage（頁面內容）
+```
+
+**新增一個需要登入的頁面**：在 `pages/` 建立元件，加到 `RequireAuth` 的 `children` 裡就好，不用另外寫任何檢查。
+
+#### `<Outlet />`：「子頁面放這裡」
+
+`AppLayout`、`RequireAuth`、`GuestOnly` 裡都有 `<Outlet />`，意思是「裡面那一層要顯示在這個位置」。就像相框：相框（`AppLayout`）固定不變，裡面的照片（頁面）會換。
+
+#### 守門員 `auth/RequireAuth.tsx`
+
+```tsx
+export function RequireAuth() {
+  const { status } = useAuth();
+  const location = useLocation();
+
+  if (status === "loading") return <p>載入中...</p>;
+
+  if (status === "unauthenticated") {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  return <Outlet />;
+}
+```
+
+- **`useLocation()`**：拿到目前的網址資訊，`location.pathname` 就是 `/settings` 這種路徑
+- **`<Navigate to="/login" />`**：畫出這個元件 = 換到 `/login`
+  - **`replace`**：取代目前這一筆瀏覽紀錄。不加的話，按「上一頁」會回到 `/settings`，又被送回 `/login`，卡在迴圈裡
+  - **`state={{ from: ... }}`**：附帶給下一頁的資料，這裡記住「原本想去哪」
+- **`<Outlet />`**：已登入，就顯示裡面的頁面
+
+`GuestOnly.tsx` 是反過來的：已登入就送走（送到 `state.from`，沒有就送到首頁），未登入才顯示裡面的頁面。
+
+#### 換頁的三種方式
+
+| 寫法 | 什麼時候用 | 例子 |
+| --- | --- | --- |
+| `<Link to="/register">` | 一般連結 | 「還沒有帳號？註冊」 |
+| `<NavLink to="/settings">` | 導覽列，會知道「現在是不是這一頁」 | 目前所在的頁面會加粗 |
+| `navigate("/login")` | 在程式裡換頁 | 註冊成功後跳到登入頁 |
+| `<Navigate to="/login" />` | 畫面一出現就換頁 | 守門員把人送走 |
+
+⚠️ **不要用 `<a href="...">`**。`<a>` 會讓瀏覽器**重新載入整個頁面**，記憶體裡的 access token 就沒了（又要 refresh 一次）。`<Link>` 只換畫面，不重新載入。
+
+### 一個部署時才會遇到的事
+
+開發時（`npm run dev`）直接打開 `http://localhost:5173/settings` 沒問題。但正式部署到靜態網站主機時，主機會去找一個叫 `settings` 的檔案，找不到就回 404。要在主機設定「**所有網址都回傳 `index.html`**」，交給 React Router 處理。每個平台的設定方式不同（Netlify、Vercel、Nginx……），部署時再查就好，現在先知道有這回事。
+
+### 驗證方式
+
+1. **沒登入時**直接在網址列輸入 `http://localhost:5173/settings` → 被送到登入頁
+2. 登入 → **自動回到** `/settings`（不是首頁）
+3. 已登入時輸入 `http://localhost:5173/login` → 被送回首頁
+4. 點導覽列的「首頁」「帳號設定」切換，目前所在的頁面會加粗
+5. 輸入不存在的網址，例如 `/abc` → 404 頁面
+6. 註冊新帳號 → 自動跳到登入頁，email 已經填好
+7. 在帳號設定頁按「登出所有裝置」或導覽列的「登出」→ 自動回到登入頁
+
+### 動手玩
+
+1. **加一個需要登入的頁面**（照著現有的頁面寫，很短）：
+   - 建立 `pages/AboutPage.tsx`：
+     ```tsx
+     export function AboutPage() {
+       return <h2>關於這個專案</h2>;
+     }
+     ```
+   - 在 `app/router.tsx` 上方加上 `import { AboutPage } from "../pages/AboutPage";`，然後在 `RequireAuth` 的 `children` 裡加一行 `{ path: "/about", element: <AboutPage /> },`
+   - 在 `app/AppLayout.tsx` 的導覽列加一個 `<NavLink to="/about" style={navLinkStyle}>關於</NavLink>`
+   - 登出後直接打開 `/about`，會被送到登入頁；登入後自動回到 `/about`。**你沒有寫任何登入檢查，守門員就自動保護了它。**
+2. **`<a>` 和 `<Link>` 的差別**：把 `LoginPage.tsx` 裡的 `<Link to="/register">` 改成 `<a href="/register">`，打開 DevTools 的 Network，點連結。會看到整個頁面重新下載。改回來。
+3. **拿掉 `replace` 會怎樣**：把 `RequireAuth.tsx` 的 `replace` 刪掉，登出後打開 `/settings`（被送到登入頁），再按瀏覽器的「上一頁」，觀察發生什麼事。改回來。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼登入成功後跳轉，不寫在 LoginForm 裡，而是交給 GuestOnly？</summary>
+
+如果寫在 LoginForm 裡，那「登入過期」「登出」「登出所有裝置」「在別的地方登入」……每個會改變登入狀態的地方，都要記得自己寫跳轉，很容易漏。
+
+交給守門員的話，規則只有一條：「**狀態是什麼，就該在什麼頁面**」。不管狀態是怎麼改變的，守門員都會處理。跟第 6 關「`status` 用算的，不另外存」是一樣的想法。
+
+</details>
+
+<details>
+<summary>Q2：前端擋住了「沒登入不能進 /settings」，這樣就安全了嗎？</summary>
+
+**不是。** 前端的守門員只是讓使用者體驗比較好，**任何人都可以繞過**（例如直接用 curl 呼叫 API）。真正的保護在後端：`/me`、`/auth/change-password` 這些 API 都有 `Depends(get_current_user)`，沒有有效的 access token 就回 401。
+
+跟第 0 關「前端檢查密碼是體驗，後端檢查才是安全」是同樣的道理。
+
+</details>
+
+<details>
+<summary>Q3：為什麼守門員在 <code>status === "loading"</code> 時要顯示「載入中」，不能直接當成未登入？</summary>
+
+App 剛啟動時，還在用 refresh token 確認是否登入過，這時候 `status` 是 `loading`。如果當成未登入，已經登入的人一重新整理 `/settings`，就會先被送到 `/login`，等確認完又被送回來，畫面會閃一下，網址也會亂掉。等確認完再決定，才不會誤判。
+
+</details>
+
+---
+
+## 關卡 8 ～ 13
 
 做到時再補上詳細內容。
 

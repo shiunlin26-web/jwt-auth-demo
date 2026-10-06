@@ -30,7 +30,7 @@ export function ChangePasswordForm() {
 
   return (
     <form onSubmit={handleSubmit}>
-      <h3 style={{ marginTop: 24 }}>修改密碼</h3>
+      <h3>修改密碼</h3>
       <input
         placeholder="目前密碼"
         type="password"

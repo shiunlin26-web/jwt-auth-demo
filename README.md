@@ -27,12 +27,15 @@ jwt-auth-demo/
 │   ├── requirements-dev.txt  # 測試用套件
 │   └── .env.example
 └── frontend/src/
+    ├── app/
+    │   ├── router.tsx     # 路由表：哪個網址顯示哪個頁面、哪些頁面要登入
+    │   └── AppLayout.tsx  # 所有頁面共用的導覽列
+    ├── pages/             # 每個網址一個頁面：登入、註冊、首頁、帳號設定、404
     ├── api/
     │   ├── client.ts      # token 存放、refresh（single-flight）、apiFetch（401 自動 refresh）
     │   └── auth.ts        # 每個登入相關 API 一個函式：login()、getMe()……
-    ├── auth/              # 登入狀態：AuthProvider（啟動時恢復登入）、useAuth()
-    ├── components/        # 畫面：登入表單、使用者資料、修改密碼
-    └── App.tsx            # 依登入狀態切換畫面
+    ├── auth/              # 登入狀態（AuthProvider、useAuth）與守門員（RequireAuth、GuestOnly）
+    └── components/        # 頁面裡的零件：登入表單、註冊表單、修改密碼……
 ```
 
 ## 需要先安裝
@@ -138,15 +141,17 @@ npm run dev
 
 ## 4. 試玩流程
 
-1. 輸入 Email 與密碼（8～72 個英文字母、數字或符號）→ 按「註冊」
-2. 按「登入」→ 拿到 access token（存在記憶體），refresh token 以 httpOnly cookie 存在瀏覽器
-3. 按「取得我的資料」→ 帶 `Authorization: Bearer <token>` 呼叫 `/me`
+1. 到「註冊」頁輸入 Email 與密碼（8～72 個英文字母、數字或符號）→ 註冊成功後自動跳到登入頁
+2. 登入 → 拿到 access token（存在記憶體），refresh token 以 httpOnly cookie 存在瀏覽器，進到首頁
+3. 首頁會帶 `Authorization: Bearer <token>` 呼叫 `/me`，顯示使用者資料
 4. **重新整理頁面** → 前端啟動時呼叫 `/auth/refresh`，靠 cookie 自動恢復登入
-5. 按「登出」→ 刪掉 DB 裡的 refresh token 並清 cookie
+5. 「帳號設定」頁可以修改密碼、登出所有裝置
+6. 按導覽列的「登出」→ 刪掉 DB 裡的 refresh token 並清 cookie，回到登入頁
+7. 沒登入時直接打開 `/settings` → 被導到登入頁，登入後自動回到 `/settings`
 
 ### 想觀察 access token 過期後自動 refresh？
 
-在 `backend/.env` 加上 `JWT_EXPIRE_MINUTES=1`，重啟後端。登入後等一分鐘再按「取得我的資料」，
+在 `backend/.env` 加上 `JWT_EXPIRE_MINUTES=1`，重啟後端。登入後等一分鐘再按首頁的「重新取得我的資料」，
 打開瀏覽器 DevTools → Network，會看到：
 
 ```
