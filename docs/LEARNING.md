@@ -411,7 +411,7 @@ JWT 是 `header.payload.signature` 三段，前兩段只是 Base64 編碼，**�
 1. 安裝新套件：
    ```bash
    cd backend
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt
    ```
 2. **檢查 `backend/.env` 的 `JWT_SECRET` 有沒有至少 32 個字元。** 太短的話後端會起不來，用這行產生一個新的：
    ```bash

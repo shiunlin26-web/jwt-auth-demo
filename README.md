@@ -42,18 +42,30 @@ jwt-auth-demo/
 
 | 工具 | 版本 |
 | --- | --- |
-| Python | 3.10 以上（程式有用到 `int \| None` 語法） |
-| Node.js | 20 以上 |
+| Python | 3.10 以上（程式有用到 `int \| None` 語法），用 `python --version` 確認 |
+| Node.js | **22.22 以上**（React Router 8 的要求），用 `node -v` 確認 |
 | PostgreSQL | 用 [Neon](https://neon.tech) 免費雲端資料庫，或本地 Postgres（見下方） |
 
 ## 1. 準備資料庫（二選一）
 
 ### A. 使用 Neon（原本的做法）
 
-在 Neon 建一個專案，複製連線字串，**把開頭改成 `postgresql+asyncpg://`**，並把 `sslmode=require` 改成 `ssl=require`（asyncpg 不認得 `sslmode`）：
+在 Neon 建一個專案，按 **Connect** 複製連線字串，長得像這樣：
 
 ```
-postgresql+asyncpg://<user>:<password>@<host>/<dbname>?ssl=require
+postgresql://neondb_owner:xxxx@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+```
+
+要改三個地方（後端用的 asyncpg 不認得 `sslmode` 和 `channel_binding`）：
+
+1. 開頭 `postgresql://` 改成 `postgresql+asyncpg://`
+2. `sslmode=require` 改成 `ssl=require`
+3. 刪掉 `&channel_binding=require`
+
+改完：
+
+```
+postgresql+asyncpg://neondb_owner:xxxx@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?ssl=require
 ```
 
 ### B. 使用本地 Postgres（Docker）
@@ -79,16 +91,25 @@ postgresql+asyncpg://postgres:postgres@localhost:5432/jwtdemo
 ```bash
 cd backend
 
-# 建立並啟用虛擬環境
+# 建立虛擬環境（只有第一次需要）
 python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+
+# 啟用虛擬環境（每次開新的終端機都要做）
+source venv/bin/activate          # macOS / Linux
+.\venv\Scripts\Activate.ps1       # Windows PowerShell
 
 # 安裝套件
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 # 建立 .env
 cp .env.example .env              # Windows: copy .env.example .env
 ```
+
+> ⚠️ **先啟用 venv，再做其他事。** 提示字元前面出現 `(venv)` 才算啟用成功。沒啟用就 `pip install`，套件會裝到系統的 Python（畫面會出現 `Defaulting to user installation`），之後執行時就會找不到套件。
+>
+> Windows 啟用時如果出現「**已停用指令碼執行**」，先執行一次 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` 再重試。
+>
+> 用 `python -m pip`，而不是直接打 `pip`：確保套件裝進「目前這個 python」，也就是 venv 裡的 python。
 
 編輯 `backend/.env`，**必填的只有兩個**：
 
@@ -106,7 +127,7 @@ JWT_SECRET=至少32個字元的隨機字串
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-建立資料表（第一次，以及之後每次 `git pull` 有新的遷移檔時都要跑）：
+建立資料表（第一次，以及之後每次 `git pull` 有新的遷移檔時都要跑；要在 `backend` 資料夾、有 `(venv)` 的狀態下執行）：
 
 ```bash
 alembic upgrade head
@@ -162,7 +183,12 @@ GET  /me            → 200（用新 token 重試）
 
 ## 5. 跑測試（選用）
 
-測試會清空資料表，所以要用**另一個資料庫**。在 Neon 的 SQL Editor 執行 `CREATE DATABASE jwtdemo_test;`，再到 `backend/.env` 加上：
+測試會清空資料表，所以要用**另一個資料庫**：
+
+- Neon：到 SQL Editor 執行 `CREATE DATABASE jwtdemo_test;`
+- Docker：`docker exec -it jwt-demo-db psql -U postgres -c "CREATE DATABASE jwtdemo_test;"`
+
+再到 `backend/.env` 加上：
 
 ```env
 TEST_DATABASE_URL=postgresql+asyncpg://...（資料庫名稱改成 jwtdemo_test）
@@ -195,9 +221,19 @@ python -m pytest
 | --- | --- | --- |
 | 格式 | JWT（HS256） | 隨機字串（`secrets.token_urlsafe`） |
 | 有效期 | `JWT_EXPIRE_MINUTES`（預設 30 分鐘） | `REFRESH_TOKEN_EXPIRE_DAYS`（預設 7 天） |
-| 存放 | 前端記憶體（React state / ref） | httpOnly cookie（`path=/auth`），DB 只存 SHA-256 雜湊 |
+| 存放 | 前端記憶體（Zustand store，重新整理就消失） | httpOnly cookie（`path=/auth`），DB 只存 SHA-256 雜湊 |
 | 用途 | 呼叫受保護 API | 換新的 access token |
 | 輪替 | – | 每次 refresh 都發新的、舊的作廢；舊的被重複使用 → 該使用者所有 refresh token 全部撤銷 |
+
+## 每次 `git pull` 之後
+
+拿到新的程式碼後，視情況做這幾件事（不確定就全部跑一次，已經是最新的會自動跳過）：
+
+| 改了什麼 | 要做什麼 |
+| --- | --- |
+| `backend/requirements.txt` | 在 `backend`、有 `(venv)`：`python -m pip install -r requirements.txt` |
+| `backend/migrations/versions/` 多了新檔案 | 在 `backend`、有 `(venv)`：`alembic upgrade head` |
+| `frontend/package.json` | 在 `frontend`：`npm install` |
 
 ## 學習路線
 
@@ -205,8 +241,24 @@ python -m pytest
 
 ## 常見問題
 
-- **`TypeError: connect() got an unexpected keyword argument 'sslmode'` / 連不到 DB**：檢查 `DATABASE_URL` 開頭是不是 `postgresql+asyncpg://`，Neon 要用 `ssl=require` 而不是 `sslmode=require`。
+**安裝、啟動相關**
+
+- **`ModuleNotFoundError: No module named 'xxx'`**（例如 `pydantic_settings`、`pytest`、`sqlalchemy`）：
+  1. 看提示字元前面有沒有 `(venv)`，沒有就先啟用 venv
+  2. 啟用後重新安裝：`python -m pip install -r requirements.txt`（跑測試的話再加 `-r requirements-dev.txt`）
+- **`The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed`**：SQLAlchemy 2.1 起不再自動安裝 `greenlet`。`requirements.txt` 已經寫了 `sqlalchemy[asyncio]`，重新跑一次 `python -m pip install -r requirements.txt` 就好。
+- **啟動後端時出現 `ValidationError ... jwt_secret ... at least 32 characters`**：`.env` 的 `JWT_SECRET` 太短，用上面的指令重新產生一個。
+- **啟動後端時出現 `ValidationError ... Field required`**：`.env` 少了必填的設定（`DATABASE_URL` 或 `JWT_SECRET`），或是 `.env` 不在 `backend` 資料夾裡。
+- **`npm install` 出現 `EBADENGINE` 警告**：Node.js 版本太舊，請更新到 22.22 以上。
+
+**資料庫相關**
+
+- **`TypeError: connect() got an unexpected keyword argument 'sslmode'`（或 `'channel_binding'`）**：`DATABASE_URL` 要照「1. 準備資料庫」改過：開頭 `postgresql+asyncpg://`、`ssl=require`、刪掉 `channel_binding`。
+- **`socket.gaierror: getaddrinfo failed`**：連不到資料庫主機。通常是 `.env` 還是範本內容（主機名稱是 `host`），或 Neon 的主機名稱沒複製完整。
 - **`relation "user" does not exist` / `column ... does not exist`**：資料表還沒建立或不是最新版本，在 `backend` 執行 `alembic upgrade head`。
+
+**前端相關**
+
 - **前端 console 出現 CORS 錯誤**：確認網址是 `http://localhost:5173`，而且後端有在 8000 port 跑。
 - **重新整理後沒有自動登入**：DevTools → Application → Cookies 看 `http://localhost:8000` 底下有沒有 `refresh_token`；如果剛剛是用 `127.0.0.1` 開的，換成 `localhost` 再登入一次。
 - **5173 被占用**：Vite 會自動改用 5174，但 CORS 預設只允許 5173，請先關掉占用的程式，或在 `backend/.env` 設定 `CORS_ORIGINS=http://localhost:5173,http://localhost:5174`。
