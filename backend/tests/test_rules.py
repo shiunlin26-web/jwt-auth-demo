@@ -11,7 +11,6 @@ from pydantic import ValidationError
 from schemas import UserCreate, UserLogin, check_password_chars
 from security import hash_password, hash_token, verify_password
 
-
 # ---------- 關卡 0：密碼規則 ----------
 
 def test_英數符號密碼可以通過():

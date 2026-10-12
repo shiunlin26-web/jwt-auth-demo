@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy import delete
 from sqlmodel import select
@@ -7,17 +8,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from config import settings
 from database import get_session
 from dependencies import get_current_user
-from models import User, RefreshToken
-from schemas import UserCreate, UserLogin, UserRead, Token, ChangePasswordRequest
+from models import RefreshToken, User
+from schemas import ChangePasswordRequest, Token, UserCreate, UserLogin, UserRead
 from security import (
-    hash_password,
-    verify_password,
     create_access_token,
     create_refresh_token,
-    refresh_token_expiry,
+    hash_password,
     hash_token,
+    refresh_token_expiry,
+    verify_password,
 )
-
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

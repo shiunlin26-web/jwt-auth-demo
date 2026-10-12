@@ -8,15 +8,15 @@ fixture 是什麼？「測試開始前幫你準備好的東西」。
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
-from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+import models  # noqa: F401  確保資料表定義都有載入，create_all 才知道要建哪些表
 from config import settings
 from database import get_session
 from main import app
-import models  # noqa: F401  確保資料表定義都有載入，create_all 才知道要建哪些表
 
 # ---------- 安全檢查：絕對不能拿正式資料庫來跑測試 ----------
 if not settings.test_database_url:

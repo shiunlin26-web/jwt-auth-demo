@@ -23,9 +23,12 @@ jwt-auth-demo/
 │   ├── alembic.ini        # Alembic（資料庫遷移）設定
 │   ├── migrations/        # 資料庫遷移檔，記錄資料表結構的每一次變更
 │   ├── tests/             # pytest 自動化測試
-│   ├── requirements.txt
-│   ├── requirements-dev.txt  # 測試用套件
+│   ├── pyproject.toml     # 套件清單 + ruff 設定（用 uv 安裝）
+│   ├── uv.lock            # 鎖定每個套件的實際版本，本機 / CI / Docker 裝出來一模一樣
+│   ├── Dockerfile         # 把後端打包成 image（部署用）
+│   ├── .dockerignore      # build image 時排除 .env、.venv 等
 │   └── .env.example
+├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pytest、Docker build、前端 build
 └── frontend/src/
     ├── app/
     │   ├── router.tsx     # 路由表：哪個網址顯示哪個頁面、哪些頁面要登入
@@ -42,7 +45,8 @@ jwt-auth-demo/
 
 | 工具 | 版本 |
 | --- | --- |
-| Python | 3.10 以上（程式有用到 `int \| None` 語法），用 `python --version` 確認 |
+| Python | 3.10 以上（程式有用到 `int \| None` 語法），用 `python --version` 確認。沒有的話 uv 會自動幫你下載 |
+| uv | Python 的套件管理工具（取代 pip + venv）。安裝方式見 [uv 官方文件](https://docs.astral.sh/uv/getting-started/installation/)：macOS / Linux 用 `curl -LsSf https://astral.sh/uv/install.sh \| sh`，Windows PowerShell 用 `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"`。裝完用 `uv --version` 確認 |
 | Node.js | **22.22 以上**（React Router 8 的要求），用 `node -v` 確認 |
 | PostgreSQL | 用 [Neon](https://neon.tech) 免費雲端資料庫，或本地 Postgres（見下方） |
 
@@ -91,25 +95,18 @@ postgresql+asyncpg://postgres:postgres@localhost:5432/jwtdemo
 ```bash
 cd backend
 
-# 建立虛擬環境（只有第一次需要）
-python -m venv venv
-
-# 啟用虛擬環境（每次開新的終端機都要做）
-source venv/bin/activate          # macOS / Linux
-.\venv\Scripts\Activate.ps1       # Windows PowerShell
-
-# 安裝套件
-python -m pip install -r requirements.txt
+# 安裝套件（第一次，以及之後 pyproject.toml / uv.lock 有變時）
+# 會自動建立 backend/.venv 並照 uv.lock 安裝所有套件（含測試用的）
+uv sync
 
 # 建立 .env
 cp .env.example .env              # Windows: copy .env.example .env
 ```
 
-> ⚠️ **先啟用 venv，再做其他事。** 提示字元前面出現 `(venv)` 才算啟用成功。沒啟用就 `pip install`，套件會裝到系統的 Python（畫面會出現 `Defaulting to user installation`），之後執行時就會找不到套件。
+> **不用再手動啟用 venv。** 之後所有指令都用 `uv run <指令>` 執行（例如 `uv run pytest`），
+> uv 會自動用 `backend/.venv` 裡的 Python 和套件，Windows、macOS 都一樣，也不會有「指令碼執行被停用」的問題。
 >
-> Windows 啟用時如果出現「**已停用指令碼執行**」，先執行一次 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` 再重試。
->
-> 用 `python -m pip`，而不是直接打 `pip`：確保套件裝進「目前這個 python」，也就是 venv 裡的 python。
+> 以前用 `python -m venv venv` 建的舊 `venv/` 資料夾可以直接刪掉。
 
 編輯 `backend/.env`，**必填的只有兩個**：
 
@@ -127,16 +124,16 @@ JWT_SECRET=至少32個字元的隨機字串
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-建立資料表（第一次，以及之後每次 `git pull` 有新的遷移檔時都要跑；要在 `backend` 資料夾、有 `(venv)` 的狀態下執行）：
+建立資料表（第一次，以及之後每次 `git pull` 有新的遷移檔時都要跑；在 `backend` 資料夾執行）：
 
 ```bash
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 啟動：
 
 ```bash
-uvicorn main:app --reload --port 8000
+uv run uvicorn main:app --reload --port 8000
 ```
 
 確認：
@@ -196,11 +193,21 @@ TEST_DATABASE_URL=postgresql+asyncpg://...（資料庫名稱改成 jwtdemo_test�
 
 ```bash
 cd backend
-python -m pip install -r requirements-dev.txt
-python -m pytest
+uv run pytest
 ```
 
 詳細說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 4。
+
+## 6. 程式碼檢查（ruff）與 CI
+
+```bash
+cd backend
+uv run ruff check .          # 找出沒用到的 import、排序錯的 import、常見 bug 寫法
+uv run ruff check --fix .    # 能自動修的直接修掉
+```
+
+推上 GitHub 之後，`.github/workflows/ci.yml` 會自動跑 ruff、pytest、Docker build 和前端 build，
+結果在 repo 的 **Actions** 分頁看。說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 9。
 
 ## API 一覽
 
@@ -231,8 +238,8 @@ python -m pytest
 
 | 改了什麼 | 要做什麼 |
 | --- | --- |
-| `backend/requirements.txt` | 在 `backend`、有 `(venv)`：`python -m pip install -r requirements.txt` |
-| `backend/migrations/versions/` 多了新檔案 | 在 `backend`、有 `(venv)`：`alembic upgrade head` |
+| `backend/pyproject.toml` 或 `backend/uv.lock` | 在 `backend`：`uv sync` |
+| `backend/migrations/versions/` 多了新檔案 | 在 `backend`：`uv run alembic upgrade head` |
 | `frontend/package.json` | 在 `frontend`：`npm install` |
 
 ## 學習路線
@@ -244,9 +251,10 @@ python -m pytest
 **安裝、啟動相關**
 
 - **`ModuleNotFoundError: No module named 'xxx'`**（例如 `pydantic_settings`、`pytest`、`sqlalchemy`）：
-  1. 看提示字元前面有沒有 `(venv)`，沒有就先啟用 venv
-  2. 啟用後重新安裝：`python -m pip install -r requirements.txt`（跑測試的話再加 `-r requirements-dev.txt`）
-- **`The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed`**：SQLAlchemy 2.1 起不再自動安裝 `greenlet`。`requirements.txt` 已經寫了 `sqlalchemy[asyncio]`，重新跑一次 `python -m pip install -r requirements.txt` 就好。
+  1. 指令前面有沒有加 `uv run`？直接打 `uvicorn`、`pytest` 會用到系統的 Python，找不到套件
+  2. 在 `backend` 重新跑一次 `uv sync`
+- **`uv: command not found` / `The term 'uv' is not recognized`**：還沒安裝 uv，見上方「需要先安裝」。**裝完一定要關掉終端機重開一個**，已經開著的視窗讀不到新的 PATH。重開後還是找不到，用 `$env:Path` 確認裡面有 `C:\Users\<你的帳號>\.local\bin`。
+- **`The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed`**：SQLAlchemy 2.1 起不再自動安裝 `greenlet`。`pyproject.toml` 已經寫了 `sqlalchemy[asyncio]`，在 `backend` 重新跑一次 `uv sync` 就好。
 - **啟動後端時出現 `ValidationError ... jwt_secret ... at least 32 characters`**：`.env` 的 `JWT_SECRET` 太短，用上面的指令重新產生一個。
 - **啟動後端時出現 `ValidationError ... Field required`**：`.env` 少了必填的設定（`DATABASE_URL` 或 `JWT_SECRET`），或是 `.env` 不在 `backend` 資料夾裡。
 - **`npm install` 出現 `EBADENGINE` 警告**：Node.js 版本太舊，請更新到 22.22 以上。

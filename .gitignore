@@ -35,3 +35,6 @@ yarn-error.log*
 pnpm-debug.log*
 # 測試
 .pytest_cache/
+
+# ruff
+.ruff_cache/
