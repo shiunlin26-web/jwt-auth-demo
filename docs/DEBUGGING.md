@@ -53,6 +53,7 @@
 | cookie 看得到，但 `/api/auth/refresh` 的 Request Headers 沒有 Cookie | path 不對：cookie 的 path 是 `/api/auth`，請求路徑不是以它開頭 | 確認前端 baseURL 是 `/api`（不是 `/api/`、不是後端網址） | 10 |
 | Console 出現 CORS 錯誤 | 前端沒走代理、直接打後端網域 | 平常不該出現；確認 `VITE_API_URL` 沒設、`vercel.json` rewrite 正確 | 10 |
 | 直接開 `https://xxx.vercel.app/settings` 是 404，從首頁點過去才正常 | SPA 的路由由前端處理，Vercel 沒有 `/settings` 這個檔案 | `vercel.json` 第二條 rewrite：非 `/api/` 的路徑都回 `index.html` | 10 |
+| 經過 Vercel 的 `/api/...` 全部 404，Response 是純文字 `Not Found`、標頭有 `x-render-routing: no-server`，但直接打 Render 網址是通的 | Vercel 轉發到了一個 Render 不認識的主機名稱。最常見是在 Deployments 按 Redeploy 時選到**最早 Import 的那筆**，它的 `vercel.json` 還是佔位字串 | 推一個 commit 到 main 讓 Vercel 從 git 重新部署；或 Deployments 找最新的 git 部署按 Promote to Production。之後 Redeploy 永遠選最上面那筆 | 10 |
 | 改了 Vercel 的環境變數，網站沒變 | `VITE_*` 變數是 **build 時**打包進去的，改了要重新 build | Deployments → 最新那筆 → Redeploy | 10 |
 | Render Dashboard 找不到以前的服務，以為被新的蓋掉 | 新服務在 Overview 的 Ungrouped Services，舊服務在某個 Project 裡；Project 只是分組 | 點 My projects；或把新服務 Move to project | 10 |
 | 推了程式碼，Vercel 有部署、Render 沒有 | Render 只看 `render.yaml` 的 `branch: main`；或 Render 的 Auto-Deploy 被關掉 | 確認推的是 main；Render 服務 Settings → Build & Deploy → Auto-Deploy | 10 |

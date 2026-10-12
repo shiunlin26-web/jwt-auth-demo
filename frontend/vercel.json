@@ -6,11 +6,7 @@
       "destination": "https://jwt-auth-demo-backend.onrender.com/api/:path*"
     },
     {
-      "source": "/echo/:path*",
-      "destination": "https://httpbin.org/:path*"
-    },
-    {
-      "source": "/((?!api/|echo/).*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
