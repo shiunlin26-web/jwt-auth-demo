@@ -2138,7 +2138,12 @@ jobs:      要做哪幾件事（backend、frontend 兩個 job，同時跑）
    uv run pytest -q         # 35 passed
    ```
 2. **CI**：把這關的 commit 推上 GitHub 後，開一個 PR（或到 Actions 分頁手動按 Run workflow），看 `CI` 兩個 job 都綠。
-3. **讀 log，這才是重點**。點進 `backend` job：
+3. **讀 log，這才是重點**。Actions 分頁有三層：
+   - 第一層 **Actions 分頁**（repo 上方的 Actions）：一列一列的 run，每列對應一次 push 或 PR，標題是 commit 訊息，前面是綠勾或紅叉
+   - 第二層 **點一列 run**：左邊列出這次的 job（`backend`、`frontend`），中間是流程圖
+   - 第三層 **點左邊的 `backend`**：一排可展開的步驟，點箭頭展開 log
+
+   在第三層：
    - `Docker build`：看每一層怎麼被執行。找 `CACHED` 字樣，那就是 layer 快取
    - `Smoke test`：看到 `{"message":"pong"}` 和 `✅ /ping OK`
    - `Docker logs`：看到 alembic 的 `Running upgrade -> 0001 ...` 和 uvicorn 的 `Uvicorn running on http://0.0.0.0:8000`。這就是容器啟動時發生的事。
