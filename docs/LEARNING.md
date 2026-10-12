@@ -49,7 +49,7 @@
 | 7 | React Router：多頁面、需要登入的頁面 | 路由、守門員元件 | ✅ 完成 |
 | 8 | Zustand + axios | 用套件取代手寫的登入狀態與 apiFetch | ✅ 完成 |
 | **9** | **Docker 與 CI**（uv、ruff、Dockerfile、GitHub Actions） | 把後端打包成 image、每次 push 自動跑測試 | ✅ 完成 |
-| 10 | 部署（Render + Vercel + Neon，前後端同站） | 真的上線，手機開得到 | ⬜ |
+| 10 | 部署（Render + Vercel + Neon，前後端同站） | 真的上線，手機開得到 | ✅ 完成 |
 | 11 | 維護（healthcheck、log、Sentry、遷移回滾、換密鑰） | 壞掉時知道去哪看、怎麼復原 | ⬜ |
 | 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ⬜ |
 | 13（20 天後自學） | Zod + React Hook Form | 表單驗證 | ⬜ |
@@ -2189,9 +2189,174 @@ build 的時候不應該連資料庫：image 要能在任何環境用，build �
 
 ---
 
-## 關卡 10 ～ 16
+## 關卡 10：部署（Render + Vercel + Neon）✅
 
-做到時再補上詳細內容。關卡 10（部署）、11（維護）、12（TanStack Query）排在 20 天計畫內，13～16 是 20 天後的自學清單，見 [`PLAN.md`](PLAN.md)。
+**改動的檔案**：
+- `backend/main.py`：所有 API 掛到 `/api` 底下（`/api/auth/login`、`/api/me`、`/api/ping`）
+- `backend/routes/auth.py`：cookie 的 `path` 從 `/auth` 改成 `/api/auth`
+- `backend/database.py`：`pool_pre_ping=True`、Neon pooled 連線的 `statement_cache_size=0`
+- `backend/tests/`：路徑加上 `/api`
+- `frontend/src/api/client.ts`：baseURL 預設改成 `/api`；`frontend/vite.config.ts`：本機代理；`frontend/.env.example`
+- 新增 `frontend/vercel.json`（Vercel 的轉發規則）、`render.yaml`（Render 的服務設定）
+- `.github/workflows/ci.yml`：smoke test 改打 `/api/ping`
+- 新增 `docs/DEBUGGING.md`：症狀 → 原因 → 修法
+
+### 一句話
+
+**把第 9 關的 image 丟到 Render、前端丟到 Vercel、資料庫用 Neon，手機用 4G 就能開。** 但這關真正的重點是一個架構決定：**前後端要讓瀏覽器以為是同一個網站**，否則登入在正式環境會直接壞掉。
+
+### 觀念 1：為什麼要「同站」，這是會把登入打爛的決定
+
+部署後前端在 `xxx.vercel.app`、後端在 `xxx.onrender.com`。如果前端直接打後端網址，對瀏覽器來說這是**跨站**（cross-site）請求。
+
+我們的 refresh token cookie 是 `SameSite=Lax`（第 1 關），意思是「跨站請求不要帶我」，這是防 CSRF 的標準做法。結果就是：登入成功，但重新整理後 `POST /auth/refresh` 沒帶 cookie → 401 → 掉登入。本機不會發生，因為 `localhost:5173` 和 `localhost:8000` 算同站（瀏覽器只看網域不看 port）。
+
+兩條路：
+
+| 做法 | 怎麼做 | 代價 |
+| --- | --- | --- |
+| A. 改成 `SameSite=None; Secure` | 允許跨站帶 cookie | iPhone Safari 預設擋第三方 cookie，Chrome 也在逐步限制。**你用手機開會壞**，而且 CSRF 防護變弱 |
+| B. **讓瀏覽器以為是同站** | 前端只打「自己網域的 `/api/...`」，由 Vercel 把 `/api/*` 轉發到 Render | 要懂「反向代理」這個概念；後端路徑要加 `/api` 前綴 |
+
+選 B。而且 B 還順便解決了 CORS：對瀏覽器來說沒有跨網域請求，CORS 根本不會發生。
+
+**這就是反向代理（reverse proxy）**，換技術棧長一樣：Next.js 的 `rewrites`、Nginx 的 `location /api`、Cloudflare 的 Workers，全部都是「使用者打我、我轉給後面的人、回應原封不動送回去」。
+
+### 觀念 2：本機和正式環境做一樣的事
+
+```
+瀏覽器 ──/api/auth/login──▶ Vite dev server（本機）  ──▶ localhost:8000/api/auth/login
+瀏覽器 ──/api/auth/login──▶ Vercel（正式）          ──▶ xxx.onrender.com/api/auth/login
+```
+
+前端程式完全一樣（baseURL 就是 `/api`），差別只在誰做轉發。本機是 `vite.config.ts` 的 `server.proxy`，正式是 `vercel.json` 的 `rewrites`。**開發環境和正式環境長得越像，上線後的意外越少**，這是部署的第一原則。
+
+為了讓轉發不用改寫路徑，後端把所有 API 都掛在 `/api` 底下（`main.py` 的 `APIRouter(prefix="/api")`）。cookie 的 `path` 也跟著改成 `/api/auth`，不然 `/api/auth/refresh` 這個路徑對不上 cookie 的 path，瀏覽器不會帶。
+
+### 觀念 3：設定和密鑰放哪
+
+image 裡沒有 `.env`（第 9 關的 `.dockerignore` 擋掉了）。正式環境的設定全部來自**平台的環境變數**：Render 的 Environment 分頁。`config.py` 讀環境變數的優先順序高於 `.env`，所以程式一行都不用改。
+
+| 設定 | 本機 `.env` | Render |
+| --- | --- | --- |
+| `DATABASE_URL` | 開發用的 Neon | **另一個** Neon 專案（正式資料不能和開發混在一起） |
+| `JWT_SECRET` | 隨便一個 | 另外產生一個，**不要和本機一樣** |
+| `COOKIE_SECURE` | `false`（http） | `true`（https） |
+| `CORS_ORIGINS` | 不用 | 不用（同站） |
+| `PORT` | 不用 | Render 自己注入，Dockerfile 的 `${PORT:-8000}` 會吃到 |
+
+`render.yaml` 裡 `sync: false` 的意思是「這個值不寫在檔案裡，建立服務時再問我」。因為 `render.yaml` 會進 git，密鑰絕對不能寫在裡面。
+
+### 觀念 4：遷移在啟動時跑
+
+Dockerfile 的 CMD 是 `alembic upgrade head && uvicorn ...`。每次部署，容器啟動時先把資料表升到最新，成功才起後端。遷移失敗 → 容器退出 → Render 標記部署失敗 → **舊版本繼續跑**。這就是為什麼不手動跑遷移：你永遠不會跑一個「程式碼是新的、資料表是舊的」的後端。
+
+### 觀念 5：免費方案的冷啟動，不是 bug
+
+- Render 免費方案：閒置 15 分鐘休眠，下一個請求要等 30～60 秒喚醒
+- Neon 免費方案：閒置 5 分鐘休眠，喚醒約 1～2 秒
+
+所以**第一次開網址會很慢**，甚至 Vercel 等不到回應回 504。第二次就正常。這是免費方案的設計，不是你部署錯了。`database.py` 的 `pool_pre_ping=True` 處理的是另一件事：Neon 休眠後，連線池裡休眠前建立的連線都死了，`pool_pre_ping` 會先確認連線活著再用，不然第一個請求會 500。
+
+### ⚠️ 開始前（一次性）：把它部署上去
+
+三個平台都用 GitHub 帳號登入，都不用綁卡。順序很重要：**先 Neon、再 Render、拿到 Render 網址之後才能設 Vercel**。
+
+**1. Neon：開一個正式用的專案**
+
+- Neon 後台 → New Project，名稱 `jwt-auth-demo-prod`，Region 選 **Singapore (ap-southeast-1)**
+- Connect → 把「Pooled connection」**關掉**（直連比較單純；開著也可以，程式會自動處理）→ 複製連線字串
+- 照 README「準備資料庫」的三個改法改成 asyncpg 格式（`postgresql+asyncpg://`、`ssl=require`、刪 `channel_binding`）
+- 這個字串**不要**放進本機的 `.env`，它只給 Render 用
+
+**2. 產生正式用的 JWT_SECRET**
+
+```bash
+cd backend
+uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+**3. Render：用 Blueprint 建後端**
+
+- render.com → 用 GitHub 登入 → 授權 Render 存取這個 repo
+- Dashboard → **New → Blueprint** → 選 `jwt-auth-demo` → 它會讀 `render.yaml`
+- 它會問 `DATABASE_URL` 和 `JWT_SECRET`，貼上第 1、2 步的值 → Apply
+- 等 build（第一次約 3～5 分鐘）。看 **Logs** 分頁，應該依序看到：Docker build 的每一層 → `Running upgrade -> 0001 ...`（alembic）→ `Uvicorn running on http://0.0.0.0:10000`
+- 服務頁面上方有網址，長得像 `https://jwt-auth-demo-backend-xxxx.onrender.com`。開 `那個網址/api/ping`，看到 `{"message":"pong"}` 就成功了（第一次要等它醒來）
+
+> 如果 Blueprint 建立失敗，退回手動：New → Web Service → 選 repo → Runtime 選 Docker、Root Directory 填 `backend`、Instance Type 選 Free、Environment 加三個變數（`DATABASE_URL`、`JWT_SECRET`、`COOKIE_SECURE=true`）、Health Check Path 填 `/api/ping`。
+
+**4. 把 Render 網址填進 `vercel.json`，commit、push**
+
+`frontend/vercel.json` 的第一條 `destination` 換成你的網址，結尾保留 `/api/:path*`：
+
+```json
+"destination": "https://jwt-auth-demo-backend-xxxx.onrender.com/api/:path*"
+```
+
+這個檔案要進 git，Vercel 是從 repo 讀它的。
+
+**5. Vercel：建前端**
+
+- vercel.com → 用 GitHub 登入 → Add New → Project → Import `jwt-auth-demo`
+- **Root Directory 一定要改成 `frontend`**（點 Edit 選資料夾）。不改的話 Vercel 找不到 `package.json` 和 `vercel.json`
+- Framework 會自動偵測成 Vite，其他不用動，**不要**設任何環境變數 → Deploy
+- 等約 1 分鐘，拿到 `https://jwt-auth-demo-xxxx.vercel.app`
+
+### 驗證方式
+
+1. **手機關 Wi-Fi 用 4G** 開 Vercel 網址（第一次等 Render 醒來，最多一分鐘）
+2. 註冊、登入、看到首頁的使用者資料
+3. **重新整理，還在登入狀態**。這一步才證明同站架構是對的
+4. 電腦開同一個網址，DevTools → Application → Cookies → 你的 vercel.app 網域，`refresh_token` 的 Path 是 `/api/auth`、Secure 打勾、HttpOnly 打勾
+5. Network 分頁：所有請求的網址都是 `你的.vercel.app/api/...`，沒有任何 `onrender.com`。這就是代理在工作
+6. Render 的 Logs 分頁看得到你剛剛的請求；Neon 的 Tables 看得到 `user` 表多了一筆
+7. 推一個 commit 到 main（例如改 README 一個字），Render 和 Vercel 都會自動重新部署
+
+### 動手玩
+
+每一個都在玩「正式環境」，玩完記得改回來。
+
+1. **拿掉一個環境變數**：Render → Environment → 刪掉 `JWT_SECRET` → Manual Deploy。看 Logs：`ValidationError ... jwt_secret ... Field required`，部署失敗，**但網站還是開得起來**，因為舊版本還在跑。加回去再部署。這是 `DEBUGGING.md` 第一條。
+2. **故意跨站**：Vercel → Settings → Environment Variables → 加 `VITE_API_URL` = 你的 Render 網址加 `/api` → Deployments → Redeploy（`VITE_*` 是 build 時打包的，改了要重 build）。登入成功，**重新整理後掉登入**，DevTools 的 Cookies 底下看不到 `refresh_token`，Console 還可能有 CORS 錯誤。這就是觀念 1 說的「會把登入打爛」。刪掉變數、Redeploy。
+3. **rewrite 填錯**：`vercel.json` 的 `destination` 故意少掉 `/api`，push。登入時 Console 出現 404 或 `SyntaxError: Unexpected token '<'`（拿到 HTML 不是 JSON）。改回來。
+4. **感受冷啟動**：15 分鐘不碰網站，再開，Network 分頁看第一個 `/api/...` 請求花了幾秒。
+
+### 想一想
+
+<details>
+<summary>Q1：既然可以用 <code>SameSite=None</code>，為什麼不直接改那一行就好？</summary>
+
+三個理由。一、iPhone Safari 預設擋第三方 cookie，你的手機驗證會過不了，而且你不會知道為什麼。二、`SameSite=Lax` 是 CSRF 防護的一部分，改成 `None` 就得另外做 CSRF token。三、跨站就一定要設 CORS，多一個會出錯的地方。同站把這三個問題一次消掉，代價只是一條 rewrite。
+
+</details>
+
+<details>
+<summary>Q2：遷移在啟動時跑，如果遷移本身有 bug 會怎樣？</summary>
+
+容器啟動失敗，Render 標記這次部署失敗，**上一個版本繼續服務**。資料庫呢？Alembic 的遷移跑在交易（transaction）裡，Postgres 支援 DDL 交易，所以失敗會整個 rollback，資料表停在上一版。這就是為什麼第 5 關要用 Alembic 而不是 `create_all`：壞掉時有「上一版」可以退。第 11 關會練習「遷移跑到一半要回滾」。
+
+</details>
+
+<details>
+<summary>Q3：<code>render.yaml</code> 和 <code>vercel.json</code> 進 git，那密鑰在哪？</summary>
+
+`render.yaml` 只寫「需要 `DATABASE_URL` 這個變數」（`sync: false`），值在 Render 的 Environment 分頁，不在 git。`vercel.json` 裡只有 Render 的網址，那不是秘密。原則：**設定進 git，密鑰進平台**。練習專案要搬這套的時候，照這個原則就不會把密碼推上 GitHub。
+
+</details>
+
+<details>
+<summary>Q4：Vercel 轉發到 Render，Render 休眠中要等 60 秒，Vercel 會等嗎？</summary>
+
+不一定。Vercel 對外部 rewrite 有逾時限制，Render 醒太慢就會拿到 504。這是免費方案疊免費方案的代價，付費的 Render 不會休眠就沒這個問題。練習專案如果真的要給別人用，這是第一個要付錢解決的地方。現在知道它會發生、第二次會好就夠了。
+
+</details>
+
+---
+
+## 關卡 11 ～ 16
+
+做到時再補上詳細內容。關卡 11（維護）、12（TanStack Query）排在 20 天計畫內，13～16 是 20 天後的自學清單，見 [`PLAN.md`](PLAN.md)。
 
 ---
 

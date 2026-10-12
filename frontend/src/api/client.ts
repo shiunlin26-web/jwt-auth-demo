@@ -13,8 +13,12 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { useAuthStore } from "../auth/authStore";
 
-// 【關卡 2】後端網址從環境變數讀，沒設定就用本機預設值
-export const API_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+// 【關卡 10】預設打「自己網域的 /api」，不直接打後端網址。
+// 本機：Vite 的 server.proxy 把 /api/* 轉到 http://localhost:8000（vite.config.ts）
+// 正式：Vercel 的 rewrites 把 /api/* 轉到 Render（vercel.json）
+// 兩邊對瀏覽器來說都是「同一個網站」，refresh cookie 才會被帶上。
+// VITE_API_URL 留著當逃生口：想直接打後端（例如除錯）時才設定。
+export const API_URL: string = import.meta.env.VITE_API_URL ?? "/api";
 
 export type TokenResponse = {
   access_token: string;
@@ -22,8 +26,9 @@ export type TokenResponse = {
 };
 
 // axios.create：建立一個有預設設定的 axios，之後呼叫時只要寫路徑
-//   baseURL：自動加在路徑前面，api.get("/me") 會送到 http://localhost:8000/me
-//   withCredentials：跨網域時也帶上 cookie（等於 fetch 的 credentials: "include"）
+//   baseURL：自動加在路徑前面，api.get("/me") 會送到 /api/me
+//   withCredentials：跨網域時也帶上 cookie（等於 fetch 的 credentials: "include"）。
+//     同站之後其實用不到，留著是為了 VITE_API_URL 直接打後端的情況
 // axios 會自動把物件轉成 JSON 送出、把回應的 JSON 轉成物件，也不用自己寫 Content-Type
 export const publicApi = axios.create({ baseURL: API_URL, withCredentials: true });
 export const api = axios.create({ baseURL: API_URL, withCredentials: true });

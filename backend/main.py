@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
@@ -19,9 +19,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(users.router)
+# 【關卡 10】所有 API 統一掛在 /api 底下：/api/auth/login、/api/me、/api/ping
+#
+# 為什麼？正式環境前端在 Vercel、後端在 Render，是兩個不同的網域。
+# 如果前端直接打後端網址，就是「跨站」請求，refresh token 的 cookie（SameSite=Lax）不會被帶上，
+# 重新整理就會掉登入；改成 SameSite=None 又會被 iPhone Safari 擋掉。
+#
+# 解法是讓瀏覽器以為前後端是同一個網站：前端只打「自己網域的 /api/...」，
+# 由 Vercel 把 /api/* 轉發（rewrite）到 Render。這就是「反向代理」。
+# 本機開發也一樣：Vite 的 server.proxy 把 /api/* 轉到 localhost:8000（frontend/vite.config.ts）。
+# 後端把所有路徑都加上 /api 前綴，代理時就不用改寫路徑，本機和正式環境長得一模一樣。
+api = APIRouter(prefix="/api")
+api.include_router(auth.router)
+api.include_router(users.router)
 
-@app.get("/ping")
+
+@api.get("/ping")
 async def ping():
     return {"message": "pong"}
+
+
+app.include_router(api)

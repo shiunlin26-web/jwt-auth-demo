@@ -28,6 +28,7 @@ jwt-auth-demo/
 │   ├── Dockerfile         # 把後端打包成 image（部署用）
 │   ├── .dockerignore      # build image 時排除 .env、.venv 等
 │   └── .env.example
+├── render.yaml                # Render 部署設定（後端）
 ├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pytest、Docker build、前端 build
 └── frontend/src/
     ├── app/
@@ -39,7 +40,12 @@ jwt-auth-demo/
     │   └── auth.ts        # 每個登入相關 API 一個函式：login()、getMe()……
     ├── auth/              # 登入狀態（Zustand store、useAuth）與守門員（RequireAuth、GuestOnly）
     └── components/        # 頁面裡的零件：登入表單、註冊表單、修改密碼……
+    frontend/vercel.json   # Vercel 部署設定：把 /api/* 轉發到 Render、SPA 路由
+    frontend/vite.config.ts  # 本機開發：把 /api/* 轉發到 localhost:8000
 ```
+
+**前後端怎麼接**：前端只打「自己網域的 `/api/...`」。本機由 Vite 轉發到 `localhost:8000`，正式環境由 Vercel 轉發到 Render。
+對瀏覽器來說前後端永遠是同一個網站，refresh cookie 才會被帶上，也不需要 CORS。說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10。
 
 ## 需要先安裝
 
@@ -138,7 +144,7 @@ uv run uvicorn main:app --reload --port 8000
 
 確認：
 
-- <http://localhost:8000/ping> 回傳 `{"message":"pong"}`
+- <http://localhost:8000/api/ping> 回傳 `{"message":"pong"}`
 - <http://localhost:8000/docs> 可以看到 Swagger API 文件，也能直接在這裡測試
 
 ## 3. 啟動前端
@@ -153,9 +159,8 @@ npm run dev
 
 打開 <http://localhost:5173>。
 
-> ⚠️ **請用 `localhost`，不要用 `127.0.0.1`。**
-> 後端 CORS 預設只允許 `http://localhost:5173`（`backend/.env` 的 `CORS_ORIGINS`），前端預設呼叫 `http://localhost:8000`（`frontend/.env` 的 `VITE_API_URL`，不設定就用預設值）。
-> 如果用 `127.0.0.1:5173` 開頁面，CORS 會擋掉，refresh token cookie 也不會被帶上。
+> 前端的 API 請求（`/api/...`）由 Vite 轉發到 `localhost:8000`，所以後端要先跑起來。
+> 用 `localhost` 或 `127.0.0.1` 開都可以。
 
 ## 4. 試玩流程
 
@@ -173,9 +178,9 @@ npm run dev
 打開瀏覽器 DevTools → Network，會看到：
 
 ```
-GET  /me            → 401
-POST /auth/refresh  → 200（拿到新的 access token）
-GET  /me            → 200（用新 token 重試）
+GET  /api/me            → 401
+POST /api/auth/refresh  → 200（拿到新的 access token）
+GET  /api/me            → 200（用新 token 重試）
 ```
 
 ## 5. 跑測試（選用）
@@ -213,14 +218,14 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 
 | Method | Path | 說明 | 認證 |
 | --- | --- | --- | --- |
-| GET | `/ping` | 健康檢查 | – |
-| POST | `/auth/register` | 註冊 `{ email, password }` | – |
-| POST | `/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie | – |
-| POST | `/auth/refresh` | 用 cookie 裡的 refresh token 換新的 access token（同時輪替 refresh token） | Cookie |
-| POST | `/auth/logout` | 刪除 refresh token 並清 cookie | Cookie |
-| POST | `/auth/logout-all` | 登出所有裝置（刪除此使用者所有 refresh token） | Bearer |
-| POST | `/auth/change-password` | 修改密碼 `{ current_password, new_password }`，其他裝置全部登出，目前裝置拿到新 token | Bearer |
-| GET | `/me` | 取得目前使用者 | Bearer |
+| GET | `/api/ping` | 健康檢查 | – |
+| POST | `/api/auth/register` | 註冊 `{ email, password }` | – |
+| POST | `/api/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie | – |
+| POST | `/api/auth/refresh` | 用 cookie 裡的 refresh token 換新的 access token（同時輪替 refresh token） | Cookie |
+| POST | `/api/auth/logout` | 刪除 refresh token 並清 cookie | Cookie |
+| POST | `/api/auth/logout-all` | 登出所有裝置（刪除此使用者所有 refresh token） | Bearer |
+| POST | `/api/auth/change-password` | 修改密碼 `{ current_password, new_password }`，其他裝置全部登出，目前裝置拿到新 token | Bearer |
+| GET | `/api/me` | 取得目前使用者 | Bearer |
 
 ## Token 設計
 
@@ -228,9 +233,14 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 | --- | --- | --- |
 | 格式 | JWT（HS256） | 隨機字串（`secrets.token_urlsafe`） |
 | 有效期 | `JWT_EXPIRE_MINUTES`（預設 30 分鐘） | `REFRESH_TOKEN_EXPIRE_DAYS`（預設 7 天） |
-| 存放 | 前端記憶體（Zustand store，重新整理就消失） | httpOnly cookie（`path=/auth`），DB 只存 SHA-256 雜湊 |
+| 存放 | 前端記憶體（Zustand store，重新整理就消失） | httpOnly cookie（`path=/api/auth`），DB 只存 SHA-256 雜湊 |
 | 用途 | 呼叫受保護 API | 換新的 access token |
 | 輪替 | – | 每次 refresh 都發新的、舊的作廢；舊的被重複使用 → 該使用者所有 refresh token 全部撤銷 |
+
+## 7. 部署（選用）
+
+後端在 Render（`render.yaml`）、前端在 Vercel（`frontend/vercel.json`）、資料庫在 Neon，全部免費方案。
+完整步驟、觀念與會踩的坑見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10；出問題先查 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)。
 
 ## 每次 `git pull` 之後
 
@@ -267,6 +277,6 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 
 **前端相關**
 
-- **前端 console 出現 CORS 錯誤**：確認網址是 `http://localhost:5173`，而且後端有在 8000 port 跑。
-- **重新整理後沒有自動登入**：DevTools → Application → Cookies 看 `http://localhost:8000` 底下有沒有 `refresh_token`；如果剛剛是用 `127.0.0.1` 開的，換成 `localhost` 再登入一次。
-- **5173 被占用**：Vite 會自動改用 5174，但 CORS 預設只允許 5173，請先關掉占用的程式，或在 `backend/.env` 設定 `CORS_ORIGINS=http://localhost:5173,http://localhost:5174`。
+- **前端請求 `/api/...` 回 500 或 `ECONNREFUSED`**：Vite 轉發不到後端，確認後端有在 8000 port 跑。
+- **重新整理後沒有自動登入**：DevTools → Application → Cookies 看 `http://localhost:5173` 底下有沒有 `refresh_token`，path 應該是 `/api/auth`。
+- **前端 console 出現 CORS 錯誤**：表示前端沒走代理、直接打後端了。檢查 `frontend/.env` 是不是設了 `VITE_API_URL`；平常不需要設。

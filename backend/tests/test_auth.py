@@ -74,7 +74,7 @@ async def test_帶access_token可以取得自己的資料(client):
     await register(client)
     token = (await login(client)).json()["access_token"]
 
-    res = await client.get("/me", headers=auth_header(token))
+    res = await client.get("/api/me", headers=auth_header(token))
 
     assert res.status_code == 200
     assert res.json()["email"] == EMAIL
@@ -85,13 +85,13 @@ async def test_登入後會記錄最後登入時間(client):
     await register(client)
     token = (await login(client)).json()["access_token"]
 
-    res = await client.get("/me", headers=auth_header(token))
+    res = await client.get("/api/me", headers=auth_header(token))
 
     assert res.json()["last_login_at"] is not None
 
 
 async def test_沒帶access_token回401(client):
-    res = await client.get("/me")
+    res = await client.get("/api/me")
     assert res.status_code == 401
 
 
@@ -102,7 +102,7 @@ async def test_refresh會換發新的refresh_token(client):
     await login(client)
     old_cookie = client.cookies.get("refresh_token")
 
-    res = await client.post("/auth/refresh")
+    res = await client.post("/api/auth/refresh")
 
     assert res.status_code == 200
     assert "access_token" in res.json()
@@ -113,18 +113,18 @@ async def test_舊的refresh_token再被使用會撤銷全部(client, make_clien
     await register(client)
     await login(client)
     old_cookie = client.cookies.get("refresh_token")
-    await client.post("/auth/refresh")  # old_cookie 被作廢，client 拿到新的
+    await client.post("/api/auth/refresh")  # old_cookie 被作廢，client 拿到新的
 
     # 模擬「小偷」：另一個 client 拿著偷來的舊 cookie
     thief = make_client(cookies={"refresh_token": old_cookie})
-    res = await thief.post("/auth/refresh")
+    res = await thief.post("/api/auth/refresh")
 
     assert res.status_code == 401
     assert res.json()["detail"] == "Refresh token reused"
     assert await count_refresh_tokens() == 0  # 全部被刪掉
 
     # 真正的使用者也被登出了
-    res = await client.post("/auth/refresh")
+    res = await client.post("/api/auth/refresh")
     assert res.status_code == 401
 
 
@@ -137,13 +137,13 @@ async def test_同一個token同時refresh只有一個成功(client, make_client
     a = make_client(cookies={"refresh_token": cookie})
     b = make_client(cookies={"refresh_token": cookie})
     # asyncio.gather：同時送出兩個請求，等兩個都回來（相當於 JS 的 Promise.all）
-    res_a, res_b = await asyncio.gather(a.post("/auth/refresh"), b.post("/auth/refresh"))
+    res_a, res_b = await asyncio.gather(a.post("/api/auth/refresh"), b.post("/api/auth/refresh"))
 
     assert sorted([res_a.status_code, res_b.status_code]) == [200, 401]
 
 
 async def test_沒有cookie時refresh回401(client):
-    res = await client.post("/auth/refresh")
+    res = await client.post("/api/auth/refresh")
     assert res.status_code == 401
 
 
@@ -164,11 +164,11 @@ async def test_登出後refresh失敗(client):
     await register(client)
     await login(client)
 
-    res = await client.post("/auth/logout")
+    res = await client.post("/api/auth/logout")
     assert res.status_code == 204
     assert await count_refresh_tokens() == 0
 
-    res = await client.post("/auth/refresh")
+    res = await client.post("/api/auth/refresh")
     assert res.status_code == 401
 
 
@@ -178,9 +178,9 @@ async def test_登出只影響自己這台裝置(make_client):
     await login(phone)
     await login(laptop)
 
-    await phone.post("/auth/logout")
+    await phone.post("/api/auth/logout")
 
-    res = await laptop.post("/auth/refresh")
+    res = await laptop.post("/api/auth/refresh")
     assert res.status_code == 200  # 電腦不受影響
 
 
@@ -193,19 +193,19 @@ async def test_登出所有裝置(make_client):
     laptop_token = (await login(laptop)).json()["access_token"]
     assert await count_refresh_tokens() == 2
 
-    res = await phone.post("/auth/logout-all", headers=auth_header(token))
+    res = await phone.post("/api/auth/logout-all", headers=auth_header(token))
 
     assert res.status_code == 204
     assert await count_refresh_tokens() == 0
-    assert (await laptop.post("/auth/refresh")).status_code == 401
+    assert (await laptop.post("/api/auth/refresh")).status_code == 401
 
     # 關卡 3 的限制：電腦手上的 access token 在過期前還是能用
-    res = await laptop.get("/me", headers=auth_header(laptop_token))
+    res = await laptop.get("/api/me", headers=auth_header(laptop_token))
     assert res.status_code == 200
 
 
 async def test_登出所有裝置需要access_token(client):
-    res = await client.post("/auth/logout-all")
+    res = await client.post("/api/auth/logout-all")
     assert res.status_code == 401
 
 
@@ -213,7 +213,7 @@ async def test_登出所有裝置需要access_token(client):
 
 async def change_password(client, token, current, new):
     return await client.post(
-        "/auth/change-password",
+        "/api/auth/change-password",
         headers=auth_header(token),
         json={"current_password": current, "new_password": new},
     )
@@ -229,8 +229,8 @@ async def test_改密碼成功(make_client):
 
     assert res.status_code == 200
     assert "access_token" in res.json()
-    assert (await phone.post("/auth/refresh")).status_code == 200   # 這台保持登入
-    assert (await laptop.post("/auth/refresh")).status_code == 401  # 其他裝置被登出
+    assert (await phone.post("/api/auth/refresh")).status_code == 200   # 這台保持登入
+    assert (await laptop.post("/api/auth/refresh")).status_code == 401  # 其他裝置被登出
     assert (await login(make_client())).status_code == 401          # 舊密碼不能用
     assert (await login(make_client(), password="new-password-1")).status_code == 200
 
