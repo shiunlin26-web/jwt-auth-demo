@@ -253,7 +253,7 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 - **`ModuleNotFoundError: No module named 'xxx'`**（例如 `pydantic_settings`、`pytest`、`sqlalchemy`）：
   1. 指令前面有沒有加 `uv run`？直接打 `uvicorn`、`pytest` 會用到系統的 Python，找不到套件
   2. 在 `backend` 重新跑一次 `uv sync`
-- **`uv: command not found` / `無法辨識 'uv'`**：還沒安裝 uv，見上方「需要先安裝」；Windows 裝完要重開終端機。
+- **`uv: command not found` / `The term 'uv' is not recognized`**：還沒安裝 uv，見上方「需要先安裝」。**裝完一定要關掉終端機重開一個**，已經開著的視窗讀不到新的 PATH。重開後還是找不到，用 `$env:Path` 確認裡面有 `C:\Users\<你的帳號>\.local\bin`。
 - **`The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed`**：SQLAlchemy 2.1 起不再自動安裝 `greenlet`。`pyproject.toml` 已經寫了 `sqlalchemy[asyncio]`，在 `backend` 重新跑一次 `uv sync` 就好。
 - **啟動後端時出現 `ValidationError ... jwt_secret ... at least 32 characters`**：`.env` 的 `JWT_SECRET` 太短，用上面的指令重新產生一個。
 - **啟動後端時出現 `ValidationError ... Field required`**：`.env` 少了必填的設定（`DATABASE_URL` 或 `JWT_SECRET`），或是 `.env` 不在 `backend` 資料夾裡。
