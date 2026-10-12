@@ -2282,11 +2282,15 @@ uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 - Dashboard → **New → Blueprint** → 選 `jwt-auth-demo` → 它會讀 `render.yaml`
 - 它會問 `DATABASE_URL` 和 `JWT_SECRET`，貼上第 1、2 步的值 → Apply
 - 等 build（第一次約 3～5 分鐘）。看 **Logs** 分頁，應該依序看到：Docker build 的每一層 → `Running upgrade -> 0001 ...`（alembic）→ `Uvicorn running on http://0.0.0.0:10000`
-- 服務頁面上方有網址，長得像 `https://jwt-auth-demo-backend-xxxx.onrender.com`。開 `那個網址/api/ping`，看到 `{"message":"pong"}` 就成功了（第一次要等它醒來）
+- 服務頁面上方有網址，長得像 `https://jwt-auth-demo-backend.onrender.com`。開 `那個網址/api/ping`，看到 `{"message":"pong"}` 就成功了（第一次要等它醒來）
+
+> **Dashboard 看不到別的服務？** Render 的 **Project** 只是分組用的資料夾，Blueprint 建的服務預設不屬於任何 Project，會在 Overview 的 **Ungrouped Services**；以前建的服務在 **My projects** 裡。兩邊都在，沒有互相覆蓋。免費方案的限制是每月 750 小時，不是服務數量。
 
 > 如果 Blueprint 建立失敗，退回手動：New → Web Service → 選 repo → Runtime 選 Docker、Root Directory 填 `backend`、Instance Type 選 Free、Environment 加三個變數（`DATABASE_URL`、`JWT_SECRET`、`COOKIE_SECURE=true`）、Health Check Path 填 `/api/ping`。
 
 **4. 把 Render 網址填進 `vercel.json`，commit、push**
+
+> 改這個檔案本身不會部署任何東西，它只是讓 repo 裡有正確的設定。第 5 步 Vercel Import 的當下會立刻部署一次，所以**先改好再 Import**，否則會帶著佔位字串部署，還得再 push 一次。
 
 `frontend/vercel.json` 的第一條 `destination` 換成你的網址，結尾保留 `/api/:path*`：
 
