@@ -104,15 +104,15 @@ jobs:
 
       # 等它啟動（要先跑 alembic upgrade head 再起 uvicorn），最多等 30 秒，然後打 /ping。
       # 失敗就印出 container 的 log 再讓這一步紅掉，這樣你在 Actions 畫面就能直接看到原因
-      - name: Smoke test（curl /ping）
+      - name: Smoke test（curl /api/ping）
         run: |
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8000/ping; then
-              echo; echo "✅ /ping OK"; exit 0
+            if curl -fsS http://localhost:8000/api/ping; then
+              echo; echo "✅ /api/ping OK"; exit 0
             fi
             sleep 1
           done
-          echo "❌ /ping 在 30 秒內沒有回應，container log 如下："
+          echo "❌ /api/ping 在 30 秒內沒有回應，container log 如下："
           docker logs backend
           exit 1
 

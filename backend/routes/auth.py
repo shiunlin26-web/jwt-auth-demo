@@ -31,7 +31,7 @@ def set_refresh_cookie(response: Response, token: str) -> None:
         samesite="lax",       # 防 CSRF
         secure=settings.cookie_secure,  # 【關卡 2】改從設定讀：本機 http 用 False，正式環境 True
         max_age=settings.refresh_token_expire_days * 24 * 3600,  # 天數換算成秒
-        path="/auth",         # 只在 /auth/* 路徑帶上
+        path="/api/auth",     # 只在 /api/auth/* 路徑帶上（【關卡 10】API 全部搬到 /api 底下）
     )
 
 
@@ -207,7 +207,7 @@ async def logout(
     # 清掉 cookie
     response.delete_cookie(
         key="refresh_token",
-        path="/auth",
+        path="/api/auth",  # 刪 cookie 時 path 要和設定時一樣，否則瀏覽器會當成另一個 cookie、刪不掉
     )
 
     return None
@@ -228,7 +228,7 @@ async def logout_all(
     await session.commit()
 
     # 這台裝置的 cookie 也清掉
-    response.delete_cookie(key="refresh_token", path="/auth")
+    response.delete_cookie(key="refresh_token", path="/api/auth")
     return None
 
 

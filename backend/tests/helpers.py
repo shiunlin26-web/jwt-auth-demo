@@ -6,11 +6,11 @@ PASSWORD = "password123"
 
 
 async def register(client: AsyncClient, email: str = EMAIL, password: str = PASSWORD):
-    return await client.post("/auth/register", json={"email": email, "password": password})
+    return await client.post("/api/auth/register", json={"email": email, "password": password})
 
 
 async def login(client: AsyncClient, email: str = EMAIL, password: str = PASSWORD):
-    return await client.post("/auth/login", json={"email": email, "password": password})
+    return await client.post("/api/auth/login", json={"email": email, "password": password})
 
 
 def auth_header(access_token: str) -> dict:

@@ -1,0 +1,31 @@
+# 【關卡 10】Render Blueprint：用一個檔案描述「要在 Render 上開什麼服務、怎麼設定」
+#
+# 不用這個檔案，在 Render 後台一個一個欄位點也可以。但寫成檔案有兩個好處：
+# 1. 設定進 git，看得到歷史、別人（或練習專案）可以照抄
+# 2. 這就是「Infrastructure as Code」的最小版本，Terraform、Kubernetes 的 YAML 都是同一個概念
+#
+# 用法：Render 後台 → New → Blueprint → 選這個 repo → 它會讀這個檔案建立服務，
+# 然後問你 sync: false 的那些環境變數的值。
+
+services:
+  - type: web
+    name: jwt-auth-demo-backend
+    runtime: docker                      # 用 backend/Dockerfile build，不是 Render 自己猜
+    plan: free                           # 免費方案：閒置 15 分鐘休眠，每月 750 小時
+    region: singapore                    # 離台灣最近的區域。Neon 也選新加坡（ap-southeast-1）延遲最低
+    branch: main                         # 推到 main 才部署
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend             # docker build 的「.」是哪個資料夾
+    healthCheckPath: /api/ping           # Render 用這個路徑判斷服務活著沒；啟動後打不通就算部署失敗
+    # autoDeployTrigger: checksPass      # 【關卡 11】CI 綠了才部署。先用預設（推 main 就部署），第 11 關再開
+    envVars:
+      # sync: false → 值不寫在這個檔案裡（它會進 git！），建立服務時 Render 會問你
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      # 正式環境一定是 https，cookie 要加 Secure
+      - key: COOKIE_SECURE
+        value: "true"
+      # Dockerfile 的 CMD 會讀 $PORT；Render 自己會注入，這裡不用設。
+      # CORS_ORIGINS 不用設：前端經過 Vercel 代理，對瀏覽器來說是同一個網站，沒有跨網域請求。

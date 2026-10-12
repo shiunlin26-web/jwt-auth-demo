@@ -266,7 +266,7 @@ user                              refreshtoken
 | `httponly=True` | JS 讀不到 → 網站被注入惡意 JS 也偷不走 |
 | `samesite="lax"` | 別的網站發起的請求不帶這個 cookie → 防 CSRF |
 | `secure` | 只在 HTTPS 傳送。本機是 http 所以設 False，正式環境要 True |
-| `path="/auth"` | 只有呼叫 `/auth/*` 時才帶上，其他 API 不會帶 |
+| `path="/api/auth"` | 只有呼叫 `/api/auth/*` 時才帶上，其他 API 不會帶（關卡 10 起所有 API 都在 `/api` 底下） |
 
 **⭐ session 的用法**：`session.add()` 只是「排進待辦」，`await session.commit()` 才真正寫進資料庫。
 
@@ -299,7 +299,7 @@ user                              refreshtoken
 
 **⭐⭐⭐ `Depends`（依賴注入）**
 - 比喻：API 函式說「我需要一個已登入的 user」，FastAPI 就**先幫你跑警衛**，通過了才把 user 交給你
-- `/me` 只有 `return current_user` 一行，因為檢查都在警衛那邊做完了
+- `/api/me` 只有 `return current_user` 一行，因為檢查都在警衛那邊做完了
 - 以後新增「要登入才能用」的 API，參數加上 `current_user: User = Depends(get_current_user)` 就好
 
 **⭐⭐ 401 是前端的暗號**：前端看到 401，就會以為「通行證過期了」而去換新的。所以「目前密碼打錯」這種情況要回 **400** 而不是 401（見第 8 站）。
@@ -362,9 +362,9 @@ cookie 裡的 refresh token
 
 | API | 要帶 access token 嗎 | 做什麼 | 影響範圍 |
 |---|---|---|---|
-| `POST /auth/logout` | ❌ 靠 cookie | 刪掉這張 refresh token、清 cookie | 這台裝置 |
-| `POST /auth/logout-all` | ✅ | 刪掉這個人**所有** refresh token | 所有裝置 |
-| `POST /auth/change-password` | ✅ | 改密碼 → 刪掉所有 refresh token → **幫這台發一張新的** | 其他裝置登出，這台保持登入 |
+| `POST /api/auth/logout` | ❌ 靠 cookie | 刪掉這張 refresh token、清 cookie | 這台裝置 |
+| `POST /api/auth/logout-all` | ✅ | 刪掉這個人**所有** refresh token | 所有裝置 |
+| `POST /api/auth/change-password` | ✅ | 改密碼 → 刪掉所有 refresh token → **幫這台發一張新的** | 其他裝置登出，這台保持登入 |
 
 ### 重點
 
@@ -537,7 +537,7 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 | | `publicApi` | `api` |
 |---|---|---|
 | 攔截器 | 沒有 | 有 |
-| 用在 | 註冊、登入、refresh、登出 | `/me`、logout-all、change-password |
+| 用在 | 註冊、登入、refresh、登出 | `/api/me`、logout-all、change-password |
 
 **登入一定要用 `publicApi`**：密碼錯也是 401，走 `api` 的話會被誤當成「通行證過期」而去 refresh。
 
@@ -606,7 +606,7 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 
 | # | 前端 | 後端 | 資料庫 |
 |---|---|---|---|
-| 1 | `LoginForm` → `authService.login` → `publicApi.post("/auth/login")` | | |
+| 1 | `LoginForm` → `authService.login` → `publicApi.post("/auth/login")`（baseURL 是 `/api`，所以實際送到 `/api/auth/login`） | | |
 | 2 | | `UserLogin` 檢查格式 → 比對密碼 → 簽 access token | 查 user |
 | 3 | | 產生 refresh token，`Set-Cookie` | 新增 refreshtoken（雜湊） |
 | 4 | 把 access token 寫進 store → 呼叫 `api.get("/me")`（攔截器自動貼 token） | `get_current_user` 驗 JWT | 查 user |
@@ -626,7 +626,7 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 |---|---|---|
 | 1 | `api.get("/me")`，帶著過期的 token | `get_current_user` → 401 |
 | 2 | 回應攔截器：蓋 `_retry` 章 → refresh | 輪替，回傳新 token |
-| 3 | 寫進 store → 重寄 `/me` | 200 |
+| 3 | 寫進 store → 重寄 `/api/me` | 200 |
 | 4 | 使用者完全沒感覺 | |
 
 ### 情境 D：7 天後回來
