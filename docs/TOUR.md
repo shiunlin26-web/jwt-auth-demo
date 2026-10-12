@@ -647,7 +647,7 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 | 登入 500，DB 缺欄位 | `create_all` 不會改已存在的表 | 用 Alembic 管資料表 | 1、5 |
 | refresh 500 `MissingGreenlet` | commit 後讀屬性 | commit 前先存變數 | 1 |
 | 後端起不來 `ValidationError` | `.env` 少填必填設定 | fail fast 是好事，看錯誤訊息補上 | 2 |
-| `ModuleNotFoundError` | 沒啟動 venv 就安裝或執行 | 看到 `(venv)` 再動手 | 4 |
+| `ModuleNotFoundError` | 沒用 `uv run` 執行，或還沒 `uv sync` | 指令前加 `uv run`；在 `backend` 跑 `uv sync` | 9 |
 | Alembic `UnicodeDecodeError` | Windows 讀 `alembic.ini` 的中文註解 | 設定檔保持 ASCII | 5 |
 | `greenlet` 找不到 | SQLAlchemy 2.1 不再自動安裝 | 用 `sqlalchemy[asyncio]` | 8 |
 
@@ -658,4 +658,4 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 - 每一站的「自我檢查」都答得出來，就代表你讀懂這個專案了
 - 想知道某一關**為什麼**這樣設計 → `LEARNING.md` 對應的關卡
 - 要把登入功能**搬到別的專案** → `LEARNING.md` 關卡 6「之後其他專案怎麼用」（注意關卡 8 之後的檔案清單）
-- 下一步 → `LEARNING.md` 關卡 9：TanStack Query
+- 下一步 → `LEARNING.md` 關卡 9：Docker 與 CI（之後是關卡 10 部署、11 維護）

@@ -5,7 +5,7 @@
 1. 在本地一步步理解「access token + refresh token」登入架構
 2. 練完之後，這個專案就是之後其他專案做登入時的**參考範本**
 
-不需要部署、不需要 CI，全部在本地、用免費工具完成。
+關卡 0～8 全部在本地完成；關卡 9 起會用到 GitHub Actions、Render、Vercel、Neon 這些**免費**的雲端服務，把專案真的上線。
 
 > 剛接手、或想從頭複習整個專案：先看 [`TOUR.md`](TOUR.md)，它照「一個請求怎麼跑」帶你把現在的程式碼讀一遍。
 
@@ -29,6 +29,10 @@
 
 > 做完「動手玩」之後，記得把改動還原：`git checkout -- .`（還原所有還沒 commit 的修改）
 
+> **關卡 9 起改用 uv 管理 Python 套件**，不用再啟用 venv。前面關卡寫的指令請這樣讀：
+> `python -m pytest ...` → `uv run pytest ...`、`alembic ...` → `uv run alembic ...`、`uvicorn ...` → `uv run uvicorn ...`、
+> `python -m pip install -r requirements.txt` → `uv sync`。
+
 ---
 
 ## 路線圖
@@ -44,11 +48,16 @@
 | 6 | 前端拆成 `api/` + `auth/` + `components/` | 之後其他專案可以直接複製這一套 | ✅ 完成 |
 | 7 | React Router：多頁面、需要登入的頁面 | 路由、守門員元件 | ✅ 完成 |
 | 8 | Zustand + axios | 用套件取代手寫的登入狀態與 apiFetch | ✅ 完成 |
-| 9 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ⬜ |
-| 10 | Zod + React Hook Form | 表單驗證 | ⬜ |
-| 11 | Tailwind CSS | 樣式 | ⬜ |
-| 12 | Vitest + MSW | 前端自動化測試 | ⬜ |
-| 13（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
+| **9** | **Docker 與 CI**（uv、ruff、Dockerfile、GitHub Actions） | 把後端打包成 image、每次 push 自動跑測試 | ✅ 完成 |
+| 10 | 部署（Render + Vercel + Neon，前後端同站） | 真的上線，手機開得到 | ⬜ |
+| 11 | 維護（healthcheck、log、Sentry、遷移回滾、換密鑰） | 壞掉時知道去哪看、怎麼復原 | ⬜ |
+| 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ⬜ |
+| 13（20 天後自學） | Zod + React Hook Form | 表單驗證 | ⬜ |
+| 14（20 天後自學） | Tailwind CSS | 樣式 | ⬜ |
+| 15（20 天後自學） | Vitest + MSW | 前端自動化測試 | ⬜ |
+| 16（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
+
+> 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
 ---
 
@@ -1576,10 +1585,12 @@ export async function getPosts(): Promise<Post[]> {
 | --- | --- | --- |
 | **7** | **React Router** | 多頁面、需要登入的頁面 |
 | 8 | Zustand + axios | 取代手寫的 AuthContext、apiFetch |
-| 9 | TanStack Query | 管理從後端拿來的資料（快取、loading、錯誤） |
-| 10 | Zod + React Hook Form | 取代手寫的表單驗證 |
-| 11 | Tailwind CSS | 取代 inline style |
-| 12 | Vitest + MSW | 前端自動化測試 |
+| 12 | TanStack Query | 管理從後端拿來的資料（快取、loading、錯誤） |
+| 13 | Zod + React Hook Form | 取代手寫的表單驗證 |
+| 14 | Tailwind CSS | 取代 inline style |
+| 15 | Vitest + MSW | 前端自動化測試 |
+
+（關卡 9～11 插在中間，是後端的 Docker、部署、維護，所以前端套件的編號往後移。）
 
 ### 用情境看懂
 
@@ -2007,9 +2018,175 @@ createRoot(...).render(
 
 ---
 
-## 關卡 9 ～ 13
+## 關卡 9：Docker 與 CI ✅
 
-做到時再補上詳細內容。
+**改動的檔案**：
+- 新增 `backend/pyproject.toml`、`backend/uv.lock`；刪除 `backend/requirements.txt`、`backend/requirements-dev.txt`
+- 新增 `backend/Dockerfile`、`backend/.dockerignore`
+- 新增 `.github/workflows/ci.yml`
+- ruff 自動修正：幾個檔案的 import 排序、`dependencies.py` 的 `raise ... from None`
+- `README.md`：安裝步驟改用 uv
+
+### 一句話
+
+**從「在我電腦上可以跑」變成「在任何一台機器上都能用同一種方式跑起來，而且每次改動都自動驗證」。** 這是上線前的最後一哩路，下一關（部署）就是把這一關做的 image 丟到雲端。
+
+### 這關要解決什麼問題
+
+到第 8 關為止，專案只在你的電腦上跑過。要上線，會碰到三個問題：
+
+| 問題 | 症狀 | 這關的解法 |
+| --- | --- | --- |
+| **環境不一樣** | 「我這邊好好的，別人跑就壞」：Python 版本、套件版本、少裝了什麼 | `uv.lock` 鎖定版本 + **Docker** 把整個環境打包 |
+| **沒人幫你檢查** | 改了一行、推上去，才發現測試壞了、型別錯了 | **CI**：每次 push 自動跑 ruff、pytest、build |
+| **你沒有本機 Docker** | 沒辦法 `docker build`、`docker run` 來學 | **CI 就是你的 Docker 練習場**：GitHub 的虛擬機有 Docker，workflow 裡真的 build、真的跑、真的看 log |
+
+### 觀念 1：uv 與 lock 檔（對照前端的 npm）
+
+| 前端（已經在用） | 後端（這關改用） | 作用 |
+| --- | --- | --- |
+| `package.json` | `pyproject.toml` | 「我需要哪些套件」 |
+| `package-lock.json` | `uv.lock` | 「實際裝了哪個版本」，連套件的套件都記 |
+| `npm install` | `uv sync` | 照 lock 檔安裝 |
+| `npm ci` | `uv sync --frozen` | 嚴格照 lock 檔裝，對不上就失敗（CI 和 Docker 用這個） |
+| `npx vite` | `uv run uvicorn ...` | 用專案裡的套件執行指令 |
+
+原本的 `requirements.txt` 只寫套件名稱、不寫版本。今天裝和三個月後裝，版本可能不一樣，這就是「CI 突然紅了，但我什麼都沒改」最常見的原因。`uv.lock` 要**進 git**，這樣你的電腦、CI、Docker 三個地方裝出來的版本完全一樣。
+
+`uv` 另一個好處：不用再 `source venv/bin/activate`。`uv run` 會自動用 `backend/.venv`，Windows 上也不會有「指令碼執行被停用」的問題。
+
+### 觀念 2：ruff（linter）
+
+前端有 eslint，後端現在有 ruff。它會抓：沒用到的 import、import 排序、常見的 bug 寫法。設定在 `pyproject.toml` 的 `[tool.ruff]`。這關跑 `ruff check --fix` 自動修了 13 個地方（幾乎都是 import 排序），剩一個要手動改：
+
+```python
+# dependencies.py：except 裡面 raise 新的例外，要說清楚「跟原本的錯誤有沒有關係」
+raise HTTPException(...) from None   # from None：刻意不把 PyJWT 的原始錯誤帶出去
+```
+
+這是 Python 的慣例：`except` 裡 `raise` 新例外時，寫 `from err`（保留原因）或 `from None`（刻意隱藏）。這裡對外只該說「token 無效」，不該洩漏是簽章錯還是過期，所以用 `from None`。
+
+### 觀念 3：Docker
+
+**四個詞**：
+
+| 詞 | 是什麼 | 比喻 |
+| --- | --- | --- |
+| **image** | 打包好的「作業系統 + Python + 套件 + 你的程式」，唯讀 | 遊戲光碟 |
+| **container** | 把 image 跑起來的那個程序，可以跑很多個 | 正在玩的那一局 |
+| **Dockerfile** | 「怎麼做出 image」的步驟 | 光碟的製作流程 |
+| **layer** | Dockerfile 每一行產生一層，有快取 | 做蛋糕的每一層，沒變的不用重做 |
+
+**為什麼要 Docker？** 部署平台（Render、Fly、AWS……）收到的是一個 image，裡面什麼都有，它不用管你用 Python 幾版、裝了什麼。「在我電腦可以跑」的問題從此消失，因為大家跑的是同一個 image。
+
+**Dockerfile 怎麼讀**（`backend/Dockerfile`，每一行都有中文註解，這裡只講三個重點）：
+
+1. **先裝套件、最後才複製程式碼**：
+   ```dockerfile
+   COPY pyproject.toml uv.lock ./        # 只複製套件清單
+   RUN uv sync --frozen --no-dev         # 裝套件（慢，但有快取）
+   ...
+   COPY . .                              # 最後才複製程式碼
+   ```
+   layer 快取的規則是「這一行和它之前的都沒變，就直接用上次的」。程式碼天天改、套件很少改，所以程式碼放最後，改程式碼不會重裝套件。
+2. **multi-stage**：第一階段 `builder` 裝套件，第二階段只 `COPY --from=builder` 裝好的 `.venv`。第二階段沒有 uv、沒有快取，image 比較小，攻擊面也小。
+3. **CMD 做兩件事**：
+   ```dockerfile
+   CMD ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+   ```
+   - `alembic upgrade head`：**部署時自動跑遷移**，不用再手動。失敗的話容器直接退出，平台會標記部署失敗，不會跑一個資料表版本不對的後端。
+   - `--host 0.0.0.0`：聽所有網路介面。寫 `127.0.0.1` 容器外面連不進來，這是部署最常見的錯誤之一。
+   - `${PORT:-8000}`：平台會用環境變數 `PORT` 告訴你聽哪個 port，沒給就 8000。
+
+**`.dockerignore`**：跟 `.gitignore` 一樣的語法，但目的是「哪些東西不要進 image」。最重要的是 `.env`，裡面有密鑰，image 可能被推到別的地方，**絕對不能進去**。那正式環境的設定從哪來？從平台的環境變數（CI 的 `docker run -e ...` 就是在模擬這件事）。
+
+**你沒有本機 Docker，怎麼辦？** CI 的 `backend` job 就是完整的 Docker 體驗：`services` 起一個 Postgres container、`docker build` 做 image、`docker run` 跑起來、`curl` 打它、`docker logs` 看它印了什麼。四個核心指令都在 Actions 的 log 裡，而且壞了會紅。
+
+### 觀念 4：CI（GitHub Actions）
+
+**CI = 每次改動都自動驗證。** 不是等到要上線才發現壞掉。
+
+`.github/workflows/ci.yml` 的結構：
+
+```
+on:        什麼時候跑（push 到 main、開 PR、手動）
+jobs:      要做哪幾件事（backend、frontend 兩個 job，同時跑）
+  steps:   每個 job 的步驟，一步失敗整個 job 就紅
+  services: 跑步驟之前先起的 container（Postgres）
+```
+
+**為什麼測試 DB 用 `services: postgres:16` 而不是 Neon？** 不用 secret、不用網路、每次都是全新乾淨的資料庫、跑完就丟。而且這就是你第一次親眼看到「用 Docker 起一個服務、別的程式連上去」。
+
+**為什麼 `uv sync --frozen`、`npm ci`？** 嚴格照 lock 檔裝。如果你改了 `pyproject.toml` 忘了更新 lock，CI 會直接紅，逼你在本機先跑 `uv sync`（它會順便更新 lock）。這就是「CI 裝的 = 你裝的」的保證。
+
+**設定從哪來？** CI 沒有 `.env`（不進 git），所以 `env:` 區塊直接給環境變數。`config.py`（pydantic-settings）讀環境變數的優先順序高於 `.env`，所以不用改任何程式。CI 用的 `JWT_SECRET` 是假的，真的密鑰只會放在部署平台。
+
+**這個 repo 是私有的**：GitHub 免費方案私有 repo 每月 2000 分鐘 Actions，一次 CI 約 3～5 分鐘，夠用。
+
+### ⚠️ 開始前（一次性）
+
+1. 安裝 uv（見 README「需要先安裝」），`uv --version` 確認
+2. 在 `backend` 執行 `uv sync`，會建立 `backend/.venv`
+3. 舊的 `backend/venv/` 可以刪掉
+4. 之後所有後端指令前面加 `uv run`
+
+### 驗證方式
+
+1. **本機**：在 `backend`
+   ```bash
+   uv run ruff check .      # All checks passed!
+   uv run pytest -q         # 35 passed
+   ```
+2. **CI**：把這關的 commit 推上 GitHub 後，開一個 PR（或到 Actions 分頁手動按 Run workflow），看 `CI` 兩個 job 都綠。
+3. **讀 log，這才是重點**。點進 `backend` job：
+   - `Docker build`：看每一層怎麼被執行。找 `CACHED` 字樣，那就是 layer 快取
+   - `Smoke test`：看到 `{"message":"pong"}` 和 `✅ /ping OK`
+   - `Docker logs`：看到 alembic 的 `Running upgrade -> 0001 ...` 和 uvicorn 的 `Uvicorn running on http://0.0.0.0:8000`。這就是容器啟動時發生的事。
+
+### 動手玩
+
+每一個都需要 push 一次讓 CI 跑，所以開一個練習用的分支做，玩完刪掉。
+
+1. **讓測試壞掉**：把 `routes/auth.py` 裡 refresh 的 `rt.revoked = True` 註解掉（第 4 關玩過），push。CI 紅，點進去看是哪一步、哪個測試。**這就是 CI 的價值：壞掉的程式進不了 main。**
+2. **讓容器外面連不到**：Dockerfile 的 `--host 0.0.0.0` 改成 `--host 127.0.0.1`，push。`Docker build` 會過，但 `Smoke test` 會紅，而且會印出 container log：uvicorn 明明說自己跑起來了。**部署時「顯示成功但一直 502」通常就是這個。**
+3. **看快取失效**：把 Dockerfile 的 `COPY . .` 移到 `RUN uv sync` 的前面，push 兩次（第二次隨便改一個註解）。第二次的 `Docker build` log 會發現套件又重裝了一遍，因為程式碼的層在套件層前面，程式碼一變，後面全部失效。改回來。
+4. **lock 檔對不上**：在 `pyproject.toml` 的 dependencies 隨便加一個套件（例如 `"rich"`），**不要**跑 `uv sync`，直接 push。`安裝套件` 那步會紅：`--frozen` 發現 lock 檔沒有這個套件。本機跑一次 `uv sync` 再 push 就好了。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼 <code>uv.lock</code> 要進 git，<code>.venv/</code> 卻不要？</summary>
+
+`uv.lock` 是「要裝哪些版本」的清單，很小，而且大家都要用同一份才有意義。`.venv/` 是裝好的結果，幾百 MB，而且跟作業系統有關（Windows 裝的在 Linux 不能用）。前端的 `package-lock.json` 進 git、`node_modules/` 不進，是同一個道理。
+
+</details>
+
+<details>
+<summary>Q2：為什麼 <code>alembic upgrade head</code> 放在 CMD（啟動時跑），不放在 Dockerfile 的 RUN（build 時跑）？</summary>
+
+build 的時候不應該連資料庫：image 要能在任何環境用，build 時根本不知道要連哪個 DB（而且 DB 密碼不能進 image）。遷移是「對某一個資料庫」做的事，所以要在容器啟動、拿到環境變數之後才跑。
+
+</details>
+
+<details>
+<summary>Q3：CI 綠了，就代表可以上線嗎？</summary>
+
+不代表。CI 證明的是「在 CI 的環境、用 CI 的設定」能跑。正式環境的設定不一樣：不同的 DB、不同的密鑰、不同的網址、cookie 要 `Secure`。這些差異就是下一關（部署）會踩的坑，也是為什麼第 11 關要有 healthcheck 和 log：上線後還要能知道它活著。
+
+</details>
+
+<details>
+<summary>Q4：CI 裡 <code>docker run --network host</code> 是什麼意思，正式環境也這樣嗎？</summary>
+
+`--network host` 讓容器直接用虛擬機的網路，所以容器連 `localhost:5432` 就是 services 起的 Postgres，我們 `curl localhost:8000` 就是容器。這在 CI 最簡單。正式環境不會這樣：平台會給容器自己的網路，DB 用它的真實主機名稱連（`DATABASE_URL` 裡的 Neon 網址），對外的 port 由平台對應。
+
+</details>
+
+---
+
+## 關卡 10 ～ 16
+
+做到時再補上詳細內容。關卡 10（部署）、11（維護）、12（TanStack Query）排在 20 天計畫內，13～16 是 20 天後的自學清單，見 [`PLAN.md`](PLAN.md)。
 
 ---
 

@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 # 【關卡 0】密碼規則：8～72 個「可列印的 ASCII 字元」
