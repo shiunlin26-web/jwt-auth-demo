@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://把這裡換成你的-render-網址.onrender.com/api/:path*"
+      "destination": "https://jwt-auth-demo-backend.onrender.com/api/:path*"
     },
     {
       "source": "/echo/:path*",
