@@ -13,10 +13,11 @@
 
 name: CI
 
-# 什麼時候跑：推到 main、任何 PR 有新 commit、或在 Actions 分頁手動按「Run workflow」
+# 什麼時候跑：推任何分支、任何 PR 有新 commit、或在 Actions 分頁手動按「Run workflow」。
+# 一個人練習時「每次 push 都跑」最有用：在分支上做動手玩，馬上就能看到紅綠。
+# 多人專案通常只跑 main 和 PR，避免重複（PR 分支的 push 會跑兩次）。
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
