@@ -62,10 +62,10 @@ jobs:
 
     steps:
       # 把 repo 的程式碼抓進虛擬機（每次都是全新的機器，什麼都沒有）
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # 裝 uv。enable-cache 會把下載過的套件存起來，下次 CI 快很多
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -129,9 +129,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
