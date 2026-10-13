@@ -29,6 +29,7 @@ dependencies = [
     "email-validator",
     "pydantic-settings",
     "alembic",
+    "sentry-sdk[fastapi]",
 ]
 
 # 開發時才需要的套件（對應原本的 requirements-dev.txt）。

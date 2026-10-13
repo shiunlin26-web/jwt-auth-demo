@@ -11,7 +11,7 @@ CORS 網址、cookie 的 secure 直接寫死在程式碼裡。
 """
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +46,21 @@ class Settings(BaseSettings):
 
     # 是否把每一句 SQL 印在 terminal。學習時可以打開看，平常關掉（會印出 token 雜湊等敏感資料）
     db_echo: bool = False
+
+    # ---- 【關卡 11】維護相關 ----
+    # log 等級：DEBUG / INFO / WARNING / ERROR
+    log_level: str = "INFO"
+    # log 要不要輸出成 JSON（一行一筆、機器好讀）。本機看文字比較舒服，正式環境用 JSON
+    log_json: bool = False
+    # Sentry 的 DSN（錯誤追蹤服務給你的網址）。沒設定就不啟用，本機通常不設
+    sentry_dsn: str | None = None
+    # 目前跑的是哪個 commit。Render 會自動注入 RENDER_GIT_COMMIT，/api/health 會回傳它，
+    # 讓你一眼確認「線上跑的是不是我剛推的那版」
+    app_version: str | None = Field(
+        default=None, validation_alias=AliasChoices("APP_VERSION", "RENDER_GIT_COMMIT")
+    )
+    # 是否開放除錯用的端點（例如故意丟例外測 Sentry）。正式環境平常關閉，要演練時再暫時打開
+    enable_debug_endpoints: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:

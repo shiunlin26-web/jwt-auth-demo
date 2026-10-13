@@ -1,8 +1,36 @@
-from fastapi import APIRouter, FastAPI
+import logging
+import time
+import uuid
+
+import sentry_sdk
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config import settings
+from database import get_session
+from logging_config import setup_logging
 from routes import auth, users
+
+# 【關卡 11】log 設定要在最前面做，之後所有 logger 都會用同一個格式
+setup_logging(level=settings.log_level, json_output=settings.log_json)
+logger = logging.getLogger("app")
+
+# 【關卡 11】Sentry：錯誤追蹤服務。程式丟出沒接住的例外時，它會把 traceback、請求資訊、
+# 發生次數整理好寄給你，比翻 log 快很多。沒設定 SENTRY_DSN 就完全不啟用（本機通常不設）。
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        # 區分是哪個環境出錯。Render 會自動注入 RENDER=true 這個環境變數
+        environment="production" if settings.app_version else "development",
+        release=settings.app_version,
+        # 不要把使用者的 IP、cookie、authorization header 送去 Sentry（隱私）
+        send_default_pii=False,
+        # 效能追蹤先關掉，免費額度留給錯誤
+        traces_sample_rate=0.0,
+    )
+    logger.info("Sentry 已啟用")
 
 # 【關卡 5】原本這裡有 lifespan，啟動時用 SQLModel.metadata.create_all 自動建表。
 # create_all 只會建「不存在的表」，改欄位時不會更新已存在的表（關卡 1 就踩過）。
@@ -18,6 +46,46 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# 【關卡 11】每個請求記一行 log，並且給它一個 request id
+#
+# middleware = 每個請求進來、回應出去都會經過的一層。這裡做三件事：
+# 1. 產生 request_id，放進回應的 X-Request-ID header。使用者回報「我剛剛出錯了」時，
+#    請他把這個 id 給你，你就能在 log 裡找到那一筆，不用大海撈針
+# 2. 記錄方法、路徑、狀態碼、耗時。這就是「結構化 log」：每個欄位分開，可以搜尋、統計
+# 3. 沒被接住的例外（500）在這裡記下 traceback 再往外丟，確保 log 裡一定有東西，
+#    不會出現「500 但 log 什麼都沒有」（DEBUGGING.md 裡最難查的那種）
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "request failed",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+            },
+        )
+        raise
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "request",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+        },
+    )
+    return response
+
 
 # 【關卡 10】所有 API 統一掛在 /api 底下：/api/auth/login、/api/me、/api/ping
 #
@@ -36,7 +104,56 @@ api.include_router(users.router)
 
 @api.get("/ping")
 async def ping():
+    """【關卡 11】liveness：「程式活著嗎」。不碰資料庫，永遠很快。Render 的 health check 打這個"""
     return {"message": "pong"}
+
+
+@api.get("/health")
+async def health(session: AsyncSession = Depends(get_session)):
+    """【關卡 11】readiness：「能正常服務嗎」。會真的查一次資料庫，給人和監控工具看。
+
+    回傳：
+    - status：ok / degraded
+    - db：ok / error（連得到資料庫嗎）
+    - migration：目前資料庫的 alembic 版本（確認遷移有沒有跑到最新）
+    - version：目前跑的 commit（確認線上是不是你剛推的那版）
+
+    為什麼 Render 的 health check 不用這個？因為資料庫短暫斷線時，liveness 還是 ok（程式沒壞），
+    用 readiness 會讓平台以為程式壞了而不斷重啟，反而更糟。兩個分開是業界慣例。
+    """
+    db_status = "ok"
+    migration = None
+    try:
+        await session.exec(text("SELECT 1"))
+        try:
+            result = await session.exec(text("SELECT version_num FROM alembic_version"))
+            migration = result.scalar_one_or_none()
+        except Exception:
+            # 測試環境用 create_all 建表，沒有 alembic_version 這張表，不算錯
+            await session.rollback()
+            migration = "unknown"
+    except Exception:
+        logger.exception("health check: database unreachable")
+        db_status = "error"
+
+    return {
+        "status": "ok" if db_status == "ok" else "degraded",
+        "db": db_status,
+        "migration": migration,
+        "version": settings.app_version,
+    }
+
+
+@api.get("/_boom", include_in_schema=False)
+async def boom():
+    """【關卡 11】演練用：故意丟一個沒接住的例外，看 log 和 Sentry 有沒有收到。
+
+    平常關著（ENABLE_DEBUG_ENDPOINTS 預設 false，回 404），不然任何人都能幫你灌爆 Sentry 額度。
+    要演練時到 Render 的 Environment 暫時設成 true。
+    """
+    if not settings.enable_debug_endpoints:
+        raise HTTPException(status_code=404, detail="Not Found")
+    raise RuntimeError("演練：這是故意丟出來的錯誤")
 
 
 app.include_router(api)
