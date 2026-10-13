@@ -50,7 +50,7 @@
 | 8 | Zustand + axios | 用套件取代手寫的登入狀態與 apiFetch | ✅ 完成 |
 | **9** | **Docker 與 CI**（uv、ruff、Dockerfile、GitHub Actions） | 把後端打包成 image、每次 push 自動跑測試 | ✅ 完成 |
 | 10 | 部署（Render + Vercel + Neon，前後端同站） | 真的上線，手機開得到 | ✅ 完成 |
-| 11 | 維護（healthcheck、log、Sentry、遷移回滾、換密鑰） | 壞掉時知道去哪看、怎麼復原 | ⬜ |
+| 11 | 維護（healthcheck、log、Sentry、遷移回滾、換密鑰） | 壞掉時知道去哪看、怎麼復原 | ✅ 完成 |
 | 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ⬜ |
 | 13（20 天後自學） | Zod + React Hook Form | 表單驗證 | ⬜ |
 | 14（20 天後自學） | Tailwind CSS | 樣式 | ⬜ |
@@ -2358,9 +2358,149 @@ uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 ---
 
-## 關卡 11 ～ 16
+## 關卡 11：維護（上線之後的事）✅
 
-做到時再補上詳細內容。關卡 11（維護）、12（TanStack Query）排在 20 天計畫內，13～16 是 20 天後的自學清單，見 [`PLAN.md`](PLAN.md)。
+**改動的檔案**：
+- `backend/main.py`：request log middleware（request id、耗時）、`/api/health`、`/api/_boom`、Sentry 初始化
+- 新增 `backend/logging_config.py`：log 格式（文字 / JSON）
+- `backend/config.py`：`LOG_LEVEL`、`LOG_JSON`、`SENTRY_DSN`、`APP_VERSION`（自動讀 Render 的 `RENDER_GIT_COMMIT`）、`ENABLE_DEBUG_ENDPOINTS`
+- `backend/pyproject.toml`：加 `sentry-sdk[fastapi]`
+- `backend/Dockerfile`：uvicorn 加 `--no-access-log`（改由 middleware 記）
+- `render.yaml`：`LOG_JSON=true`
+- `.github/workflows/ci.yml`：加 `alembic upgrade head` + `alembic check`；smoke test 多打 `/api/health`
+- 新增 `backend/tests/test_health.py`（4 個測試，共 39 個）
+- 新增 `docs/RUNBOOK.md`（維運手冊）、`AGENTS.md` + `CLAUDE.md`（給 AI 工具的專案說明）
+
+### 一句話
+
+**上線不是終點。這關給你三樣東西：壞掉時「看得到」（log、Sentry、health），壞掉時「退得回去」（退版、roll forward），以及「壞的程式進不了正式環境」（CI 綠了才部署、branch protection）。**
+
+### 觀念 1：liveness 和 readiness 是兩個問題
+
+| | `/api/ping` | `/api/health` |
+| --- | --- | --- |
+| 回答的問題 | 程式活著嗎？ | 能正常服務嗎？ |
+| 做什麼 | 什麼都不做，回 pong | 真的查一次資料庫，回報遷移版本和 commit |
+| 誰用 | Render 的 health check | 你、監控工具、部署後的檢查 |
+| 資料庫斷線時 | 還是 ok | `degraded` |
+
+為什麼 Render 的 health check 不用 `/api/health`？因為資料庫短暫斷線時，程式本身沒壞，用 readiness 會讓平台以為程式壞了而一直重啟，反而把事情弄得更糟。Kubernetes 把這兩個分成 livenessProbe 和 readinessProbe，就是同一個道理。
+
+`/api/health` 回的 `version` 來自 Render 自動注入的 `RENDER_GIT_COMMIT`。**部署後看一眼 version 對不對，是最便宜的「我推的真的上線了嗎」檢查**。
+
+### 觀念 2：log 要能搜尋，而且要能對到「哪一個請求」
+
+本機出錯你看 terminal；正式環境你只有 log。兩件事讓 log 真的有用：
+
+1. **結構化**：每筆 log 是一行 JSON，欄位分開。Render 的 Logs 可以搜 `"status": 500`、`"path": "/api/auth/login"`。純文字做不到。
+2. **request id**：middleware 幫每個請求產生一個 id，寫進 log 也放進回應的 `X-Request-ID` header。使用者說「我剛剛出錯了」，請他給你這個 id，你直接搜到那一筆。
+
+`logging_config.py` 用的是 Python 內建的 logging，沒有額外套件。本機 `LOG_JSON=false` 看文字，正式環境 `render.yaml` 設 `LOG_JSON=true`。
+
+middleware 還做一件事：**沒被接住的例外一定會被記下 traceback 再往外丟**。「500 但 log 什麼都沒有」是最難查的狀況，這一層保證不會發生。
+
+### 觀念 3：Sentry，讓錯誤自己來找你
+
+log 要你主動去翻。Sentry 反過來：程式丟出沒接住的例外時，它把 traceback、是哪個路徑、發生幾次、第一次和最後一次的時間整理好，寄 email 給你。免費方案每月 5000 個錯誤，個人專案綽綽有餘。
+
+程式只有一段：`sentry_sdk.init(dsn=...)`。`SENTRY_DSN` 沒設就完全不啟用，本機不用。`send_default_pii=False` 是刻意的：不把使用者 IP、cookie、authorization header 送出去。
+
+### 觀念 4：遷移壞了不要「退」，要「往前修」
+
+正式環境**不要**手動 `alembic downgrade`。原則叫 **roll forward**：推一個新的遷移把它修正。原因是 `alembic_version` 表記著「跑到哪一版」，手動退版後程式碼和資料庫的認知就不一致了，下次部署會更亂。
+
+安全的改表習慣：**刪欄位、改型別要分兩次部署**。第一次先加新欄位、讓程式不再用舊的；第二次才刪。這樣任何時候退版，舊版程式都還跑得動。完整流程在 `RUNBOOK.md` 第 3 節。
+
+### 觀念 5：換 JWT_SECRET 幾乎無感，因為 refresh token 不是 JWT
+
+這是第 1 關設計的回報。access token 是 JWT，換了密鑰舊的全部失效，但它只有 30 分鐘。refresh token 是隨機字串、DB 存雜湊，**和密鑰無關**。所以換密鑰後：使用者下一個請求 401 → 前端自動 refresh → 拿到新密鑰簽的 access token。**不用重新登入**。如果當初 refresh token 也用 JWT，換密鑰就是全站登出。
+
+### 觀念 6：備份
+
+這個專案的資產就是 Neon 裡的 `user` 表。Neon 有內建還原（從某個時間點建分支），免費方案可回溯的時間有限。手動備份用 `pg_dump`。原則只有一條：**刪資料前先備份**。
+
+### 觀念 7：CI 綠了才部署 + branch protection
+
+到第 10 關為止，推 main 就部署，**就算 CI 紅了 Render 照樣部署**。這關把它關起來，兩層：
+
+1. **Render：After CI Checks Pass**。CI 紅就不部署。
+2. **GitHub branch protection**：main 不能直接 push，要走 PR，而且 `backend`、`frontend` 兩個 check 綠了才能合併。
+
+有了這兩層，「壞的程式進正式環境」的路就被堵死了。另外 CI 多了 `alembic check`：改了 `models.py` 沒寫遷移，CI 會紅（故障演練清單第 4 條，本機測試抓不到，因為測試用 `create_all` 建表）。
+
+### ⚠️ 開始前（一次性）
+
+**1. Sentry**（約 10 分鐘）
+- sentry.io → Sign up，用 GitHub 登入，選免費的 Developer 方案
+- Create Project → Platform 選 **FastAPI** → 名稱 `jwt-auth-demo-backend` → Create
+- 它會顯示一段 `sentry_sdk.init(dsn="https://...")`，**只複製 dsn 那串網址**
+- Render → 服務 → Environment → Add → `SENTRY_DSN` = 那串 → Save（會自動重新部署）
+- Render Logs 裡應該看到 `Sentry 已啟用`
+
+**2. Render：CI 綠了才部署**
+- Render → 服務 → Settings → Build & Deploy → **Auto-Deploy** → 改成 **After CI Checks Pass** → Save
+- 免費方案如果沒有這個選項：改成 **Off**，然後在 GitHub Actions 的 workflow 最後加一步，CI 通過後打 Render 的 Deploy Hook（Settings → Deploy Hook 複製網址，存成 GitHub Secret）。要走這條告訴 Claude，會幫你加
+
+**3. GitHub branch protection**
+- GitHub repo → Settings → **Rules → Rulesets** → New ruleset → New branch ruleset
+- Name：`main`；Enforcement：Active；Target branches：Add target → Include default branch
+- 勾 **Require a pull request before merging**（Required approvals 設 0，一個人的專案不用審）
+- 勾 **Require status checks to pass** → Add checks → 搜 `backend` 和 `frontend` 兩個都加
+- Create
+
+之後你（和 Claude）都不能直接推 main，一律開 PR。這就是從第 9 關開始一直在做的流程，現在變成強制。
+
+### 驗證方式
+
+1. **本機**：`uv run pytest -q` 39 passed；`uv run alembic check` 顯示 `No new upgrade operations detected`
+2. **本機看 JSON log**：`.env` 暫時加 `LOG_JSON=true`，啟動後端，打 `/api/ping`，terminal 每行是一筆 JSON，有 `request_id`、`duration_ms`。看完改回來
+3. **正式**：`https://jwt-auth-demo-backend.onrender.com/api/health` 的 `db` 是 `ok`、`migration` 是 `0004`、`version` 是 main 最新 commit 的前幾碼
+4. **Render Logs**：打一次前端登入，Logs 裡找到 `"path": "/api/auth/login"` 那筆，有 `request_id`、`status`、`duration_ms`
+5. **CI**：Actions 裡多了「遷移檢查」那步，smoke test 印出 `/api/health` 的內容
+
+### 動手玩
+
+1. **觸發一個真的錯誤，看 Sentry 和 log**：Render → Environment → `ENABLE_DEBUG_ENDPOINTS` = `true` → Save（重新部署）→ 開 `後端網址/api/_boom` → 500。Render Logs 找 `"level": "ERROR"` 那筆，有完整 traceback 和 `request_id`；一分鐘內 Sentry 收到 email 和一個新 issue。**玩完改回 `false`**。
+2. **推一個會讓 CI 紅的 commit，看 Render 不部署**：開分支，把 `routes/auth.py` 的 `rt.revoked = True` 註解掉，開 PR。CI 紅，GitHub 的 Merge 按鈕被擋住（branch protection）。關掉 PR 不要合。
+3. **改了 models.py 沒寫遷移**：開分支，`models.py` 的 `User` 加一個欄位 `nickname: str | None = None`，**不要**跑 alembic revision，開 PR。本機 pytest 會過，但 CI 的「遷移檢查」會紅。這就是故障演練第 4 條，提前讓你看一次。關掉 PR。
+4. **退版演練**：Render → Events → 找上一個成功的部署 → Rollback。看 `/api/health` 的 `version` 變成舊的 commit。再 Manual Deploy 回最新。
+5. **本機遷移退一版**：`uv run alembic downgrade -1` → `uv run alembic current` 看變 0003 → Neon 的 `user` 表 `nickname` 欄位回來了（0004 是刪它）→ `uv run alembic upgrade head`。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼 <code>/api/_boom</code> 要用環境變數開關，而不是直接寫在程式裡？</summary>
+
+因為它會讓任何知道網址的人幫你製造錯誤，灌爆 Sentry 的免費額度，log 也會被洗版。原則：**除錯用的東西預設關閉**，要用時才打開，用完關掉。這和 `DB_ECHO` 一樣。
+
+</details>
+
+<details>
+<summary>Q2：request id 為什麼要先看請求有沒有帶 <code>X-Request-ID</code>，沒有才自己產生？</summary>
+
+為了串接。如果前面還有一層（Vercel、API gateway、或別的服務呼叫你），它們可能已經有一個 id，沿用它才能把整條鏈的 log 串起來。這是分散式追蹤最簡化的版本。
+
+</details>
+
+<details>
+<summary>Q3：有了 branch protection，Claude 之後怎麼幫你推程式？</summary>
+
+一樣開 PR，等 CI 綠，你（或 Claude）按 Merge。差別只是「直接推 main」這條路被堵掉了，對誰都一樣。練習專案也建議一開始就設，這樣 AI 拼出來的東西一定經過 CI 才能上線。
+
+</details>
+
+<details>
+<summary>Q4：Sentry 和 log 都有錯誤資訊，為什麼兩個都要？</summary>
+
+log 是全部的紀錄，包含正常的請求，用來「查某一次發生了什麼」。Sentry 只收錯誤，但會幫你分組、計數、通知，用來「知道有事發生、哪個最嚴重」。一個是檔案櫃，一個是警報器。
+
+</details>
+
+---
+
+## 關卡 12 ～ 16
+
+做到時再補上詳細內容。關卡 12（TanStack Query）排在 20 天計畫內，13～16 是 20 天後的自學清單，見 [`PLAN.md`](PLAN.md)。
 
 ---
 

@@ -20,6 +20,7 @@ jwt-auth-demo/
 │   │   ├── auth.py        # 註冊、登入、refresh、登出、登出所有裝置、修改密碼
 │   │   └── users.py       # /me（需要登入）
 │   ├── config.py          # 所有設定集中在這裡（讀 .env）
+│   ├── logging_config.py  # log 格式（文字 / JSON）
 │   ├── alembic.ini        # Alembic（資料庫遷移）設定
 │   ├── migrations/        # 資料庫遷移檔，記錄資料表結構的每一次變更
 │   ├── tests/             # pytest 自動化測試
@@ -29,6 +30,7 @@ jwt-auth-demo/
 │   ├── .dockerignore      # build image 時排除 .env、.venv 等
 │   └── .env.example
 ├── render.yaml                # Render 部署設定（後端）
+├── AGENTS.md                  # 給 AI 工具（與人）看的專案規矩；CLAUDE.md 指向它
 ├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pytest、Docker build、前端 build
 └── frontend/src/
     ├── app/
@@ -218,7 +220,8 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 
 | Method | Path | 說明 | 認證 |
 | --- | --- | --- | --- |
-| GET | `/api/ping` | 健康檢查 | – |
+| GET | `/api/ping` | 活著嗎（不碰資料庫，Render health check 用） | – |
+| GET | `/api/health` | 能服務嗎：資料庫連線、遷移版本、目前 commit | – |
 | POST | `/api/auth/register` | 註冊 `{ email, password }` | – |
 | POST | `/api/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie | – |
 | POST | `/api/auth/refresh` | 用 cookie 裡的 refresh token 換新的 access token（同時輪替 refresh token） | Cookie |
@@ -241,6 +244,7 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 
 後端在 Render（`render.yaml`）、前端在 Vercel（`frontend/vercel.json`）、資料庫在 Neon，全部免費方案。
 完整步驟、觀念與會踩的坑見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10；出問題先查 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)。
+上線後的維運（看 log、退版、換密鑰、備份）見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，關卡 11。
 
 ## 每次 `git pull` 之後
 

@@ -77,6 +77,14 @@ jobs:
       - name: Lint（ruff）
         run: uv run ruff check .
 
+      # 【關卡 11】遷移檔和 models.py 對不對得上？
+      # 先把 DATABASE_URL 那個資料庫用遷移升到最新，再用 alembic check 比對 models.py：
+      # 有人改了 models.py 卻沒產生遷移檔，這一步會紅（本機測試用 create_all 建表，抓不到這種錯）
+      - name: 遷移檢查（alembic upgrade + check）
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+
       - name: 測試（pytest）
         run: uv run pytest -q
 
@@ -104,11 +112,16 @@ jobs:
 
       # 等它啟動（要先跑 alembic upgrade head 再起 uvicorn），最多等 30 秒，然後打 /ping。
       # 失敗就印出 container 的 log 再讓這一步紅掉，這樣你在 Actions 畫面就能直接看到原因
-      - name: Smoke test（curl /api/ping）
+      # 【關卡 11】ping 通了再打 /api/health：確認容器裡的程式真的連得到資料庫、遷移版本正確
+      - name: Smoke test（curl /api/ping、/api/health）
         run: |
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:8000/api/ping; then
-              echo; echo "✅ /api/ping OK"; exit 0
+              echo; echo "✅ /api/ping OK"
+              echo "--- /api/health ---"
+              curl -fsS http://localhost:8000/api/health | tee health.json; echo
+              grep -q '"db": *"ok"' health.json || { echo "❌ /api/health 說資料庫連不上"; exit 1; }
+              exit 0
             fi
             sleep 1
           done

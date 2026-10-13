@@ -58,6 +58,18 @@
 | Render Dashboard 找不到以前的服務，以為被新的蓋掉 | 新服務在 Overview 的 Ungrouped Services，舊服務在某個 Project 裡；Project 只是分組 | 點 My projects；或把新服務 Move to project | 10 |
 | 推了程式碼，Vercel 有部署、Render 沒有 | Render 只看 `render.yaml` 的 `branch: main`；或 Render 的 Auto-Deploy 被關掉 | 確認推的是 main；Render 服務 Settings → Build & Deploy → Auto-Deploy | 10 |
 
+## 維護（關卡 11）
+
+| 症狀 | 原因 | 修法 | 關卡 |
+| --- | --- | --- | --- |
+| `/api/health` 的 `version` 和 main 最新 commit 對不上 | Render 還沒部署完、Auto-Deploy 設成 After CI Checks Pass 但 CI 紅了、或 Auto-Deploy 是 Off | Render Events 看最近一次部署；GitHub Actions 看 CI | 11 |
+| `/api/health` 的 `db` 是 `error` | 資料庫連不上：`DATABASE_URL` 錯、Neon 專案被刪或暫停、剛換密碼 | Render Logs 找 `health check: database unreachable` 那筆的 traceback | 11 |
+| `/api/health` 的 `migration` 不是最新 | 啟動時的 `alembic upgrade head` 沒成功 | Render Logs 找 alembic 段的錯誤；見 RUNBOOK 第 3 節 | 11 |
+| Sentry 沒收到任何東西 | `SENTRY_DSN` 沒設或設錯；或程式有接住例外（接住的不會送） | Render Logs 啟動時有沒有 `Sentry 已啟用`；用 `/api/_boom` 測 | 11 |
+| 500 但 log 裡找不到 | middleware 之前就壞了（例如 `config.py` 讀設定失敗），或 log 等級設太高 | 看 Render Logs 啟動段；`LOG_LEVEL` 不要高於 INFO | 11 |
+| Render Logs 裡的 log 是一整段 JSON 看不懂 | 正式環境 `LOG_JSON=true` 是刻意的，一行一筆、可搜尋 | 用 Logs 的搜尋欄搜 `request_id`、`"status": 500` | 11 |
+| 直接 push main 被拒絕：`protected branch` | branch protection 生效了 | 開分支、開 PR、CI 綠了再 Merge | 11 |
+
 ## 登入邏輯（本機就會遇到）
 
 | 症狀 | 原因 | 修法 | 關卡 |

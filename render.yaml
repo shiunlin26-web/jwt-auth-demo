@@ -17,7 +17,9 @@ services:
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend             # docker build 的「.」是哪個資料夾
     healthCheckPath: /api/ping           # Render 用這個路徑判斷服務活著沒；啟動後打不通就算部署失敗
-    # autoDeployTrigger: checksPass      # 【關卡 11】CI 綠了才部署。先用預設（推 main 就部署），第 11 關再開
+    # 【關卡 11】「CI 綠了才部署」在 Dashboard 設定：服務 → Settings → Build & Deploy → Auto-Deploy → After CI Checks Pass。
+    # Blueprint 也有對應欄位（autoDeployTrigger: checksPass），但免費方案與欄位名稱未經官方文件確認，
+    # 為了不讓 Blueprint 同步失敗，這裡不寫，用 Dashboard 設定
     envVars:
       # sync: false → 值不寫在這個檔案裡（它會進 git！），建立服務時 Render 會問你
       - key: DATABASE_URL
@@ -27,5 +29,10 @@ services:
       # 正式環境一定是 https，cookie 要加 Secure
       - key: COOKIE_SECURE
         value: "true"
+      # 【關卡 11】log 輸出成 JSON，Render 的 Logs 分頁可以搜尋欄位
+      - key: LOG_JSON
+        value: "true"
+      # 【關卡 11】SENTRY_DSN 不寫在這裡：有 Sentry 帳號之後，到 Render 的 Environment 分頁手動加。
+      # 寫成 sync: false 會讓每次 Blueprint 同步都問你，沒有 Sentry 的人會卡住
       # Dockerfile 的 CMD 會讀 $PORT；Render 自己會注入，這裡不用設。
       # CORS_ORIGINS 不用設：前端經過 Vercel 代理，對瀏覽器來說是同一個網站，沒有跨網域請求。
