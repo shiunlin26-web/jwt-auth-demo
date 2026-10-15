@@ -1983,6 +1983,7 @@ createRoot(...).render(
    const { useAuthStore } = await import("/src/auth/authStore.ts"); useAuthStore.getState();
    ```
    會看到 `accessToken`、`user`、`notice` 等目前的值。這就是 Zustand「在 React 外面也能讀」的效果。
+   > 關卡 12 起 `user` 不在 store 裡了（搬到 TanStack Query），這裡只會看到 `accessToken`、`notice`、`initialized`；使用者資料改看右下角的 Devtools。
 2. **從外面改 store，畫面會跟著變**：接著輸入：
    ```js
    useAuthStore.getState().setNotice("我從 Console 改的！");

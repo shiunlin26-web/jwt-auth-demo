@@ -29,8 +29,8 @@
 
 **進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。此刻（2026-10-15）：
 
-- 關卡 0～11 已合併到 `main`，正式環境在線上（Render + Vercel + Neon）。
-- 關卡 12 與交接文件（本文件、`CHAIN.md`、`QA.md`）於 2026-10-15 推上分支 `claude/optimistic-newton-v16d55`。`git log --oneline origin/main -3` 看不到「關卡 12」就代表 PR 還沒合併，接手的第一件事是開 PR、等 CI 綠、合併。合併後把這兩行改成「關卡 0～12 已合併」。
+- 關卡 0～12 已合併到 `main`（PR #5，2026-10-15），正式環境在線上（Render + Vercel + Neon）。
+- 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
 - **範例專案（本 repo）已凍結**：之後只改文件、修 bug，不加功能。它的用途是被複製到其他專案當登入模板。
 - 關卡 13～16 是學習者自己的自學清單（`LEARNING.md` 末尾有每一項的開場提示）。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次。
@@ -80,6 +80,8 @@
 7. 刻意不碰：Kubernetes、Terraform、docker compose、前端 Dockerfile、自訂網域、slowapi。
 8. 範例專案凍結。練習專案題目由學習者決定，AI 不要代選（`PLAN.md` 原本寫「待辦含分類」，2026-10-15 改為另行決定，PLAN 本文保留歷史）；他說題目之前，先做跟題目無關的事（開 repo、環 1～6 都不需要題目）。
 9. 文件全中文；AI 指引放 `AGENTS.md`，`CLAUDE.md` 只指向它，避免綁定單一工具。
+10. **架構與程式碼要是現代開發的專業水準**（2026-10-15 補充）。「這是教學模板」不是降低標準的理由：型別檢查、格式化、lint、測試、CI 全綠才合併，安全細節（例如 bcrypt 不能擋住 event loop、註冊的競態要處理）照正式專案的標準做。教學註解是加在專業程式碼上，不是用來解釋為什麼偷懶。
+11. **會碰到付費門檻的事要提早說**（2026-10-15 補充）。部署平台的設定、第三方服務的方案，只要有可能跳出付費頁，動手前先告訴學習者「這一步可能要錢，免費替代方案是＿＿」，讓他決定。已知的邊界：Render 的「After CI Checks Pass」在免費方案不一定有（替代：Deploy Hook）、Render Pre-Deploy Command 要付費（已改用啟動時跑遷移）、Railway 沒有長期免費方案（已排除）、GitHub Actions 私有 repo 每月 2000 分鐘、Neon / Sentry / Vercel Hobby 的額度見 `PLAN.md` 查證表。
 
 ## 6. 文件地圖
 

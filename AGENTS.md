@@ -21,7 +21,7 @@ JWT 登入的教學範本：FastAPI 後端 + React 前端 + Neon Postgres，已�
 backend/            FastAPI。入口 main.py，設定 config.py，資料表 models.py，遷移 migrations/
   routes/           auth.py（註冊、登入、refresh、登出、改密碼）、users.py（/me）
   tests/            pytest，需要 TEST_DATABASE_URL
-frontend/src/       React + Vite。api/（axios）、auth/（Zustand store、守門員）、pages/、components/
+frontend/src/       React + Vite。api/（axios、TanStack Query 快取）、auth/（Zustand store、useMe、守門員）、pages/、components/
 .github/workflows/  CI：ruff、alembic check、pytest、Docker build/run/smoke、前端 lint/build
 render.yaml         Render 後端設定；frontend/vercel.json：Vercel 轉發 /api 到 Render
 ```
@@ -53,6 +53,8 @@ npm run lint && npm run build
 - 改了 `pyproject.toml` 要跑 `uv sync` 並把 `uv.lock` 一起 commit；改了 `package.json` 要把 `package-lock.json` 一起 commit。
 - 推之前本機跑：`uv run ruff check .`、`uv run pytest -q`、`npm run lint`、`npm run build`。
 - `.env` 永遠不進 git；密鑰只放平台的環境變數。
+- **架構與程式碼以現代開發的專業水準為準**。這是教學模板，但教學註解是加在專業程式碼上，不是降低標準的理由：型別檢查、格式化、lint、測試、CI 全綠才合併；安全與效能細節照正式專案做。
+- **會碰到付費門檻的事，動手前先說**。部署平台的設定、第三方服務的方案，只要可能跳出付費頁，先告訴學習者「這步可能要錢，免費替代是＿＿」，由他決定。已知邊界列在 `docs/HANDOFF.md` 第 5 節第 11 條。
 
 ## AI 在練習專案裡的規則（也適用這裡）
 
