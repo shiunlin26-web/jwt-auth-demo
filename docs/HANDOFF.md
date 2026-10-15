@@ -29,12 +29,13 @@
 
 **進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。此刻（2026-10-15）：
 
-- 關卡 0～12 全部完成，已合併到 `main`，正式環境在線上（Render + Vercel + Neon）。
+- 關卡 0～11 已合併到 `main`，正式環境在線上（Render + Vercel + Neon）。
+- 關卡 12 與交接文件（本文件、`CHAIN.md`、`QA.md`）於 2026-10-15 推上分支 `claude/optimistic-newton-v16d55`。`git log --oneline origin/main -3` 看不到「關卡 12」就代表 PR 還沒合併，接手的第一件事是開 PR、等 CI 綠、合併。合併後把這兩行改成「關卡 0～12 已合併」。
 - **範例專案（本 repo）已凍結**：之後只改文件、修 bug，不加功能。它的用途是被複製到其他專案當登入模板。
 - 關卡 13～16 是學習者自己的自學清單（`LEARNING.md` 末尾有每一項的開場提示）。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次。
 
-接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions）、線上 `/api/health` 的 `db` 是 `ok`。
+接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-15，關卡 12 的 CI 綠；線上 health 由學習者自己開一次。
 
 ## 3. 一關要長什麼樣（給 AI 產出新關卡用）
 
@@ -63,7 +64,7 @@
 5. **修 bug 先講根本原因**，再改。他要學的是找原因的方法，不是修好的結果。
 6. **不確定就問**。尤其是會影響架構的決定（例如 cookie 的 SameSite、要不要加一張表）。
 7. **弄壞是設計的一部分**。「動手玩」刻意讓東西壞掉。他回報「壞了」不是求救，先問他「你覺得為什麼」。
-8. **每三天一次集中問答**。練習專案期間他會在 `QUESTIONS.md` 累積疑問（`PLAN.md`「練習專案的規則」第 4 條）。
+8. **每三天一次集中問答**。練習專案期間他會在**練習專案 repo 根目錄**的 `QUESTIONS.md` 累積疑問（`PLAN.md`「練習專案的規則」第 4 條；本 repo 沒有這個檔）。
 9. **不要替他寫練習專案**。練習專案的規則是：他下任務（可以直接貼 `CHAIN.md` 的任務描述），AI 做，他驗收。AI 在練習專案裡一樣只做被要求的事。
 
 ## 5. 已經定了的事（不要再問）
@@ -75,9 +76,9 @@
 3. 技術棧固定：FastAPI + SQLModel + Alembic + pytest + uv + ruff；React 19 + Vite + React Router + Zustand + axios + TanStack Query。**練習專案用同一套**，換棧是 20 天後自己的事。
 4. 正式環境**前後端同站**：Vercel rewrites 把 `/api/*` 轉到 Render，cookie 保持 `SameSite=Lax`。不用 `SameSite=None` 硬撐（理由見 `QA.md`）。
 5. 遷移在容器啟動時跑（`alembic upgrade head && uvicorn ...`），不用付費的 Pre-Deploy。
-6. CI 綠了才部署；main 有 branch protection，一律走 PR。
+6. CI 綠了才部署；main 有 branch protection，一律走 PR。「CI 綠了才部署」是用 Render Dashboard 的 Auto-Deploy: After CI Checks Pass（`ci.yml` 裡沒有 Deploy Hook，所以不是那條備案）。接手時到 Render → Settings → Build & Deploy 看一眼確認。
 7. 刻意不碰：Kubernetes、Terraform、docker compose、前端 Dockerfile、自訂網域、slowapi。
-8. 範例專案凍結。練習專案題目由學習者決定，AI 不要代選；他說題目之前，先做跟題目無關的事（開 repo、環 1）。
+8. 範例專案凍結。練習專案題目由學習者決定，AI 不要代選（`PLAN.md` 原本寫「待辦含分類」，2026-10-15 改為另行決定，PLAN 本文保留歷史）；他說題目之前，先做跟題目無關的事（開 repo、環 1～6 都不需要題目）。
 9. 文件全中文；AI 指引放 `AGENTS.md`，`CLAUDE.md` 只指向它，避免綁定單一工具。
 
 ## 6. 文件地圖
@@ -117,9 +118,13 @@
 
 每一段都假設對方是一個沒有任何對話記憶的 AI，而且已經能讀這個 repo。
 
-**接手帶練習專案：**
+**接手帶練習專案（題目還沒定，先做環 1～6）：**
 
-> 先讀 `AGENTS.md` 和 `docs/HANDOFF.md`。我是這個 repo 的學習者，接下來要開一個新的練習專案，照 `docs/CHAIN.md` 的七環走一遍。題目是：＿＿＿。現在從環 1 開始：請把 `CHAIN.md` 環 1 的「給 AI 的任務」套到這個題目上，列出你要做的事和驗收標準，等我確認再動手。做完只做被要求的事，並列出「我注意到但你沒要求、所以我沒做」的清單。
+> 先讀 jwt-auth-demo 的 `AGENTS.md` 和 `docs/HANDOFF.md`。我是它的學習者，接下來要開一個新的練習專案，照 `docs/CHAIN.md` 的七環走一遍。題目還沒定，環 1～6 跟題目無關，先走。新 repo 的 `AGENTS.md` 用 `CHAIN.md` 附錄 B 的範本。現在從環 1 開始：把 `CHAIN.md` 環 1「給 AI 的任務」整段當成我的任務，技術棧跟 jwt-auth-demo 一樣，列出你要做的事和驗收標準（照環 1 的四條），等我確認再動手。只做被要求的事，做完列出「我注意到但你沒要求、所以我沒做」的清單。commit 由我自己下。
+
+**接手帶練習專案（題目已定，進入環 7）：**
+
+> 先讀 jwt-auth-demo 的 `AGENTS.md` 和 `docs/HANDOFF.md`。練習專案環 1～6 已完成、已上線、CI 綠。題目是：＿＿＿。現在做環 7 的第一個功能：＿＿＿。把 `docs/CHAIN.md` 環 7「給 AI 的任務」套到這個功能上，列出你要做的事和驗收標準，等我確認再動手。只做這個功能，做完列出「我注意到但你沒要求、所以我沒做」的清單。
 
 **接手帶範例專案的自學關卡：**
 
@@ -142,3 +147,5 @@
 - `PLAN.md` 的 20 天時程已經過期（實際進度比它快），只當設計理由看，不當行事曆。
 - 兩個分頁同時重新整理可能觸發 refresh token 的重複使用偵測而雙雙登出（關卡 1 Q2、關卡 6 Q4），刻意沒解，練習專案知道有這回事就好。
 - 免費方案的條款會變；`PLAN.md` 的查證是 2026-10-12 的結果。
+- 各關卡文件裡的「測試有幾個」是當時的數字（關卡 4 寫 34、關卡 11 寫 39），以 `uv run pytest -q` 的輸出為準。
+- 這份文件的第 2 節會過期。每次合併 PR、換工具、進度變，都要更新它。
