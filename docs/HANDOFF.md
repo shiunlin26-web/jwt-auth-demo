@@ -29,10 +29,10 @@
 
 **進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。此刻（2026-10-15）：
 
-- 關卡 0～15 已完成（0～12 合併於 PR #5，13 起各自一個 PR），正式環境在線上（Render + Vercel + Neon）。
+- 關卡 0～16 已完成（0～12 合併於 PR #5，13 起各自一個 PR），正式環境在線上（Render + Vercel + Neon）。
 - 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
 - **範例專案（本 repo）已凍結**：之後只改文件、修 bug、合 Dependabot 的 PR，不加功能。它的用途是被複製到其他專案當登入模板。
-- 關卡 16～17 是學習者自己的自學清單（`LEARNING.md` 末尾有每一項的開場提示），由 AI 接續做或學習者自學皆可。
+- 關卡 17（slowapi 頻率限制）是選做，`LEARNING.md` 末尾有開場提示。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次。
 
 接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-15，關卡 12 的 CI 綠；線上 health 由學習者自己開一次。
@@ -130,7 +130,7 @@
 
 **接手帶範例專案的自學關卡：**
 
-> 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 16（Vitest + MSW）。先讀關卡 4 的測試觀念和 `client.ts` 的攔截器，再給我這關的「觀念」段落，等我讀完說 OK 再寫程式。一關一個 commit，中文訊息。
+> 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 17（slowapi 頻率限制）。先讀 `routes/auth.py` 的 login 和關卡 11 的 middleware，再給我這關的「觀念」段落，等我讀完說 OK 再寫程式。一關一個 commit，中文訊息。
 
 **壞掉了：**
 
@@ -144,7 +144,7 @@
 
 ## 9. 已知的限制與沒做的事
 
-- 本 repo 沒有前端自動化測試（關卡 16 的自學內容）。前端的驗證靠 `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm run build` 和手動操作。
+- 前端測試（關卡 16）只覆蓋攔截器、守門員、登入表單；沒有端對端測試（Playwright），主路徑靠手動或練習專案再加。
 - `LEARNING.md` 已完成的關卡是歷史紀錄：裡面的檔名、指令是當時的版本（例如關卡 6 以前用 `App.tsx`、關卡 9 以前用 `pip`）。開頭和關卡 6 有換算說明，不要回去改寫。
 - `PLAN.md` 的 20 天時程已經過期（實際進度比它快），只當設計理由看，不當行事曆。
 - 兩個分頁同時重新整理可能觸發 refresh token 的重複使用偵測而雙雙登出（關卡 1 Q2、關卡 6 Q4），刻意沒解，練習專案知道有這回事就好。

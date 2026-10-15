@@ -263,7 +263,8 @@
 | 檔案 | 搬過去要改什麼 |
 | --- | --- |
 | `package.json`、`package-lock.json`、`.nvmrc` | 改 `name`。搬完 `npm ci` |
-| `vite.config.ts`、`vercel.json`、`tsconfig*.json`、`eslint.config.js`、`.prettierrc`、`.prettierignore`、`index.html` | `vercel.json` 的 `destination` 改成新的 Render 網址；`index.html` 的 `<title>`；其他不用改 |
+| `vite.config.ts`、`vitest.config.ts`、`vercel.json`、`tsconfig*.json`、`eslint.config.js`、`.prettierrc`、`.prettierignore`、`index.html` | `vercel.json` 的 `destination` 改成新的 Render 網址；`index.html` 的 `<title>`；其他不用改 |
+| `src/test/setup.ts`、`src/test/server.ts`、`src/api/client.test.ts`、`src/auth/RequireAuth.test.tsx`、`src/components/LoginForm.test.tsx` | 不用改。新功能的測試照 `LoginForm.test.tsx` 的樣子寫在被測檔案旁邊；`server.ts` 的 `handlers` 加新 API 的預設回應 |
 | `src/main.tsx` | 不用改（`initializeAuth()`、`QueryClientProvider`、`RouterProvider`） |
 | `src/api/client.ts`、`src/api/auth.ts`、`src/api/queryClient.ts` | 不用改。新功能的 API 另開 `src/api/todos.ts`，用 `api.get` / `api.post`（會自動帶 token、自動 refresh） |
 | `src/auth/authStore.ts`、`authService.ts`、`useAuth.ts`、`useMe.ts`、`RequireAuth.tsx`、`GuestOnly.tsx` | 不用改。新功能的 query / mutation 照 `useMe.ts` 的樣子另開 `src/features/<功能>/queries.ts`（`LEARNING.md` 關卡 12 有範例） |

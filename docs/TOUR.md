@@ -1,4 +1,4 @@
-# 專案導覽：從零讀懂整個專案（到關卡 15）
+# 專案導覽：從零讀懂整個專案（到關卡 16）
 
 給**剛接手這個專案的人**，也給**複習用**。
 
@@ -33,7 +33,7 @@
 | 6 | 帶通行證進門 | `dependencies.py`、`routes/users.py` | ⭐⭐⭐ |
 | 7 | 續期：refresh 輪替 | `routes/auth.py`（refresh） | ⭐⭐⭐ |
 | 8 | 登出與改密碼 | `routes/auth.py`（其餘） | ⭐⭐ |
-| 9 | 自動化測試 | `tests/` | ⭐ |
+| 9 | 自動化測試 | `backend/tests/`、`frontend/src/**/*.test.ts(x)` | ⭐ |
 | **前端** | | | |
 | 10 | 前端怎麼啟動、換頁 | `main.tsx`、`app/router.tsx`、`app/AppLayout.tsx` | ⭐⭐ |
 | 11 | 守門員 | `auth/RequireAuth.tsx`、`auth/GuestOnly.tsx` | ⭐⭐ |
@@ -402,6 +402,8 @@ cookie 裡的 refresh token
 
 **⭐ 讀一個測試**：準備（註冊）→ 動作（登入）→ 檢查（`assert` 狀態碼、cookie、資料筆數）
 
+**前端也有了**（關卡 16）：`frontend/src/**/*.test.ts(x)`，用 Vitest 跑、MSW 當假後端。`client.test.ts` 測攔截器（401 換證、single-flight、`_retry`），`RequireAuth.test.tsx` 測守門員三種狀態，`LoginForm.test.tsx` 測表單。`npm test` 兩秒跑完。
+
 ### 自我檢查
 
 - [ ] 怎麼只跑名字裡有 refresh 的測試？（`python -m pytest -k refresh`）
@@ -671,4 +673,4 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 - 每一站的「自我檢查」都答得出來，就代表你讀懂這個專案了
 - 想知道某一關**為什麼**這樣設計 → `LEARNING.md` 對應的關卡
 - 要把登入功能**搬到別的專案** → `LEARNING.md` 關卡 6「之後其他專案怎麼用」（注意關卡 8、12 之後的檔案清單）
-- 下一步 → 關卡 0～15 都完成了。要開練習專案 → `CHAIN.md`；關卡 14～17 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`
+- 下一步 → 關卡 0～16 都完成了。要開練習專案 → `CHAIN.md`；關卡 14～17 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`

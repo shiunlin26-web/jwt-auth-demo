@@ -193,6 +193,8 @@ GET  /api/me            → 200（用新 token 重試）
 
 ## 5. 跑測試（選用）
 
+前端：在 `frontend` 執行 `npm test`（Vitest + MSW 假後端，不需要後端在跑）。下面是後端的測試。
+
 測試會清空資料表，所以要用**另一個資料庫**：
 
 - Neon：到 SQL Editor 執行 `CREATE DATABASE jwtdemo_test;`

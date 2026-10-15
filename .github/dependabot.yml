@@ -22,6 +22,10 @@ updates:
     groups:
       npm-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # @types/node 的大版本要跟實際跑的 Node 版本（.nvmrc）一致，不跟著最新版走
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # CI 用的 actions（actions/checkout 之類）也會過期
   - package-ecosystem: "github-actions"
