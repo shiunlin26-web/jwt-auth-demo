@@ -65,12 +65,11 @@ jwt-auth-demo/
 電腦每次開機都是乾淨系統的話，不用照下面一步一步做，用 `scripts/setup.ps1`。第一次在 PowerShell 貼：
 
 ```powershell
-winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
 git clone https://github.com/shiunlin26-web/jwt-auth-demo.git $HOME\jwt-auth-demo
 & $HOME\jwt-auth-demo\scripts\setup.ps1
 ```
 
-之後每次開機只要最後一行。它會裝工具、拉最新 main、問你 Neon 的連線字串（或用 `-EnvFile D:\jwt.env` 從 USB 讀）、`uv sync`、`npm ci`、跑一次測試當基準線。細節在腳本開頭的註解。
+（機器上連 git 都沒有時，先到 git-scm.com 裝 git，或有 winget 的話 `winget install Git.Git`。）之後每次開機只要最後一行。它會裝 Node 和 uv（有 winget 用 winget，沒有就從官網下載 zip，不需要管理員權限）、拉最新 main、問你 Neon 的連線字串（或用 `-EnvFile D:\jwt.env` 從 USB 讀）、`uv sync`、`npm ci`、跑一次測試當基準線。細節在腳本開頭的註解。
 
 ## 需要先安裝
 

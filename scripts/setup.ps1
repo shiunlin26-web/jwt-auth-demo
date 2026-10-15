@@ -4,8 +4,7 @@
 用途：學習者的電腦每次開機都是乾淨的系統，每次都要從頭裝工具、拉專案、裝套件、填 .env。
 這個腳本把整個流程壓成一個指令，三到五分鐘跑完。
 
-第一次（機器上還沒有 git、也沒有 repo）在 PowerShell 貼這三行：
-    winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+第一次（機器上還沒有 repo）：先用任何方式拿到 git（winget、官網安裝程式都可以），然後
     git clone https://github.com/shiunlin26-web/jwt-auth-demo.git $HOME\jwt-auth-demo
     & $HOME\jwt-auth-demo\scripts\setup.ps1
 （git clone 會跳出瀏覽器登入 GitHub 一次，因為 repo 是私有的）
@@ -14,7 +13,7 @@
     & $HOME\jwt-auth-demo\scripts\setup.ps1
 
 做的事（已經有的會跳過）：
-  1. 裝 git、Node.js LTS（winget）、uv（官方安裝腳本）
+  1. 裝 git、Node.js（.nvmrc 的大版號）、uv。有 winget 用 winget，沒有就直接從官網下載 zip，不需要管理員權限
   2. git pull 最新 main
   3. 設定 git 的 user.name / user.email（沒有的話會問你）
   4. backend：uv sync、建立 .env（問你 Neon 的兩個連線字串，JWT_SECRET 自動產生）、alembic upgrade head
@@ -45,24 +44,62 @@ function Refresh-Path {
 }
 
 # ---------- 1. 工具 ----------
-Step "檢查工具"
-if (-not (Has winget)) { throw "找不到 winget（Windows 10 1709 以上內建）。請先到 Microsoft Store 更新「應用程式安裝程式」。" }
+# 有 winget 就用 winget；沒有（精簡的 VM 常常沒有）就直接從官網下載 zip 解到 $HOME\.local，不需要管理員權限
+$LocalBin = "$HOME\.local"
+New-Item -ItemType Directory -Force -Path $LocalBin | Out-Null
 
-if (-not (Has git)) {
-    Step "安裝 git"
-    winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
-    Refresh-Path
+function Add-SessionPath($dir) {
+    if (-not ($env:Path -split ";" | Where-Object { $_ -eq $dir })) { $env:Path = "$dir;$env:Path" }
+    $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    if (-not ($userPath -split ";" | Where-Object { $_ -eq $dir })) {
+        [System.Environment]::SetEnvironmentVariable("Path", "$dir;$userPath", "User")
+    }
 }
-if (-not (Has node)) {
-    Step "安裝 Node.js LTS（專案需要 22.22 以上）"
-    winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements
-    Refresh-Path
+
+function Install-Git {
+    if (Has winget) {
+        winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+        Refresh-Path
+        return
+    }
+    # MinGit：Git for Windows 的精簡 zip 版，不用安裝程式
+    $rel = Invoke-RestMethod "https://api.github.com/repos/git-for-windows/git/releases/latest"
+    $asset = $rel.assets | Where-Object { $_.name -like "MinGit-*-64-bit.zip" -and $_.name -notlike "*busybox*" } | Select-Object -First 1
+    $zip = "$env:TEMP\mingit.zip"
+    Invoke-WebRequest $asset.browser_download_url -OutFile $zip
+    Expand-Archive $zip "$LocalBin\git" -Force
+    Add-SessionPath "$LocalBin\git\cmd"
 }
-if (-not (Has uv)) {
-    Step "安裝 uv"
+
+function Install-Node {
+    # 版本照 frontend/.nvmrc 的大版號（22）抓最新的 22.x
+    $major = (Get-Content "$RepoRoot\frontend\.nvmrc").Trim()
+    if (Has winget) {
+        winget install --id "OpenJS.NodeJS.$major" -e --accept-source-agreements --accept-package-agreements
+        Refresh-Path
+        if (Has node) { return }
+    }
+    $index = Invoke-RestMethod "https://nodejs.org/dist/index.json"
+    $ver = ($index | Where-Object { $_.version -like "v$major.*" } | Select-Object -First 1).version
+    $zip = "$env:TEMP\node.zip"
+    Invoke-WebRequest "https://nodejs.org/dist/$ver/node-$ver-win-x64.zip" -OutFile $zip
+    if (Test-Path "$LocalBin\node") { Remove-Item "$LocalBin\node" -Recurse -Force }
+    Expand-Archive $zip $LocalBin -Force
+    Rename-Item "$LocalBin\node-$ver-win-x64" "node"
+    Add-SessionPath "$LocalBin\node"
+}
+
+function Install-Uv {
+    # uv 的官方安裝腳本本來就不用 winget，裝到 $HOME\.local\bin
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    Add-SessionPath "$LocalBin\bin"
     Refresh-Path
 }
+
+Step "檢查工具"
+if (-not (Has git))  { Step "安裝 git";  Install-Git }
+if (-not (Has node)) { Step "安裝 Node.js（照 .nvmrc 的大版號）"; Install-Node }
+if (-not (Has uv))   { Step "安裝 uv";   Install-Uv }
 Write-Host ("git  " + (git --version))
 Write-Host ("node " + (node --version))
 Write-Host ("uv   " + (uv --version))
