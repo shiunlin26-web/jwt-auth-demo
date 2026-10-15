@@ -57,6 +57,9 @@
 | 15 | Tailwind CSS | 樣式（v4、深色模式、共用 UI 元件） | ✅ 完成 |
 | 16 | Vitest + MSW | 前端自動化測試（攔截器、守門員、表單） | ✅ 完成 |
 | 17 | 登入頻率限制（slowapi） | 防暴力破解；代理後面的客戶端 IP | ✅ 完成 |
+| 18 | SQL 與資料庫（看 ORM 底下） | 索引、執行計畫、交易與鎖、N+1 | ✅ 完成 |
+| 19 | HTTP 與瀏覽器規則 | 狀態碼、標頭、cookie、CORS、快取 | ⬜ |
+| 20 | 讀 log 與除錯（故障演練） | 分段確認、request id、用測試抓 bug | ⬜ |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -3297,9 +3300,116 @@ slowapi 內建的 429 回 `{"error": ...}`，前端的 `getErrorMessage` 讀的�
 
 ---
 
+## 關卡 18：SQL 與資料庫（看 ORM 底下）✅
+
+**改動的檔案**：新增 `docs/labs/18-sql.sql`（實驗腳本）。程式沒有改：這關的目的是把你一直透過 SQLModel 在用、但沒親眼看過的東西攤開來。
+
+### 一句話
+
+**ORM 不是資料庫，它只是幫你產生 SQL。索引為什麼快、交易在鎖什麼、N+1 為什麼慢，都要看 SQL 本身才懂。AI 寫出來的查詢「能跑」很容易，「資料多了還快」要靠你自己看得懂執行計畫。**
+
+### ⚠️ 開始前
+
+1. 實驗會灌 5 萬個假帳號，**只在測試資料庫做**：Neon 的 `jwtdemo_test`（關卡 4 建的），或本機 Postgres。不要碰正式的。
+2. 工具二選一：Neon 後台的 SQL Editor（左上角選資料庫，貼一段按 Run），或 `psql`（有裝的話：`psql "<TEST_DATABASE_URL 原始格式>"`）。第 5 步的鎖需要兩個視窗，Neon SQL Editor 開兩個瀏覽器分頁就行。
+3. 想看程式平常送出什麼 SQL：`backend/.env` 暫時加 `DB_ECHO=true`，重啟後端，terminal 會印出每一句。看完改回來。
+
+### 觀念 1：ORM 底下就是 SQL
+
+`DB_ECHO=true` 之後登入一次，你會看到大概四句：
+
+```sql
+SELECT ... FROM "user" WHERE "user".email = $1          -- select(User).where(User.email == data.email)
+DELETE FROM refreshtoken WHERE user_id = $1 AND expires_at < $2   -- delete_expired_refresh_tokens
+INSERT INTO refreshtoken (...) VALUES (...)              -- issue_refresh_token
+UPDATE "user" SET last_login_at = $1 WHERE id = $2       -- user.last_login_at = ...（commit 時才送）
+COMMIT
+```
+
+`$1`、`$2` 是**參數**：值不是拼進字串，是另外送，這就是 ORM 幫你擋掉 SQL injection 的方式。每一句 Python 對應哪一句 SQL，能對得上，ORM 就不再是黑盒子。
+
+### 觀念 2：索引是「另外維護的目錄」
+
+| 這個專案的索引 | 對應程式裡的哪一句 | 沒有它會怎樣 |
+| --- | --- | --- |
+| `ix_user_email`（unique） | 登入、註冊查 email | 每次登入翻完整張 user 表 |
+| `ix_refreshtoken_token_hash`（unique） | refresh、logout 查 token | 每次 refresh 翻完整張 token 表（量是 user 的好幾倍） |
+| `ix_refreshtoken_user_id` | 登出所有裝置、清過期 token | 每次翻完整張 token 表 |
+| 兩張表的主鍵 | `session.get(User, id)` | 自動有，不用管 |
+
+原理：索引是照某個欄位**排好序**的另一份資料（B-tree），所以可以像翻字典一樣跳著找，而不是一頁一頁翻（Seq Scan）。代價是每次寫入都要多維護一份，所以**不是每個欄位都加**。實驗第 3 步會讓你親眼看到兩者差幾十到幾百倍。
+
+**索引會失效的常見原因**：對欄位套函式（`lower(email)`）、用 `LIKE '%xxx'` 開頭是萬用字元、型別不一致。實驗第 3 步第二句就是函式讓索引失效的例子。
+
+**什麼時候要加**：`WHERE`、`JOIN ... ON`、`ORDER BY` 裡常用的欄位，而且表會長大。練習專案的 `todo.user_id`、`todo.category_id` 一定要（外鍵欄位預設**沒有**索引，Postgres 不會幫你加）。
+
+### 觀念 3：交易與鎖，refresh 的 `with_for_update()` 在擋什麼
+
+交易（transaction）：一組操作要嘛全部成功、要嘛全部不算。`refresh` 裡「舊 token 標記 revoked + 發新 token」是一組，中間斷掉不能只做一半，所以兩句之後才一次 `commit()`。
+
+鎖：`SELECT ... FOR UPDATE` 把那一列鎖住到 commit 為止，第二個同時進來的請求會**等**。沒有它，兩個請求同時讀到 `revoked = false`，兩個都換發成功，關卡 1 的重複使用偵測就失效了。實驗第 5 步用兩個視窗可以親眼看到「卡住」。
+
+關卡 1 踩的 `MissingGreenlet` 也在這裡：commit 之後 ORM 把物件標成「過期」，再讀屬性會偷偷發一句 `SELECT`，在 async 裡這是不被允許的，所以 commit 前先把值存進變數。
+
+### 觀念 4：N+1 和連線池
+
+**N+1**：查 20 個使用者（1 次），再每個使用者查一次 token 數（20 次），總共 21 趟網路來回。Neon 在新加坡，每趟幾十毫秒，20 個就是一秒。ORM 很容易寫成這樣（`for user in users: user.tokens`）。解法是一句 `JOIN + GROUP BY`（實驗第 4 步），或 ORM 的 eager loading（`selectinload`）。練習專案「待辦列表顯示分類名稱」就是典型的 N+1 陷阱。
+
+**連線池**（`database.py`）：每個請求不是重新連資料庫（要 TLS 握手、認證，幾十毫秒），而是從池子拿一條現成的。免費方案的 Neon 連線數上限很小，`pool_pre_ping` 是確認拿到的連線還活著（關卡 10），關機時 `engine.dispose()` 是把連線好好還回去（關卡 13）。
+
+### 驗證方式
+
+照 `docs/labs/18-sql.sql` 的 7 步做完，你應該能回答：
+
+1. `EXPLAIN ANALYZE` 的第一行，`Index Scan` 和 `Seq Scan` 分別長什麼樣，`Execution Time` 差多少
+2. 拔掉 `ix_refreshtoken_token_hash` 之後，同一句查詢慢了幾倍
+3. 兩個視窗的 `FOR UPDATE`，第二個視窗是在哪一刻解開的
+4. 第 4 步的 JOIN 一句和「21 句」在來回次數上的差別
+5. 最後 `user` 和 `refreshtoken` 的筆數回到實驗前
+
+### 動手玩
+
+1. **讓登入變慢**：在測試資料庫拔掉 `ix_user_email`（`DROP INDEX ix_user_email;`），用 `TEST_DATABASE_URL` 當 `DATABASE_URL` 起後端，看 request log 的 `duration_ms`。登入從幾毫秒變幾十毫秒（5 萬筆）。建回來：`CREATE UNIQUE INDEX ix_user_email ON "user" (email);`。
+2. **用程式的方式加索引**：`models.py` 的 `RefreshToken.expires_at` 加 `index=True`，`uv run alembic revision --autogenerate --rev-id 0005 -m "index expires_at"`，看產生的遷移檔只有一行 `create_index`。**不要合併**，這是練習「改了 models 就要有遷移」的流程；看完 `git checkout -- .` 並刪掉產生的檔案。（想一想 Q1 會說為什麼不真的加。）
+3. **看 ORM 送什麼**：`DB_ECHO=true`，前端按「重新取得我的資料」、改密碼、登出所有裝置，對照 terminal 的 SQL 和 `routes/auth.py` 的程式碼，每句找到對應。
+4. **故意寫一個 N+1**：Python 殼（`uv run python`）裡用 `async with AsyncSession(engine)` 查 20 個 user，再迴圈每個查 `count(RefreshToken)`，打開 `DB_ECHO` 數有幾句 SQL。再用一句 `select(User.email, func.count(RefreshToken.id)).join(...).group_by(User.id)` 做同樣的事，數一次。
+5. **pgexercises.com**：免費、瀏覽器裡直接練 Postgres，從 Basic 做到 Joins 就夠練習專案用。一天一節。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼 <code>delete_expired_refresh_tokens</code> 查 <code>expires_at</code>，卻不替它加索引？</summary>
+
+因為那句還有 `user_id = ?`，已經走 `ix_refreshtoken_user_id`，縮到「這個使用者的幾筆」之後再看 `expires_at`，筆數個位數，索引沒意義，反而每次寫入多維護一份。**索引是給「縮小範圍」的那個條件用的**。什麼時候要：如果改成全站排程清理（`WHERE expires_at < now()` 沒有 user_id），那就要加。
+
+</details>
+
+<details>
+<summary>Q2：email 的索引是 unique，這和程式裡「先查再寫」有什麼關係？</summary>
+
+關卡 13 修的競態：兩個請求同時註冊同一個 email，程式層的「先查不存在再寫入」擋不住，真正守住唯一性的是這個 unique 索引，它會讓第二個 `INSERT` 失敗（`IntegrityError`）。所以**唯一性永遠要在資料庫層宣告**，程式層的檢查只是為了給使用者友善的訊息。
+
+</details>
+
+<details>
+<summary>Q3：測試的 <code>conftest.py</code> 用 <code>TRUNCATE ... CASCADE</code>，CASCADE 是什麼？</summary>
+
+`refreshtoken.user_id` 是指向 `user.id` 的外鍵。清空 `user` 時，如果 `refreshtoken` 還有列指著它，資料庫會拒絕（保護參照完整性）。`CASCADE` 是「連同指著它的也一起清」。這也是為什麼實驗第 7 步要先刪 token 再刪 user。練習專案的 `todo` 指向 `category`，刪分類時要先決定：連同待辦一起刪、還是把待辦的分類設成 NULL、還是拒絕刪除（外鍵的 `ON DELETE` 選項）。
+
+</details>
+
+<details>
+<summary>Q4：為什麼不要 <code>SELECT *</code>？程式裡 <code>select(User)</code> 不就是嗎？</summary>
+
+兩層原因。效能：欄位多、有大欄位（長文字、JSON）時，只取需要的欄位省很多傳輸。穩定：之後加欄位，`SELECT *` 的回傳形狀會悄悄變。`select(User)` 在這個專案可以接受，因為表很小、而且 ORM 需要整個物件；練習專案的「列表頁」只需要 id、title、done，就該 `select(Todo.id, Todo.title, Todo.done)`。
+
+</details>
+
+---
+
 ## 之後還可以自己摸的（不排關卡）
 
-範例專案到關卡 17 全部完成並凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
+範例專案的程式到關卡 17 凍結；18～20 是只加文件與實驗的觀念關。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
 
 | 主題 | 一句話 | 開場提示的關鍵字 |
 | --- | --- | --- |
