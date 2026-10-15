@@ -269,8 +269,8 @@
 | `src/auth/authStore.ts`、`authService.ts`、`useAuth.ts`、`useMe.ts`、`RequireAuth.tsx`、`GuestOnly.tsx` | 不用改。新功能的 query / mutation 照 `useMe.ts` 的樣子另開 `src/features/<功能>/queries.ts`（`LEARNING.md` 關卡 12 有範例） |
 | `src/app/router.tsx`、`src/app/AppLayout.tsx` | 加新頁面的路由（要登入的放在 `RequireAuth` 底下）、導覽列加連結 |
 | `src/pages/`（Login、Register、Home、Settings、NotFound） | 保留；Home 改成你的功能頁或留著 |
-| `src/components/`（LoginForm、RegisterForm、ChangePasswordForm、UserPanel、styles.ts） | 保留；`UserPanel` 顯示 token 的那行是學習用，正式專案拿掉 |
-| `src/schemas/auth.ts`、`src/index.css` | 不用改。新功能的表單規則照 `schemas/auth.ts` 的樣子另開 `src/schemas/<功能>.ts` |
+| `src/components/`（LoginForm、RegisterForm、ChangePasswordForm、UserPanel、ui.tsx） | 保留；`ui.tsx` 是共用的 Tailwind 元件，新頁面也用它；`UserPanel` 顯示 token 的那行是學習用，正式專案拿掉 |
+| `src/schemas/auth.ts`、`src/index.css` | 不用改（`index.css` 只有 Tailwind 的 import 和 body 底色）。新功能的表單規則照 `schemas/auth.ts` 的樣子另開 `src/schemas/<功能>.ts` |
 
 ### 其他
 

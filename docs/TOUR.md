@@ -1,4 +1,4 @@
-# 專案導覽：從零讀懂整個專案（到關卡 14）
+# 專案導覽：從零讀懂整個專案（到關卡 15）
 
 給**剛接手這個專案的人**，也給**複習用**。
 
@@ -596,11 +596,12 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
   - `useForm({ resolver: zodResolver(schema), mode: "onChange" })`：規則交給 Zod，欄位狀態交給 React Hook Form
   - `<input {...register("email")} />`：把欄位接上表單
   - `<form onSubmit={handleSubmit(onSubmit)}>`：驗證全過才呼叫 `onSubmit`，按 Enter 也能送出
-  - `onSubmit` 裡 `try` 呼叫 `useAuth` 的函式，`catch` 用 `setError("root", ...)` 顯示 `getErrorMessage(error)`
+  - `onSubmit` 裡 `try` 呼叫 `useAuth` 的函式，`catch` 把 `getErrorMessage(error)` 放進元件自己的 `useState`（不進表單狀態，理由見 LEARNING.md 關卡 15）
   - 按鈕 `disabled={!isValid || isSubmitting}`
 - **⭐ 註冊完帶 email 到登入頁**：`navigate("/login", { state: { registeredEmail } })`，登入頁用 `useLocation().state` 讀出來
 - **⭐ `schemas/auth.ts`**：Zod schema，跟後端 `schemas.py` 一樣的規則，只為了**即時提示**，真正把關的是後端。`z.infer` 同時產生型別
 - `UserPanel` 顯示 token 前 40 字是**學習用**，正式專案要拿掉
+- **⭐ `components/ui.tsx`**：`TextInput`、`Button`、`Hint`、`Alert` 四個共用元件，Tailwind 的 class 集中在這裡（詳見 LEARNING.md 關卡 15）
 
 ### 自我檢查
 
@@ -670,4 +671,4 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 - 每一站的「自我檢查」都答得出來，就代表你讀懂這個專案了
 - 想知道某一關**為什麼**這樣設計 → `LEARNING.md` 對應的關卡
 - 要把登入功能**搬到別的專案** → `LEARNING.md` 關卡 6「之後其他專案怎麼用」（注意關卡 8、12 之後的檔案清單）
-- 下一步 → 關卡 0～14 都完成了。要開練習專案 → `CHAIN.md`；關卡 14～17 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`
+- 下一步 → 關卡 0～15 都完成了。要開練習專案 → `CHAIN.md`；關卡 14～17 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`

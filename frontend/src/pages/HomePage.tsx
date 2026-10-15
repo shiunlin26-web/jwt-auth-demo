@@ -9,7 +9,7 @@ export function HomePage() {
 
   return (
     <section>
-      <h2>嗨，{me?.email ?? "..."}</h2>
+      <h2 className="mb-4 text-xl font-semibold">嗨，{me?.email ?? "..."}</h2>
       <UserPanel />
     </section>
   );

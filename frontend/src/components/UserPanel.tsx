@@ -8,6 +8,7 @@
 import { getErrorMessage } from "../api/client";
 import { useAuth } from "../auth/useAuth";
 import { useMe } from "../auth/useMe";
+import { Alert, Button } from "./ui";
 
 export function UserPanel() {
   const { accessToken } = useAuth();
@@ -21,32 +22,24 @@ export function UserPanel() {
   return (
     <div>
       {/* 學習用：顯示 access token 的前 40 個字，正式專案不需要 */}
-      <p style={{ fontSize: 12, wordBreak: "break-all", color: "gray" }}>
-        Token: {accessToken?.slice(0, 40)}...
-      </p>
+      <p className="mb-3 text-xs break-all text-zinc-500">Token: {accessToken?.slice(0, 40)}...</p>
 
-      {/* 第 8 關這顆按鈕要自己 try/catch、自己管錯誤訊息；現在只是叫 query 重抓 */}
-      <button onClick={() => refetch()} disabled={isFetching}>
-        {isFetching ? "更新中..." : "重新取得我的資料"}
-      </button>
-      {dataUpdatedAt > 0 && (
-        <span style={{ marginLeft: 8, fontSize: 12, color: "gray" }}>
-          上次更新：{new Date(dataUpdatedAt).toLocaleTimeString()}
-        </span>
-      )}
-      {error && <p style={{ color: "crimson" }}>{getErrorMessage(error)}</p>}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* 第 8 關這顆按鈕要自己 try/catch、自己管錯誤訊息；現在只是叫 query 重抓 */}
+        <Button variant="secondary" onClick={() => refetch()} disabled={isFetching}>
+          {isFetching ? "更新中..." : "重新取得我的資料"}
+        </Button>
+        {dataUpdatedAt > 0 && (
+          <span className="text-xs text-zinc-500">
+            上次更新：{new Date(dataUpdatedAt).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+      {error && <Alert>{getErrorMessage(error)}</Alert>}
 
-      {isPending && <p>載入中...</p>}
+      {isPending && <p className="mt-3 text-sm text-zinc-500">載入中...</p>}
       {me && (
-        <pre
-          style={{
-            background: "#f0f0f0",
-            color: "#333",
-            padding: 12,
-            borderRadius: 4,
-            overflowX: "auto",
-          }}
-        >
+        <pre className="mt-3 overflow-x-auto rounded-md bg-zinc-100 p-3 text-sm text-zinc-800 dark:bg-zinc-900 dark:text-zinc-200">
           {JSON.stringify(me, null, 2)}
         </pre>
       )}

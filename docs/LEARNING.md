@@ -54,7 +54,7 @@
 | 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ✅ 完成 |
 | 13 | 工程品質基線（型別檢查、格式化、Dependabot、幾個專業面的修正） | 什麼叫「專業水準」的 repo | ✅ 完成 |
 | 14 | Zod + React Hook Form | 表單驗證（Zod 是前端的 Pydantic） | ✅ 完成 |
-| 15 | Tailwind CSS | 樣式 | ⬜ |
+| 15 | Tailwind CSS | 樣式（v4、深色模式、共用 UI 元件） | ✅ 完成 |
 | 16 | Vitest + MSW | 前端自動化測試 | ⬜ |
 | 17（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
 
@@ -2830,6 +2830,8 @@ minor、patch 通常可以，但先看一眼 changelog。CI 綠只代表「現�
 | `onChange={(e) => setEmail(e.target.value)}` | `{...register("email")}` | React Hook Form |
 | `canLogin = email.trim() !== "" && password !== ""` | `formState.isValid` | Zod 算、RHF 回報 |
 | `useState` 存錯誤訊息 + `try/catch` | `setError("root", { message })` | React Hook Form |
+
+> 關卡 15 修正：`setError("root")` 會把 `isValid` 設成 false，密碼打錯後按鈕會一直灰到使用者改了欄位，想用同一組帳密重試做不到。後端錯誤改回元件自己的 `useState`（`serverError`），表單狀態只管欄位。下面程式片段裡的 `setError` 是當時的版本。
 | `event.preventDefault()` | `handleSubmit(onSubmit)` | React Hook Form |
 | `utils/password.ts` 的 if 鏈 | `passwordSchema` | Zod |
 | 沒有「送出中」狀態 | `isSubmitting` | React Hook Form |
@@ -2885,7 +2887,7 @@ const onSubmit = async (data: LoginInput) => {
 - **`mode: "onChange"`**：每次輸入都驗，`isValid` 才會即時更新；預設是送出時才驗
 - **`register("email")`**：回傳 `name`、`onChange`、`onBlur`、`ref` 四樣，展開到 input 上就接好了。RHF 是**非受控**的：值存在 DOM 裡，不是每個鍵盤事件都重新渲染，欄位多了效能明顯比 `useState` 好
 - **`handleSubmit(onSubmit)`**：先 `preventDefault`，跑 Zod，全過才呼叫 `onSubmit` 並把**型別正確的資料**傳進來
-- **`setError("root")`**：後端回的錯誤（密碼錯、email 已註冊）不屬於任何欄位，掛在 `root`
+- **`setError("root")`**：後端回的錯誤（密碼錯、email 已註冊）不屬於任何欄位，掛在 `root`（關卡 15 改回 `useState`，見上方註記）
 - **`isSubmitting`**：`onSubmit` 還在 `await` 時是 true，按鈕 disabled，擋住連點兩次
 
 **3. `RegisterForm` 的 `register` 撞名**：`useForm` 回傳的 `register` 和 `api/auth.ts` 的 `register` 同名，import 時改名 `register as registerUser`。
@@ -2894,7 +2896,7 @@ const onSubmit = async (data: LoginInput) => {
 
 1. `frontend` 跑 `npm install`，`npm run dev`
 2. **註冊頁**：一打開「註冊」按鈕是灰的；email 打 `abc` 出現「Email 格式不正確」；密碼打 `short` 出現「密碼至少 8 個字元」、打中文出現「只能包含英文字母…」；兩個都合法按鈕才亮
-3. **登入頁**：密碼打錯，按鈕下方出現「登入失敗：Incorrect email or password」（後端的訊息，掛在 `root`）
+3. **登入頁**：密碼打錯，按鈕下方出現「登入失敗：Incorrect email or password」（後端的訊息）
 4. **改密碼**：新舊密碼打一樣，新密碼下方出現「新密碼不能和目前密碼相同」且按鈕灰（`refine`）；改成功後兩個欄位清空（`reset()`）
 5. 送出時按鈕文字變「登入中...」（DevTools Network 調成 Slow 4G 比較看得到）
 6. `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm run build` 綠
@@ -2903,7 +2905,7 @@ const onSubmit = async (data: LoginInput) => {
 
 1. **改一條規則，兩邊都動**：`passwordSchema` 的 `.min(8)` 改成 `.min(12)`。註冊頁的提示立刻變，而且 `RegisterInput` 型別沒變（還是 string），因為規則和型別是分開的兩層。改回來。
 2. **拿掉 `mode: "onChange"`**：按鈕一開始就是亮的，按下去才驗證、才出現錯誤訊息。這是 RHF 的預設（`onSubmit`），比較不吵但少了即時提示。改回來。
-3. **拿掉 `resolver`**：沒有任何驗證，空白表單也能送，後端回 422，訊息出現在 `root`。這就是「前端驗證是體驗，後端驗證是安全」。改回來。
+3. **拿掉 `resolver`**：沒有任何驗證，空白表單也能送，後端回 422，訊息出現在按鈕下方。這就是「前端驗證是體驗，後端驗證是安全」。改回來。
 4. **前後端規則不一致**：`passwordSchema` 的 `.max(72)` 改成 `.max(80)`，用 75 個字元的密碼註冊：前端放行、後端 422「at most 72 characters」。使用者會看到一個前端沒提示過的錯誤，這就是為什麼兩邊要一致。改回來。
 5. **看 `z.infer`**：在 `schemas/auth.ts` 最下面加 `const x: RegisterInput = { email: "a" };`，`npm run typecheck` 會說少了 `password`。刪掉。
 
@@ -2939,20 +2941,124 @@ TypeScript 只在**編譯時**存在，跑起來就沒了。使用者在 input �
 
 ---
 
-## 關卡 15 ～ 17（20 天後自學）
+## 關卡 15：Tailwind CSS ✅
 
-範例專案到關卡 14 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
+**改動的檔案**：`frontend/package.json`（新增 `tailwindcss`、`@tailwindcss/vite`，開發用 `prettier-plugin-tailwindcss`）、`vite.config.ts`（加外掛）、`.prettierrc`（加外掛）、`src/index.css`（換成 `@import "tailwindcss"`）、新增 `components/ui.tsx`（`TextInput`、`Button`、`Hint`、`Alert`），刪除 `components/styles.ts`；`AppLayout`、所有 `pages/`、所有 `components/`、`RequireAuth`、`GuestOnly` 的 inline style 全部改成 class
+
+### 一句話
+
+**樣式從「每個元件自己寫 `style={{...}}`」變成「用 Tailwind 的 class 拼」，重複的組合包成小元件。順便把 Vite 範本留下的 CSS 清掉，加上深色模式。**
+
+### 觀念：為什麼是 Tailwind
+
+| 做法 | 問題 |
+| --- | --- |
+| inline style（第 6～14 關） | 不能寫 hover、深色模式、響應式；`styles.ts` 這種共用物件越長越難管 |
+| 傳統 CSS 檔 + class 名字 | 要替每個東西取名字（`.login-form__hint--error`），而且 CSS 是全域的，改一條可能影響別處 |
+| CSS-in-JS（styled-components） | 執行期才產生 CSS，有效能成本；React 19 的 server 端生態已經在遠離它 |
+| **Tailwind** | 樣式寫在 class 名字裡：`bg-zinc-50 p-6 rounded-md`。沒有命名問題、沒有全域污染、build 時只留用到的 class，CSS 很小 |
+
+代價是 class 很長。解法就是這關做的：**重複的組合 → 元件**（`ui.tsx`），不是另外寫 CSS。
+
+**Tailwind v4 和 v3 的差別**（網路上很多教學是 v3）：沒有 `tailwind.config.js`、沒有 PostCSS 設定、不用 `@tailwind base/components/utilities` 三行。只要 Vite 外掛 + CSS 裡一行 `@import "tailwindcss"`。
+
+### 程式怎麼寫
+
+**1. 接上（`vite.config.ts`、`index.css`）**
+
+```ts
+plugins: [react(), tailwindcss()],
+```
+
+```css
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-zinc-50 text-zinc-800 antialiased dark:bg-zinc-950 dark:text-zinc-200;
+  }
+}
+```
+
+- `@layer base`：整站的底，只放 body 的顏色這種真正全域的東西
+- **`dark:`**：系統是深色模式時生效（Tailwind v4 預設跟著 `prefers-color-scheme`）。每個有顏色的 class 都要想一下深色版，不然深色模式會出現白底白字
+
+**2. 共用元件（`components/ui.tsx`）**
+
+```tsx
+export function TextInput(props: ComponentProps<"input">) {
+  return <input {...props} className="mb-2 block w-full rounded-md border ... dark:bg-zinc-900" />;
+}
+```
+
+- `ComponentProps<"input">`：接受 `<input>` 的所有屬性，`{...register("email")}` 直接展開上去（React 19 起 `ref` 是普通的 prop，不需要 `forwardRef`）
+- `Button` 用 `variant` 切三種顏色；`Hint` 是欄位下的小字；`Alert` 是整張表單的訊息，帶 `role="alert"`（螢幕閱讀器會唸、測試也好找）
+
+**3. NavLink 的 `className` 可以是函式**（`AppLayout.tsx`）
+
+```tsx
+const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+  `text-sm ${isActive ? "font-semibold text-indigo-600 underline" : "text-zinc-600"}`;
+```
+
+**4. `prettier-plugin-tailwindcss`**：自動把 class 照官方順序排（版面 → 間距 → 顏色……），所有人寫出來的順序一樣，diff 乾淨。`.prettierrc` 加一行 `plugins` 就有。
+
+**5. 順手修的兩件事**
+- **build 警告**：關卡 14 加了 Zod 和 React Hook Form 之後，打包成一個 JS 檔超過 500 kB，Vite 會警告。`vite.config.ts` 加 `codeSplitting`，把 `node_modules` 切成 `react` 和 `vendor` 兩個 chunk：套件很少變，使用者的瀏覽器可以一直用快取，只重新下載你改過的那一小塊。專業的 repo 不留警告。
+- **登入失敗後按鈕卡在灰色**：端對端測試抓到的。關卡 14 用 `setError("root")` 放後端錯誤，但 React Hook Form 的 `setError` 會把 `isValid` 設成 false，按鈕灰到使用者改了欄位為止。改回元件自己的 `useState`，表單狀態只管欄位，伺服器的回應是另一回事。關卡 14 的文件已加註記。
+
+### 驗證方式
+
+1. `frontend` 跑 `npm install`，`npm run dev`，打開網站：輸入框有圓角和 focus 的藍框、按鈕是靛藍色、disabled 時變淡
+2. **深色模式**：DevTools → Rendering → Emulate CSS `prefers-color-scheme: dark`（或系統切深色）。底變黑、文字變淺、輸入框變深色，沒有白底白字
+3. **手機寬度**：DevTools 切成手機，版面不會跑掉、不會橫向捲動
+4. **CSS 很小**：`npm run build`，`dist/assets/*.css` 約 14 kB（gzip 約 4 kB），裡面只有真的用到的 class
+5. `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm run build` 綠
+
+### 動手玩
+
+1. **加一個 class 看效果**：`HomePage.tsx` 的 `<h2>` 加 `text-indigo-600`，存檔立刻變色（Vite HMR）。再加 `hover:text-red-600`，滑鼠移上去變紅。inline style 做不到 hover，這是改用 Tailwind 的第一個直接好處。改回來。
+2. **深色模式漏掉會怎樣**：`ui.tsx` 的 `TextInput` 把所有 `dark:` 開頭的 class 刪掉，切成深色模式：輸入框是白底、文字是深色，但 placeholder 和外框跟周圍的黑底格格不入。這就是「每個顏色都要想深色版」。改回來。
+3. **看 build 只留用到的 class**：`index.css` 暫時加一行 `.x { @apply bg-fuchsia-500; }`，`npm run build` 後 CSS 大小幾乎不變；但如果在某個元件加 `className="bg-fuchsia-500"`，CSS 會多出那一條。Tailwind 掃描的是原始碼裡**出現過的 class 字串**，所以 class 名字不能用字串拼接（`bg-${color}-500` 掃不到）。改回來。
+4. **Prettier 排序**：`Button` 的 class 順序隨便打亂，`npm run format` 後會排回官方順序。
+5. **用 `variant` 加一種按鈕**：`ui.tsx` 的 `buttonVariants` 加 `ghost: "text-zinc-600 hover:bg-zinc-100"`，把導覽列的登出改成 `variant="ghost"`。型別會自動接受新的字串（`keyof typeof`）。看完改回來或留著都可以。
+
+### 想一想
+
+<details>
+<summary>Q1：class 這麼長，不會很難讀嗎？</summary>
+
+會，一開始會。但換個角度：以前要在 `.tsx` 和 `.css` 兩個檔案之間跳，現在樣式就在元素旁邊，改的時候不用找。真正難讀的是「同一組 class 重複出現在十個地方」，那是該抽成元件的訊號（`ui.tsx`），不是 Tailwind 的問題。
+
+</details>
+
+<details>
+<summary>Q2：為什麼 Tailwind 不能用 <code>bg-${color}-500</code> 這種動態 class？</summary>
+
+Tailwind 不執行你的程式，它只用正規表示式掃描原始碼裡「長得像 class」的字串，把掃到的產生成 CSS。`bg-${color}-500` 在原始碼裡不是完整的 class，掃不到，build 出來就沒有這條 CSS。要動態切換顏色，寫成完整字串的對照表（像 `buttonVariants` 那樣）。
+
+</details>
+
+<details>
+<summary>Q3：深色模式為什麼跟著系統，不做一個切換按鈕？</summary>
+
+跟著系統是零成本的（`dark:` 變體 + `prefers-color-scheme`），而且大多數使用者希望所有 app 一致。切換按鈕要多存一個偏好（localStorage）、要在 HTML 加 class、要處理第一次載入閃一下的問題。練習專案要做再做，Tailwind v4 用 `@custom-variant dark (&:where(.dark, .dark *))` 一行就能改成 class 控制。
+
+</details>
+
+<details>
+<summary>Q4：<code>ui.tsx</code> 算不算在造輪子？不該直接用 shadcn/ui 之類的嗎？</summary>
+
+四個元件、每個十行，不算。shadcn/ui 本質上也是「把 Tailwind class 包成元件、複製進你的 repo」，只是元件多很多（對話框、下拉選單、日期……）。練習專案需要那些時再引入，而且因為它也是 Tailwind，和這關學的東西完全相容。
+
+</details>
+
+---
+
+## 關卡 16 ～ 17（20 天後自學）
+
+範例專案到關卡 15 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
 建議順序就是編號順序；每一項都附「做完要看得到什麼」，當驗收標準。
-
-### 關卡 15：Tailwind CSS（樣式）
-
-- **為什麼**：現在是 inline style 和 `styles.ts`。Tailwind 是目前最常見的樣式方案，練習專案的頁面多了會需要。
-- **先讀**：`components/styles.ts`、`AppLayout.tsx` 的 style 寫法。
-- **開場提示**：
-
-  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 15：裝 Tailwind CSS（Vite 官方做法），把 `AppLayout`、`pages/`、`components/` 的 inline style 和 `styles.ts` 改成 Tailwind class，版面維持跟現在差不多就好，不要重新設計。先說明 Tailwind 的工作原理（為什麼 class 名字就是樣式、build 時發生什麼）再動手。一關一個 commit。
-
-- **做完要看得到**：`styles.ts` 消失；`npm run build` 後 CSS 檔比以前大一點但 JS 沒變；畫面在手機寬度不會跑版。
 
 ### 關卡 16：Vitest + MSW（前端自動化測試）
 

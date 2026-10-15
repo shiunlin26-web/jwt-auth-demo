@@ -5,23 +5,27 @@
  *   useState 一個欄位一個       → useForm 一次管所有欄位
  *   onChange={(e) => setX(...)}  → {...register("x")}
  *   手算 canLogin               → formState.isValid（由 zod schema 決定）
- *   useState 存錯誤訊息          → setError("root", ...) 放進表單狀態
  *   event.preventDefault()      → handleSubmit 幫你做
+ *
+ * 【關卡 15】後端回的錯誤（密碼錯）留在元件自己的 useState，不用 setError("root")：
+ * setError 會把 isValid 設成 false，按鈕會灰掉直到使用者改了某個欄位，想用同一組帳密重試（例如剛才網路斷線）做不到。
+ * 原則：表單狀態只管「欄位」，伺服器的回應是另一回事。
  */
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { getErrorMessage } from "../api/client";
 import { useAuth } from "../auth/useAuth";
 import { loginSchema, type LoginInput } from "../schemas/auth";
-import { inputStyle } from "./styles";
+import { Alert, Button, TextInput } from "./ui";
 
 export function LoginForm({ defaultEmail = "" }: { defaultEmail?: string }) {
   const { login } = useAuth();
+  const [serverError, setServerError] = useState("");
   const {
     register, // 把 input 接上表單：register("email") 回傳 name、onChange、onBlur、ref
     handleSubmit, // 先跑 zod 驗證，全部通過才呼叫你的 onSubmit
-    setError, // 把後端回的錯誤放進表單狀態（"root" 代表「整張表單」而不是某個欄位）
-    formState: { errors, isValid, isSubmitting },
+    formState: { isValid, isSubmitting },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema), // 驗證規則交給 zod
     mode: "onChange", // 每次輸入都驗證，isValid 才會即時更新（預設是送出時才驗）
@@ -29,29 +33,29 @@ export function LoginForm({ defaultEmail = "" }: { defaultEmail?: string }) {
   });
 
   const onSubmit = async (data: LoginInput) => {
+    setServerError("");
     try {
       // 成功後 store 更新為已登入 → GuestOnly 發現已登入，自動導到首頁（或原本想去的頁面）
       await login(data.email, data.password);
     } catch (error) {
-      setError("root", { message: `登入失敗：${getErrorMessage(error)}` });
+      setServerError(`登入失敗：${getErrorMessage(error)}`);
     }
   };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
-      <input placeholder="Email" autoComplete="email" {...register("email")} style={inputStyle} />
-      <input
+      <TextInput placeholder="Email" autoComplete="email" {...register("email")} />
+      <TextInput
         placeholder="Password"
         type="password"
         autoComplete="current-password"
         {...register("password")}
-        style={inputStyle}
       />
       {/* isSubmitting：onSubmit 還在 await 時是 true，擋住連點兩次 */}
-      <button type="submit" disabled={!isValid || isSubmitting}>
+      <Button type="submit" disabled={!isValid || isSubmitting}>
         {isSubmitting ? "登入中..." : "登入"}
-      </button>
-      {errors.root && <p style={{ color: "crimson" }}>{errors.root.message}</p>}
+      </Button>
+      {serverError && <Alert>{serverError}</Alert>}
     </form>
   );
 }
