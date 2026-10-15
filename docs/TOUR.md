@@ -1,4 +1,4 @@
-# 專案導覽：從零讀懂整個專案（到關卡 12）
+# 專案導覽：從零讀懂整個專案（到關卡 14）
 
 給**剛接手這個專案的人**，也給**複習用**。
 
@@ -39,7 +39,7 @@
 | 11 | 守門員 | `auth/RequireAuth.tsx`、`auth/GuestOnly.tsx` | ⭐⭐ |
 | 12 | 登入狀態放哪 | `auth/authStore.ts`、`auth/authService.ts`、`auth/useAuth.ts`、`auth/useMe.ts` | ⭐⭐⭐ |
 | 13 | 跟後端講話 | `api/client.ts`、`api/auth.ts`、`api/queryClient.ts` | ⭐⭐⭐ |
-| 14 | 畫面 | `pages/`、`components/`、`utils/` | ⭐ |
+| 14 | 畫面 | `pages/`、`components/`、`schemas/` | ⭐ |
 | **總複習** | | | |
 | 15 | 前後端串起來走一遍 + 踩過的坑 | — | ⭐⭐⭐ |
 
@@ -195,7 +195,7 @@ user                              refreshtoken
 ### 自我檢查
 
 - [ ] 為什麼登入時不檢查密碼規則？
-- [ ] 前端 `utils/password.ts` 也有一份規則，為什麼後端還要再檢查一次？
+- [ ] 前端 `schemas/auth.ts` 也有一份規則，為什麼後端還要再檢查一次？
 
 ---
 
@@ -584,7 +584,7 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 
 ## 第 14 站：畫面
 
-**讀**：`pages/` 挑一個、`components/LoginForm.tsx`、`utils/password.ts`
+**讀**：`pages/` 挑一個、`components/LoginForm.tsx`、`schemas/auth.ts`
 
 ### 一句話
 
@@ -592,12 +592,14 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 
 ### 重點
 
-- **⭐ 表單的固定寫法**（`LoginForm`）：
-  - `useState` 存輸入值
-  - `<form onSubmit>` + `event.preventDefault()`：按 Enter 也能送出，而且不會重新整理頁面
-  - `try` 呼叫 `useAuth` 的函式，`catch` 顯示 `getErrorMessage(error)`
+- **⭐ 表單的固定寫法**（`LoginForm`，詳見 LEARNING.md 關卡 14）：
+  - `useForm({ resolver: zodResolver(schema), mode: "onChange" })`：規則交給 Zod，欄位狀態交給 React Hook Form
+  - `<input {...register("email")} />`：把欄位接上表單
+  - `<form onSubmit={handleSubmit(onSubmit)}>`：驗證全過才呼叫 `onSubmit`，按 Enter 也能送出
+  - `onSubmit` 裡 `try` 呼叫 `useAuth` 的函式，`catch` 用 `setError("root", ...)` 顯示 `getErrorMessage(error)`
+  - 按鈕 `disabled={!isValid || isSubmitting}`
 - **⭐ 註冊完帶 email 到登入頁**：`navigate("/login", { state: { registeredEmail } })`，登入頁用 `useLocation().state` 讀出來
-- **⭐ `utils/password.ts`**：跟後端一樣的密碼規則，只為了**即時提示**，真正把關的是後端
+- **⭐ `schemas/auth.ts`**：Zod schema，跟後端 `schemas.py` 一樣的規則，只為了**即時提示**，真正把關的是後端。`z.infer` 同時產生型別
 - `UserPanel` 顯示 token 前 40 字是**學習用**，正式專案要拿掉
 
 ### 自我檢查
@@ -668,4 +670,4 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 - 每一站的「自我檢查」都答得出來，就代表你讀懂這個專案了
 - 想知道某一關**為什麼**這樣設計 → `LEARNING.md` 對應的關卡
 - 要把登入功能**搬到別的專案** → `LEARNING.md` 關卡 6「之後其他專案怎麼用」（注意關卡 8、12 之後的檔案清單）
-- 下一步 → 關卡 0～13 都完成了。要開練習專案 → `CHAIN.md`；關卡 14～17 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`
+- 下一步 → 關卡 0～14 都完成了。要開練習專案 → `CHAIN.md`；關卡 14～17 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`

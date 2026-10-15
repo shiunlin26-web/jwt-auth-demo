@@ -1,55 +1,58 @@
-/** 【關卡 6】登入後顯示：修改密碼表單 */
-import { useState, type FormEvent } from "react";
+/** 【關卡 6】登入後顯示：修改密碼表單；【關卡 14】改用 React Hook Form + Zod */
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { getErrorMessage } from "../api/client";
 import { useAuth } from "../auth/useAuth";
-import { getPasswordError, PASSWORD_HINT } from "../utils/password";
+import { PASSWORD_HINT, changePasswordSchema, type ChangePasswordInput } from "../schemas/auth";
 import { hintStyle, inputStyle } from "./styles";
 
 export function ChangePasswordForm() {
   const { changePassword } = useAuth();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const {
+    register,
+    handleSubmit,
+    setError,
+    reset, // 成功後把欄位清空
+    formState: { errors, isValid, isSubmitting },
+  } = useForm<ChangePasswordInput>({
+    resolver: zodResolver(changePasswordSchema),
+    mode: "onChange",
+    defaultValues: { currentPassword: "", newPassword: "" },
+  });
 
-  // 新密碼套用和註冊一樣的規則；目前密碼不套（跟登入一樣，只判斷對不對）
-  const newPasswordError = newPassword === "" ? null : getPasswordError(newPassword);
-  const canSubmit = currentPassword !== "" && newPassword !== "" && newPasswordError === null;
-
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!canSubmit) return;
-    setMessage("");
+  const onSubmit = async (data: ChangePasswordInput) => {
     try {
-      await changePassword(currentPassword, newPassword);
-      setCurrentPassword("");
-      setNewPassword("");
+      await changePassword(data.currentPassword, data.newPassword);
+      reset();
     } catch (error) {
-      setMessage(`改密碼失敗：${getErrorMessage(error)}`);
+      setError("root", { message: `改密碼失敗：${getErrorMessage(error)}` });
     }
   };
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit(onSubmit)}>
       <h3>修改密碼</h3>
       <input
         placeholder="目前密碼"
         type="password"
-        value={currentPassword}
-        onChange={(e) => setCurrentPassword(e.target.value)}
+        autoComplete="current-password"
+        {...register("currentPassword")}
         style={inputStyle}
       />
       <input
         placeholder="新密碼"
         type="password"
-        value={newPassword}
-        onChange={(e) => setNewPassword(e.target.value)}
+        autoComplete="new-password"
+        {...register("newPassword")}
         style={inputStyle}
       />
-      <p style={hintStyle(newPasswordError !== null)}>{newPasswordError ?? PASSWORD_HINT}</p>
-      <button type="submit" disabled={!canSubmit}>
-        修改密碼
+      <p style={hintStyle(errors.newPassword !== undefined)}>
+        {errors.newPassword?.message ?? PASSWORD_HINT}
+      </p>
+      <button type="submit" disabled={!isValid || isSubmitting}>
+        {isSubmitting ? "修改中..." : "修改密碼"}
       </button>
-      {message && <p style={{ color: "crimson" }}>{message}</p>}
+      {errors.root && <p style={{ color: "crimson" }}>{errors.root.message}</p>}
     </form>
   );
 }

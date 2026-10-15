@@ -29,10 +29,10 @@
 
 **進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。此刻（2026-10-15）：
 
-- 關卡 0～13 已完成（0～12 合併於 PR #5；13 工程品質基線見其 PR），正式環境在線上（Render + Vercel + Neon）。
+- 關卡 0～14 已完成（0～12 合併於 PR #5，13、14 各自一個 PR），正式環境在線上（Render + Vercel + Neon）。
 - 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
 - **範例專案（本 repo）已凍結**：之後只改文件、修 bug、合 Dependabot 的 PR，不加功能。它的用途是被複製到其他專案當登入模板。
-- 關卡 13（工程品質基線）之後範例專案凍結；關卡 14～17 是學習者自己的自學清單（`LEARNING.md` 末尾有每一項的開場提示）。
+- 關卡 15～17 是學習者自己的自學清單（`LEARNING.md` 末尾有每一項的開場提示），由 AI 接續做或學習者自學皆可。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次。
 
 接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-15，關卡 12 的 CI 綠；線上 health 由學習者自己開一次。
@@ -130,7 +130,7 @@
 
 **接手帶範例專案的自學關卡：**
 
-> 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 14（Zod + React Hook Form）。先讀關卡 6 和 8 看現在表單怎麼寫，再給我這關的「觀念」段落，等我讀完說 OK 再寫程式。一關一個 commit，中文訊息。
+> 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 15（Tailwind CSS）。先讀關卡 14 看現在表單怎麼寫，再給我這關的「觀念」段落，等我讀完說 OK 再寫程式。一關一個 commit，中文訊息。
 
 **壞掉了：**
 
