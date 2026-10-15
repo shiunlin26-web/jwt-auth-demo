@@ -36,6 +36,7 @@ jwt-auth-demo/
 ├── .editorconfig              # 編輯器共用的縮排、換行規則
 ├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pyright、pytest、Docker build、前端 prettier / lint / build
 ├── .github/dependabot.yml     # 每週自動開 PR 更新套件
+├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
 └── frontend/src/
     ├── app/
     │   ├── router.tsx     # 路由表：哪個網址顯示哪個頁面、哪些頁面要登入

@@ -1,0 +1,13 @@
+diff --git a/backend/models.py b/backend/models.py
+index 80be6b7..7c75dad 100644
+--- a/backend/models.py
++++ b/backend/models.py
+@@ -11,6 +11,8 @@ class User(SQLModel, table=True):
+     # 【關卡 5】最後登入時間。用 Alembic 遷移新增的欄位（0002），不用刪表重建
+     # 舊資料沒有這個值，所以要允許 None（資料庫裡是 NULL）
+     last_login_at: datetime | None = None
++    # 顯示用的暱稱
++    nickname: str | None = None
+ 
+ 
+ class RefreshToken(SQLModel, table=True):

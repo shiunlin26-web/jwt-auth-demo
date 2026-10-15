@@ -1,0 +1,13 @@
+diff --git a/backend/security.py b/backend/security.py
+index a377048..661bbb2 100644
+--- a/backend/security.py
++++ b/backend/security.py
+@@ -47,7 +47,7 @@ def create_access_token(user_id: int) -> str:
+     payload = {
+         "sub": str(user_id),
+         "iat": now,  # 【關卡 13】簽發時間。除錯和之後要做「某時間點前的 token 全部作廢」會用到
+-        "exp": now + timedelta(minutes=settings.jwt_expire_minutes),
++        "exp": now + timedelta(seconds=settings.jwt_expire_minutes),
+     }
+     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+ 
