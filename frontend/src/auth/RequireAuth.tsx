@@ -16,7 +16,7 @@ export function RequireAuth() {
   const location = useLocation();
 
   if (status === "loading") {
-    return <p>載入中...</p>;
+    return <p className="text-sm text-zinc-500">載入中...</p>;
   }
 
   if (status === "unauthenticated") {
