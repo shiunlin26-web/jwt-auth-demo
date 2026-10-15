@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
@@ -10,6 +10,7 @@ from config import settings
 from database import get_session
 from dependencies import get_current_user
 from models import RefreshToken, User
+from rate_limit import limiter
 from schemas import ChangePasswordRequest, Token, UserCreate, UserLogin, UserRead
 from security import (
     DUMMY_PASSWORD_HASH,
@@ -72,8 +73,13 @@ async def delete_expired_refresh_tokens(session: AsyncSession, user_id: int) -> 
     )
 
 
+# 【關卡 17】註冊也限制：不然可以用腳本灌一堆假帳號。
+# slowapi 規定被限制的端點要有 request 參數；要回 X-RateLimit-* 標頭還要有 response 參數（它把標頭塞進去）
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+@limiter.limit(settings.auth_rate_limit)
 async def register(
+    request: Request,
+    response: Response,
     data: UserCreate,
     session: AsyncSession = Depends(get_session),
 ):
@@ -107,8 +113,11 @@ async def register(
     return user
 
 
+# 【關卡 17】同一個 IP 每分鐘最多 10 次：擋暴力破解。第 11 次回 429，前端會顯示「請求太頻繁」
 @router.post("/login", response_model=Token)
+@limiter.limit(settings.auth_rate_limit)
 async def login(
+    request: Request,
     data: UserLogin,  # 【關卡 0】登入改用 UserLogin，不套用註冊的密碼規則
     response: Response,
     session: AsyncSession = Depends(get_session),

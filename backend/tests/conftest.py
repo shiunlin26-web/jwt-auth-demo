@@ -18,6 +18,11 @@ import models  # noqa: F401  確保資料表定義都有載入，create_all 才�
 from config import settings
 from database import get_session
 from main import app
+from rate_limit import limiter
+
+# 【關卡 17】測試預設關掉頻率限制：所有測試都從同一個 IP 打登入，不關會被自己擋。
+# 要測限制本身的測試用 test_rate_limit.py 的 fixture 暫時打開
+limiter.enabled = False
 
 # ---------- 安全檢查：絕對不能拿正式資料庫來跑測試 ----------
 if not settings.test_database_url:

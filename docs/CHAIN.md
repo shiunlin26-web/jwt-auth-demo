@@ -247,16 +247,16 @@
 | `database.py` | 不用改 |
 | `models.py` | `User`、`RefreshToken` 保留；練習專案的表加在後面，都要有 `user_id` 外鍵 |
 | `schemas.py` | 保留；新功能的請求 / 回應格式加在後面 |
-| `security.py` | 不用改（密碼雜湊、JWT、refresh token 產生與雜湊） |
+| `security.py`、`rate_limit.py` | 不用改（密碼雜湊、JWT、refresh token；頻率限制與代理後的客戶端 IP）。正式環境記得設 `TRUSTED_PROXY_HOPS`（`render.yaml` 已有） |
 | `dependencies.py` | 不用改。新端點用 `Depends(get_current_user)` 拿目前使用者 |
 | `routes/auth.py`、`routes/users.py` | 不用改。新功能另開 `routes/todos.py` 之類，在 `main.py` 掛進 `api` router |
 | `main.py` | 保留 middleware、`/api` 前綴、`ping`、`health`、`_boom`；`include_router` 加新的 |
 | `logging_config.py` | 不用改 |
 | `alembic.ini`、`migrations/env.py`、`migrations/script.py.mako` | 不用改。**不要**複製 `migrations/versions/` 裡的檔案，新專案從頭產生：`uv run alembic revision --autogenerate --rev-id 0001 -m "init"` |
-| `tests/conftest.py`、`tests/helpers.py`、`tests/test_auth.py`、`tests/test_rules.py`、`tests/test_health.py`、`pytest.ini` | 不用改。`conftest.py` 的 `TRUNCATE` 那行要把新專案的表名加進去 |
+| `tests/conftest.py`、`tests/helpers.py`、`tests/test_auth.py`、`tests/test_rules.py`、`tests/test_health.py`、`tests/test_rate_limit.py`、`pytest.ini` | 不用改。`conftest.py` 的 `TRUNCATE` 那行要把新專案的表名加進去 |
 | `Dockerfile`、`.dockerignore`、`.env.example` | 不用改 |
 
-搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"` → `uv run alembic upgrade head` → `uv run pytest -q`（39 個測試應該全綠）→ `uv run uvicorn main:app --reload --port 8000`。
+搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"` → `uv run alembic upgrade head` → `uv run pytest -q`（51 個測試應該全綠）→ `uv run uvicorn main:app --reload --port 8000`。
 
 ### 前端（`frontend/`）
 

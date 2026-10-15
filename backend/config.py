@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     # 是否開放除錯用的端點（例如故意丟例外測 Sentry）。正式環境平常關閉，要演練時再暫時打開
     enable_debug_endpoints: bool = False
 
+    # 【關卡 17】登入與註冊的頻率限制（slowapi 的格式："10/minute"、"100/hour"）
+    rate_limit_enabled: bool = True
+    auth_rate_limit: str = "10/minute"
+    # 前面有幾層可信的代理（決定從 X-Forwarded-For 的哪一段取客戶端 IP，見 rate_limit.py）。
+    # 本機 0；只有 Render 1；Vercel + Render 2（render.yaml 設 2）
+    trusted_proxy_hops: int = 0
+
     @property
     def cors_origin_list(self) -> list[str]:
         """把 "a,b,c" 轉成 ["a", "b", "c"]"""

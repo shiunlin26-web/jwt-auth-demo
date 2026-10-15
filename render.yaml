@@ -32,6 +32,10 @@ services:
       # 【關卡 11】log 輸出成 JSON，Render 的 Logs 分頁可以搜尋欄位
       - key: LOG_JSON
         value: "true"
+      # 【關卡 17】請求經過 Vercel（rewrite）和 Render（負載平衡）兩層代理才到程式，
+      # 頻率限制要從 X-Forwarded-For 右邊數第 2 段取真正的客戶端 IP（rate_limit.py 有說明）
+      - key: TRUSTED_PROXY_HOPS
+        value: "2"
       # 【關卡 11】SENTRY_DSN 不寫在這裡：有 Sentry 帳號之後，到 Render 的 Environment 分頁手動加。
       # 寫成 sync: false 會讓每次 Blueprint 同步都問你，沒有 Sentry 的人會卡住
       # Dockerfile 的 CMD 會讀 $PORT；Render 自己會注入，這裡不用設。

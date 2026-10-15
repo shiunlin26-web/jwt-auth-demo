@@ -1,4 +1,4 @@
-# 專案導覽：從零讀懂整個專案（到關卡 16）
+# 專案導覽：從零讀懂整個專案（到關卡 17）
 
 給**剛接手這個專案的人**，也給**複習用**。
 
@@ -29,7 +29,7 @@
 | 2 | 資料表長怎樣 | `models.py`、`migrations/` | ⭐⭐ |
 | 3 | 門口檢查：請求格式 | `schemas.py` | ⭐⭐ |
 | 4 | 工具箱：密碼與 token | `security.py` | ⭐⭐⭐ |
-| 5 | 註冊與登入 | `routes/auth.py`（register、login） | ⭐⭐⭐ |
+| 5 | 註冊與登入 | `routes/auth.py`（register、login）、`rate_limit.py` | ⭐⭐⭐ |
 | 6 | 帶通行證進門 | `dependencies.py`、`routes/users.py` | ⭐⭐⭐ |
 | 7 | 續期：refresh 輪替 | `routes/auth.py`（refresh） | ⭐⭐⭐ |
 | 8 | 登出與改密碼 | `routes/auth.py`（其餘） | ⭐⭐ |
@@ -673,4 +673,4 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 - 每一站的「自我檢查」都答得出來，就代表你讀懂這個專案了
 - 想知道某一關**為什麼**這樣設計 → `LEARNING.md` 對應的關卡
 - 要把登入功能**搬到別的專案** → `LEARNING.md` 關卡 6「之後其他專案怎麼用」（注意關卡 8、12 之後的檔案清單）
-- 下一步 → 關卡 0～16 都完成了。要開練習專案 → `CHAIN.md`；關卡 14～17 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`
+- 下一步 → 關卡 0～17 全部完成了。要開練習專案 → `CHAIN.md`；關卡 14～17 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`

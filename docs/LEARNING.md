@@ -56,7 +56,7 @@
 | 14 | Zod + React Hook Form | 表單驗證（Zod 是前端的 Pydantic） | ✅ 完成 |
 | 15 | Tailwind CSS | 樣式（v4、深色模式、共用 UI 元件） | ✅ 完成 |
 | 16 | Vitest + MSW | 前端自動化測試（攔截器、守門員、表單） | ✅ 完成 |
-| 17（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
+| 17 | 登入頻率限制（slowapi） | 防暴力破解；代理後面的客戶端 IP | ✅ 完成 |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -3173,22 +3173,133 @@ mock axios 等於「假裝攔截器不存在」：你 mock 掉的正是要測的
 
 ---
 
-## 關卡 17（選做、自學）
+## 關卡 17：登入頻率限制（slowapi）✅
 
-範例專案到關卡 16 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
-每一項都附「做完要看得到什麼」，當驗收標準。
+**改動的檔案**：`backend/pyproject.toml`（加 `slowapi`）、`uv.lock`、新增 `rate_limit.py`、`config.py`（`RATE_LIMIT_ENABLED`、`AUTH_RATE_LIMIT`、`TRUSTED_PROXY_HOPS`）、`main.py`（接上 limiter、自訂 429 回應、`/api/_ip` 除錯端點）、`routes/auth.py`（login、register 加 `@limiter.limit`）、`.env.example`、`render.yaml`（`TRUSTED_PROXY_HOPS=2`）、`tests/conftest.py`（預設關掉）、新增 `tests/test_rate_limit.py`（共 51 個測試）
 
-### 關卡 17：登入頻率限制（slowapi，選做）
+### 一句話
 
-- **為什麼**：現在 `/api/auth/login` 可以無限次嘗試，可以暴力猜密碼。
-- **先讀**：`routes/auth.py` 的 login；關卡 11 的 middleware（頻率限制也是一層）。
-- **開場提示**：
+**沒有頻率限制，登入端點就是一台免費的密碼猜測機。這關加上「每個 IP 每分鐘 10 次」，但真正的功課是「在兩層代理後面，客戶端 IP 到底是哪一個」。**
 
-  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 17：用 slowapi 給 `/api/auth/login` 和 `/api/auth/register` 加頻率限制（例如每個 IP 每分鐘 10 次），超過回 429，並寫測試。說明在 Vercel 代理後面「客戶端 IP」要從哪個 header 拿、為什麼不能信任任意 header。一關一個 commit。
+### 觀念 1：為什麼 bcrypt 不夠
 
-- **做完要看得到**：連續打 11 次登入第 11 次是 429；測試綠；正式環境（經過 Vercel）限制的是真正的客戶端 IP，不是 Vercel 的 IP。
+關卡 13 讓每次比對密碼要花 100 毫秒，攻擊者一秒只能猜 10 次。但他可以開一百條連線同時猜，而且每一次都在消耗你的 CPU（免費方案只有一點點）。頻率限制是「不管你猜對猜錯，一分鐘就是只能來 10 次」，而且在 bcrypt 之前就擋掉，CPU 不用花。
 
-### 之後還可以自己摸的（不排關卡）
+註冊也要限：不然腳本可以灌一堆假帳號把 Neon 的免費額度吃掉。
+
+### 觀念 2：客戶端 IP 不是 `request.client.host`
+
+正式環境的請求路徑：**瀏覽器 → Vercel（rewrite）→ Render（負載平衡）→ 我們的程式**。程式看到的連線來源（`request.client.host`）是 Render 內部的代理，所有使用者都一樣。用它當 key，限制會變成「全站每分鐘 10 次」，第 11 個使用者就登不進去。
+
+代理的慣例是把「它看到的來源」**接在** `X-Forwarded-For` 標頭的最後：
+
+```
+X-Forwarded-For: <瀏覽器的 IP>, <Vercel 出口 IP>
+```
+
+那直接拿最左邊？不行：**最左邊是任何人都能自己填的**（`curl -H "X-Forwarded-For: 1.2.3.4"`），攻擊者每次換一個假 IP 就繞過了。只有代理接上去的那幾段可信。所以 `rate_limit.py` 的規則是：
+
+> 從右邊數，跳過 `TRUSTED_PROXY_HOPS` 層可信的代理，取下一段。本機 0（用連線來源）、只有 Render 1、Vercel + Render 2。
+
+| 情境 | `X-Forwarded-For` | hops | 取到 |
+| --- | --- | --- | --- |
+| 本機 | 沒有 | 0 | `request.client.host` |
+| 本機但有人自己填 | `1.1.1.1` | 0 | 不理它，`request.client.host` |
+| 正式，經 Vercel | `瀏覽器, Vercel` | 2 | 瀏覽器 ✓ |
+| 正式，攻擊者塞假 IP 再經 Vercel | `假, 瀏覽器, Vercel` | 2 | 瀏覽器 ✓（假的在更左邊，數不到） |
+| 正式，直接打 Render 網址 | `瀏覽器` | 2 | 段數不夠，退回連線來源（Render 代理的 IP） |
+
+最後一列是已知的限制：直接打 Render 網址的人會被算成同一個 IP（互相影響），而且塞兩段假 IP 可以繞過。要堵這條路得讓 Render 只接受來自 Vercel 的流量，免費方案做不到；實務上通常靠 Cloudflare 這類前置層。**設定 hops 前先確認實際的標頭長什麼樣**：打開 `ENABLE_DEBUG_ENDPOINTS` 看 `/api/_ip`，從前端網址打一次、直接打 Render 網址一次，比較兩者。
+
+### 觀念 3：限制的狀態存哪
+
+slowapi 預設存在記憶體：**單一實例**沒問題（免費方案就是一台，而且重啟就歸零也無所謂）。如果之後開兩台以上，每台各自計數，上限就變成兩倍，要改 `storage_uri` 指向 Redis（Upstash 有免費方案）。這和「session 存記憶體 vs 存 Redis」是同一個問題。
+
+### 程式怎麼寫
+
+**1. 誰算同一個人（`rate_limit.py`）**
+
+```python
+limiter = Limiter(key_func=get_client_ip, headers_enabled=True, enabled=settings.rate_limit_enabled)
+```
+
+**2. 哪些端點（`routes/auth.py`）**
+
+```python
+@router.post("/login", response_model=Token)
+@limiter.limit(settings.auth_rate_limit)   # "10/minute"
+async def login(request: Request, data: UserLogin, response: Response, ...):
+```
+
+slowapi 要求端點有 `request` 參數（拿 IP）和 `response` 參數（塞 `X-RateLimit-*` 標頭）。`register` 原本沒有 `response`，第一次跑測試就炸了：「parameter `response` must be an instance of starlette.responses.Response」，這是它最常見的錯誤訊息。
+
+**3. 超過時回什麼（`main.py`）**
+
+slowapi 內建的 429 回 `{"error": ...}`，前端的 `getErrorMessage` 讀的是 `detail`，所以自己寫 handler 回 `{"detail": "請求太頻繁，請稍後再試（上限 10 per 1 minute）"}` 並補上 `Retry-After`。前端一行都不用改，登入表單會直接顯示這句話。
+
+**4. 測試（`tests/test_rate_limit.py`）**
+
+所有測試都從同一個 IP 打登入，不關掉限制會被自己擋，所以 `conftest.py` 預設 `limiter.enabled = False`；要測限制本身的測試用 fixture 暫時打開並 `limiter.reset()`。`get_client_ip` 用假的 `Request` 物件直接測上面那張表的每一列，不用起伺服器。
+
+### ⚠️ 開始前（正式環境）
+
+`render.yaml` 多了 `TRUSTED_PROXY_HOPS=2`。Blueprint 有時不會自動同步新的環境變數：部署後到 Render → Environment 確認有這個值，沒有就手動加。
+
+> 付費門檻提醒：Vercel 自己也有「Firewall → Rate Limiting」，但那是 Pro 方案（付費）的功能，這關的做法在免費方案就能用。Cloudflare 的免費方案有基本的 rate limiting 規則，但要自訂網域（學習者決定不買），所以也不用。
+
+### 驗證方式
+
+1. **本機**：`uv run pytest -q` 51 個測試綠；啟動後端，用 curl 連打登入 11 次，第 11 次是 429，回應有 `Retry-After` 和 `X-RateLimit-Remaining`：
+   ```bash
+   for i in $(seq 1 11); do curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:8000/api/auth/login -H 'content-type: application/json' -d '{"email":"a@b.com","password":"x"}'; done
+   ```
+2. **前端**：登入頁密碼亂打 11 次，第 11 次出現「登入失敗：請求太頻繁，請稍後再試」。一分鐘後恢復
+3. **正式環境 hops 對不對**：Render → Environment 暫時 `ENABLE_DEBUG_ENDPOINTS=true` → 開 `https://<前端網址>/api/_ip`：`x_forwarded_for` 應該有兩段，`rate_limit_key` 是你自己的 IP（可以用搜尋「my ip」對照）。再直接開 `https://<Render 網址>/api/_ip` 看差別。看完關掉
+4. **正式環境真的會擋**：手機 4G 開前端，密碼亂打 11 次 → 429；換到 Wi-Fi（不同 IP）→ 不受影響
+
+### 動手玩
+
+1. **把 hops 設錯**：本機 `.env` 加 `TRUSTED_PROXY_HOPS=1`，用 curl 帶 `-H "X-Forwarded-For: 1.2.3.4"` 打登入 11 次 → 429；再帶 `-H "X-Forwarded-For: 5.6.7.8"` → 又可以打 10 次。這就是「hops 比實際代理層數多，攻擊者就能自己換 IP」。刪掉那行。
+2. **改上限**：`.env` 加 `AUTH_RATE_LIMIT=3/minute`，第 4 次就 429。slowapi 的格式還有 `100/hour`、`5/second`、`10/minute;100/hour`（兩個同時）。刪掉。
+3. **拿掉 `response` 參數**：`routes/auth.py` 的 login 把 `response: Response` 暫時改名，跑一次登入會看到那句「must be an instance of starlette.responses.Response」。改回來。
+4. **看 conftest 的作用**：`conftest.py` 的 `limiter.enabled = False` 註解掉，`uv run pytest -q` 會有一堆 429 的失敗。改回來。
+5. **把限制關掉看差別**：`.env` 加 `RATE_LIMIT_ENABLED=false`，連打 20 次都是 401。這是本機壓力測試時用的開關。刪掉。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼用 IP 當 key，不用 email？攻擊者換 IP 就繞過了。</summary>
+
+兩種各擋一種攻擊：IP 擋「一個人猜很多帳號」，email 擋「很多人（殭屍網路）猜同一個帳號」。完整做法是兩個都限（IP 每分鐘 10 次、同一個 email 每分鐘 5 次）。這關只做 IP，因為 slowapi 的 key 在讀 request body 之前就要決定，用 email 當 key 要自己寫 middleware。練習專案如果做，記得 email 的限制觸發時**不要**告訴使用者「這個帳號被鎖了」，那會洩漏帳號存在。
+
+</details>
+
+<details>
+<summary>Q2：429 和 401 的順序：被限制時，密碼正確也回 429，會不會讓正常使用者困擾？</summary>
+
+會，但這是刻意的。如果「密碼正確就放行」，攻擊者只要猜中就能進來，限制形同虛設。正常使用者一分鐘打錯 10 次密碼的機率很低，而且訊息有說「請稍後再試」。
+
+</details>
+
+<details>
+<summary>Q3：為什麼 <code>get_client_ip</code> 要寫成「從右邊數」而不是「最左邊」？網路上很多範例都取最左邊。</summary>
+
+取最左邊的範例假設「前面有一層會**覆寫**（不是接上）標頭的代理」，例如 Cloudflare 會提供獨立的 `CF-Connecting-IP`。我們的 Vercel 和 Render 都是「接上」，最左邊就變成使用者自己能填的。原則：**只信任你知道的那幾層代理接上去的段，其他都當成使用者輸入**。
+
+</details>
+
+<details>
+<summary>Q4：記憶體計數重啟就歸零，免費方案的 Render 動不動就休眠，這樣限制不是常常失效？</summary>
+
+休眠是閒置 15 分鐘才發生，而攻擊進行中服務不會閒置，所以攻擊期間計數是穩定的。歸零的時機剛好是「沒人在打」的時候，影響很小。真的在意就換 Redis。
+
+</details>
+
+---
+
+## 之後還可以自己摸的（不排關卡）
+
+範例專案到關卡 17 全部完成並凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
 
 | 主題 | 一句話 | 開場提示的關鍵字 |
 | --- | --- | --- |

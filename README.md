@@ -230,8 +230,8 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 | --- | --- | --- | --- |
 | GET | `/api/ping` | 活著嗎（不碰資料庫，Render health check 用） | – |
 | GET | `/api/health` | 能服務嗎：資料庫連線、遷移版本、目前 commit | – |
-| POST | `/api/auth/register` | 註冊 `{ email, password }` | – |
-| POST | `/api/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie | – |
+| POST | `/api/auth/register` | 註冊 `{ email, password }`（每個 IP 每分鐘 10 次，超過回 429） | – |
+| POST | `/api/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie（每個 IP 每分鐘 10 次，超過回 429） | – |
 | POST | `/api/auth/refresh` | 用 cookie 裡的 refresh token 換新的 access token（同時輪替 refresh token） | Cookie |
 | POST | `/api/auth/logout` | 刪除 refresh token 並清 cookie | Cookie |
 | POST | `/api/auth/logout-all` | 登出所有裝置（刪除此使用者所有 refresh token） | Bearer |
