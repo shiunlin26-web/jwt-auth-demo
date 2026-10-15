@@ -260,6 +260,7 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 ## 學習路線
 
 一步步把這個專案練到接近生產級的過程，記錄在 [`docs/LEARNING.md`](docs/LEARNING.md)。
+要接手帶人（或換一個 AI 工具繼續）：先讀 [`docs/HANDOFF.md`](docs/HANDOFF.md)；要把這套搬到新專案：[`docs/CHAIN.md`](docs/CHAIN.md)。
 
 ## 常見問題
 
