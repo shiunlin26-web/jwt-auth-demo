@@ -2689,7 +2689,58 @@ const create = useCreateTodo();
 
 ## 關卡 13 ～ 16（20 天後自學）
 
-做到時再補上詳細內容。13～16 是 20 天後的自學清單，見 [`PLAN.md`](PLAN.md)。
+範例專案到關卡 12 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
+建議順序就是編號順序；每一項都附「做完要看得到什麼」，當驗收標準。
+
+### 關卡 13：Zod + React Hook Form（表單驗證）
+
+- **為什麼**：現在表單是 `useState` 一個欄位一個、`utils/password.ts` 手寫規則。欄位多了（練習專案的表單）會很難維護。Zod 用一份 schema 同時做型別和驗證，React Hook Form 管欄位狀態和錯誤訊息。
+- **先讀**：關卡 6 的 `LoginForm.tsx`、`utils/password.ts`；關卡 8「手寫版 vs 套件版」的對照寫法。
+- **開場提示**：
+
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 13：用 Zod + React Hook Form 取代 `RegisterForm`、`LoginForm`、`ChangePasswordForm` 的手寫驗證，密碼規則從 `utils/password.ts` 改成 Zod schema（規則不變：8～72 字元、可列印 ASCII）。先給我「觀念」和「手寫版 vs 套件版」對照表，等我說 OK 再寫程式。一關一個 commit，中文訊息，程式註解標【關卡 13】。做完列出你注意到但沒做的事。
+
+- **做完要看得到**：三個表單行為跟以前一樣（含錯誤訊息即時顯示）；`utils/password.ts` 被刪掉或只剩 schema；`npm run lint`、`npm run build` 綠。
+
+### 關卡 14：Tailwind CSS（樣式）
+
+- **為什麼**：現在是 inline style 和 `styles.ts`。Tailwind 是目前最常見的樣式方案，練習專案的頁面多了會需要。
+- **先讀**：`components/styles.ts`、`AppLayout.tsx` 的 style 寫法。
+- **開場提示**：
+
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 14：裝 Tailwind CSS（Vite 官方做法），把 `AppLayout`、`pages/`、`components/` 的 inline style 和 `styles.ts` 改成 Tailwind class，版面維持跟現在差不多就好，不要重新設計。先說明 Tailwind 的工作原理（為什麼 class 名字就是樣式、build 時發生什麼）再動手。一關一個 commit。
+
+- **做完要看得到**：`styles.ts` 消失；`npm run build` 後 CSS 檔比以前大一點但 JS 沒變；畫面在手機寬度不會跑版。
+
+### 關卡 15：Vitest + MSW（前端自動化測試）
+
+- **為什麼**：後端有 39 個測試，前端一個都沒有。改 `client.ts` 的攔截器時，現在只能手動玩一遍。MSW 可以假裝成後端，讓測試不需要真的起伺服器。
+- **先讀**：關卡 4 的測試觀念（fixture、整合測試 vs 單元測試）；`client.ts` 的攔截器。
+- **開場提示**：
+
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 15：裝 Vitest + React Testing Library + MSW，寫三組測試：(1) `client.ts` 的 401 → refresh → 重送，以及 single-flight（同時三個請求只有一個 refresh）；(2) `RequireAuth` 在三種狀態下的行為；(3) `LoginForm` 密碼錯誤時顯示後端的錯誤訊息。CI 的前端 job 加一步跑測試。先對照後端 pytest 的概念說明每個工具是什麼，再動手。一關一個 commit。
+
+- **做完要看得到**：`npm test` 綠；把 `client.ts` 的 `_retry` 拿掉，測試會紅；CI 多一步。
+
+### 關卡 16：登入頻率限制（slowapi，選做）
+
+- **為什麼**：現在 `/api/auth/login` 可以無限次嘗試，可以暴力猜密碼。
+- **先讀**：`routes/auth.py` 的 login；關卡 11 的 middleware（頻率限制也是一層）。
+- **開場提示**：
+
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 16：用 slowapi 給 `/api/auth/login` 和 `/api/auth/register` 加頻率限制（例如每個 IP 每分鐘 10 次），超過回 429，並寫測試。說明在 Vercel 代理後面「客戶端 IP」要從哪個 header 拿、為什麼不能信任任意 header。一關一個 commit。
+
+- **做完要看得到**：連續打 11 次登入第 11 次是 429；測試綠；正式環境（經過 Vercel）限制的是真正的客戶端 IP，不是 Vercel 的 IP。
+
+### 之後還可以自己摸的（不排關卡）
+
+| 主題 | 一句話 | 開場提示的關鍵字 |
+| --- | --- | --- |
+| docker compose | 一個檔案同時起後端 + Postgres，本機不用裝 Postgres（要先有本機 Docker） | 「寫 `docker-compose.yml`，服務有 backend 和 postgres，用 `.env` 注入設定，說明 volume 是什麼」 |
+| 自訂網域與 DNS | 把 `*.vercel.app` 換成自己的網域，HTTPS 自動 | 「說明 A / CNAME 記錄差別、Vercel 怎麼接自訂網域、HTTPS 憑證誰發」 |
+| GitHub Codespaces | 瀏覽器裡的開發環境，有 Docker | 「幫這個 repo 寫 `.devcontainer`，讓 Codespaces 打開就能跑後端和前端」 |
+| 分頁之間同步登入狀態 | 關卡 6 Q4 提到的 `BroadcastChannel` | 「一個分頁登出，其他分頁立刻跟著登出」 |
+| Postgres Row Level Security | 授權檢查從程式搬到資料庫層 | 「說明 RLS 和在程式裡加 `WHERE user_id` 的取捨」 |
 
 ---
 
