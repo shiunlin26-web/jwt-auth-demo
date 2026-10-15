@@ -37,6 +37,7 @@ jwt-auth-demo/
 ├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pyright、pytest、Docker build、前端 prettier / lint / build
 ├── .github/dependabot.yml     # 每週自動開 PR 更新套件
 ├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
+├── scripts/setup.ps1          # 乾淨的 Windows 機器一鍵建置（裝工具、拉 main、.env、sync、測試）
 └── frontend/src/
     ├── app/
     │   ├── router.tsx     # 路由表：哪個網址顯示哪個頁面、哪些頁面要登入
@@ -58,6 +59,18 @@ jwt-auth-demo/
 
 **前後端怎麼接**：前端只打「自己網域的 `/api/...`」。本機由 Vite 轉發到 `localhost:8000`，正式環境由 Vercel 轉發到 Render。
 對瀏覽器來說前後端永遠是同一個網站，refresh cookie 才會被帶上，也不需要 CORS。說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10。
+
+## 乾淨機器一鍵建置（Windows）
+
+電腦每次開機都是乾淨系統的話，不用照下面一步一步做，用 `scripts/setup.ps1`。第一次在 PowerShell 貼：
+
+```powershell
+winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+git clone https://github.com/shiunlin26-web/jwt-auth-demo.git $HOME\jwt-auth-demo
+& $HOME\jwt-auth-demo\scripts\setup.ps1
+```
+
+之後每次開機只要最後一行。它會裝工具、拉最新 main、問你 Neon 的連線字串（或用 `-EnvFile D:\jwt.env` 從 USB 讀）、`uv sync`、`npm ci`、跑一次測試當基準線。細節在腳本開頭的註解。
 
 ## 需要先安裝
 
