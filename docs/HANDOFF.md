@@ -29,10 +29,10 @@
 
 **進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。此刻（2026-10-15）：
 
-- 關卡 0～19 全部完成並合併到 `main`（每關一個 PR，`git log --oneline --merges` 看得到），正式環境在線上（Render + Vercel + Neon）。關卡 18～20 是觀念關（SQL、HTTP、除錯），程式幾乎不動，主要是 `docs/labs/` 的實驗。
+- 關卡 0～20 全部完成並合併到 `main`（每關一個 PR，`git log --oneline --merges` 看得到），正式環境在線上（Render + Vercel + Neon）。關卡 18～20 是觀念關（SQL、HTTP、除錯），程式幾乎不動，主要是 `docs/labs/` 的實驗。
 - 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
 - **範例專案（本 repo）已凍結**：不加業務功能（待辦、分類那種），只改文件、修 bug、合 Dependabot 的 PR。「教學用的延伸關卡」（例如分頁同步登出）**可以**做在本 repo，編號接在 17 之後，照第 3 節的格式；業務功能一律在練習專案。它的用途是被複製到其他專案當登入模板。
-- 路線圖待做：關卡 20。之後 `LEARNING.md` 末尾「之後還可以自己摸的」是不排關卡的延伸清單。
+- 路線圖已無待做項目；`LEARNING.md` 末尾「之後還可以自己摸的」是不排關卡的延伸清單。`docs/drills/` 是故障演練的 patch，可以照 README 的格式再出新題。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次。
 
 接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-15，關卡 17 的 CI 綠；線上 health 由學習者自己開一次。

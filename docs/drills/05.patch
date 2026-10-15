@@ -1,0 +1,13 @@
+diff --git a/frontend/src/api/client.ts b/frontend/src/api/client.ts
+index f6f5888..25ce53e 100644
+--- a/frontend/src/api/client.ts
++++ b/frontend/src/api/client.ts
+@@ -42,7 +42,7 @@ export const api = axios.create({ baseURL: API_URL, withCredentials: true });
+ let refreshPromise: Promise<string | null> | null = null;
+ 
+ export function refreshAccessToken(): Promise<string | null> {
+-  if (!refreshPromise) {
++  if (refreshPromise === null || true) {
+     refreshPromise = publicApi
+       .post<TokenResponse>("/auth/refresh")
+       .then((res) => res.data.access_token)

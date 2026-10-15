@@ -1,0 +1,13 @@
+diff --git a/backend/routes/auth.py b/backend/routes/auth.py
+index 3c61149..45c1e3b 100644
+--- a/backend/routes/auth.py
++++ b/backend/routes/auth.py
+@@ -34,7 +34,7 @@ def set_refresh_cookie(response: Response, token: str) -> None:
+         samesite="lax",  # 防 CSRF
+         secure=settings.cookie_secure,  # 【關卡 2】改從設定讀：本機 http 用 False，正式環境 True
+         max_age=settings.refresh_token_expire_days * 24 * 3600,  # 天數換算成秒
+-        path="/api/auth",  # 只在 /api/auth/* 路徑帶上（【關卡 10】API 全部搬到 /api 底下）
++        path="/auth",  # 只在 /auth/* 路徑帶上
+     )
+ 
+ 

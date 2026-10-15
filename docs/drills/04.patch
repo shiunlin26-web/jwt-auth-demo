@@ -1,0 +1,13 @@
+diff --git a/backend/security.py b/backend/security.py
+index a377048..401fa91 100644
+--- a/backend/security.py
++++ b/backend/security.py
+@@ -58,7 +58,7 @@ def decode_access_token(token: str) -> dict:
+     return jwt.decode(
+         token,
+         settings.jwt_secret,
+-        algorithms=[settings.jwt_algorithm],
++        algorithms=["HS512"],
+         options={"require": ["exp", "sub"]},
+     )
+ 

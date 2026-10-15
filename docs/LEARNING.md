@@ -5,7 +5,7 @@
 1. 在本地一步步理解「access token + refresh token」登入架構
 2. 練完之後，這個專案就是之後其他專案做登入時的**參考範本**
 
-關卡 0～8 全部在本地完成；關卡 9 起會用到 GitHub Actions、Render、Vercel、Neon 這些**免費**的雲端服務，把專案真的上線。關卡 13 起把 repo 提升到專業水準（型別檢查、格式化、表單、樣式、前端測試、頻率限制）。全部 18 關（0～17）已完成。
+關卡 0～8 全部在本地完成；關卡 9 起會用到 GitHub Actions、Render、Vercel、Neon 這些**免費**的雲端服務，把專案真的上線。關卡 13 起把 repo 提升到專業水準（型別檢查、格式化、表單、樣式、前端測試、頻率限制）；18～20 是 SQL、HTTP、除錯的觀念關。全部 21 關（0～20）已完成。
 
 > 剛接手、或想從頭複習整個專案：先看 [`TOUR.md`](TOUR.md)，它照「一個請求怎麼跑」帶你把現在的程式碼讀一遍。
 
@@ -59,7 +59,7 @@
 | 17 | 登入頻率限制（slowapi） | 防暴力破解；代理後面的客戶端 IP | ✅ 完成 |
 | 18 | SQL 與資料庫（看 ORM 底下） | 索引、執行計畫、交易與鎖、N+1 | ✅ 完成 |
 | 19 | HTTP 與瀏覽器規則 | 狀態碼、標頭、cookie、CORS、快取 | ✅ 完成 |
-| 20 | 讀 log 與除錯（故障演練） | 分段確認、request id、用測試抓 bug | ⬜ |
+| 20 | 讀 log 與除錯（故障演練） | 分段確認、request id、用測試抓 bug | ✅ 完成 |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -3538,9 +3538,158 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 
 ---
 
+## 關卡 20：讀 log 與除錯（故障演練）✅
+
+**改動的檔案**：新增 `docs/drills/`（5 個故障 patch + 說明）。程式沒有改。
+
+### 一句話
+
+**AI 說「修好了」，你要能自己確認。這關把除錯變成一套固定流程，然後用五個真的壞掉的版本練：靠症狀、log 和測試找出原因，而不是靠猜。這是你指揮 AI 時唯一無法外包的能力。**
+
+### 觀念 1：除錯的固定流程（照順序，不要跳）
+
+1. **先問「哪一段壞」，再問「為什麼壞」**。`DEBUGGING.md` 開頭的三個通用動作：看 log、看 Network、分段確認（後端活著嗎 → 前端打得到後端嗎 → 登入流程哪一步 4xx/5xx）。九成的問題在分段確認時就定位了。
+2. **看錯誤訊息的最後幾行**。Python 的 traceback 由上往下是呼叫鏈，**最後一行**是真正的錯誤、**倒數第二段**是你的程式裡出事的那行。前端 Console 一樣，紅字的第一行通常就是答案。
+3. **重現**。能穩定重現才算定位。「有時候會」要先找到讓它每次都發生的條件（例如：等 token 過期、同時發三個請求）。
+4. **縮小範圍**。一次只改一個變數：把前端拿掉用 curl 打後端；把 Vercel 拿掉直接打 Render；把資料庫換成測試資料庫。哪一步症狀消失，問題就在那一層。
+5. **用工具抓，不要用眼睛掃**。`pytest`、`npm test`、`alembic check`、`pyright`、`git diff`、`git bisect`。每種工具抓一類錯（觀念 3）。
+6. **修完要能說出根本原因**，而且加一個測試或一條 `DEBUGGING.md`，同樣的事不會再花第二次時間。
+
+### 觀念 2：這個專案的 log 怎麼讀
+
+本機是文字、正式環境是 JSON（`LOG_JSON=true`），欄位一樣：
+
+```json
+{"level": "INFO", "logger": "app", "message": "request", "request_id": "3f2a9c1b0e4d",
+ "method": "POST", "path": "/api/auth/login", "status": 401, "duration_ms": 112.4}
+```
+
+| 看什麼 | 怎麼用 |
+| --- | --- |
+| `status` | 搜 `"status": 500` 找爆掉的；`"status": 401` 一大堆代表 token 或 cookie 有問題 |
+| `duration_ms` | 登入 100 毫秒上下是 bcrypt 的正常值；1 毫秒代表根本沒比對（關卡 13 的 timing）；幾秒代表資料庫或冷啟動 |
+| `request_id` | 使用者回報時請他給回應標頭的 `X-Request-ID`，直接搜這一筆；前後端串起來的關鍵 |
+| `level: ERROR` + traceback | middleware 保證沒接住的例外一定記下來（關卡 11）。先看最後一行 |
+| `path` 的分布 | 同一個 IP 一分鐘幾十次 `/api/auth/login` 是攻擊或是 bug（關卡 17） |
+
+正式環境：Render → Logs，搜尋欄直接打欄位；Sentry 收沒接住的例外。本機：跑 uvicorn 的 terminal。看不到你以為會有的 log，先確認 `LOG_LEVEL` 和「例外有沒有被誰接住」。
+
+### 觀念 3：哪個工具抓哪種錯
+
+| 錯誤類型 | 誰抓得到 | 誰抓不到 |
+| --- | --- | --- |
+| 型別、`None` 當值用 | pyright、tsc | 測試（沒走到那行） |
+| 行為改壞（cookie 路徑、簽章） | pytest、vitest | lint |
+| 改了 models 沒遷移 | `alembic check`（CI 有） | pytest（測試用 `create_all`） |
+| 時間、效期、頻率 | **幾乎只有眼睛**：Network、log 的時間戳 | 測試通常不等 30 分鐘 |
+| 正式環境才有的（代理、環境變數） | `/api/health`、`/api/_ip`、Render log | 本機全部綠 |
+
+演練的五題就是照這張表設計的：有的測試會紅，有的**全部綠但東西壞了**。知道哪一種是哪一種，才知道什麼時候要相信 CI、什麼時候要自己開瀏覽器看。
+
+### ⚠️ 開始前
+
+- 後端、前端都能在本機跑；`uv run pytest -q`、`npm test` 現在是綠的（這是基準線）。
+- `docs/drills/README.md` 有操作方式。**不要先看 patch 檔的內容**，`git status` 看它改了哪個檔案是允許的提示。
+- 每題給自己 20 分鐘；找不到就看答案，重點是學「找的方法」，不是找到。
+
+### 演練
+
+| 題 | 套上 | 症狀（你會看到的） | 提示 |
+| --- | --- | --- | --- |
+| 1 | `docs/drills/01.patch` | 登入成功，**重新整理後掉登入** | 先分段：是 refresh 沒送、送了被拒、還是回了但前端沒收？DevTools → Application → Cookies 和 Network 的 Request Headers 各看一眼 |
+| 2 | `docs/drills/02.patch` | 登入後一切正常，但 Network 裡 **`refresh` 多得不正常**；`pytest` 全綠 | 時間相關的東西測試抓不到。看 `refresh` 之間隔幾秒；用 jwt.io 貼 access token 看 `exp` |
+| 3 | `docs/drills/03.patch` | 本機 `pytest` 全綠、程式正常；但 **CI 紅**（或正式環境登入 500） | 哪一步紅？本機跑同一個指令 |
+| 4 | `docs/drills/04.patch` | 登入成功後**立刻**被登出，提示「登入已過期」；`pytest` 有紅 | 看 `/api/me` 的回應 `detail`；登入和 refresh 都 200 但 `/me` 401，問題在「驗」不在「簽」 |
+| 5 | `docs/drills/05.patch` | 等 access token 過期後（`JWT_EXPIRE_MINUTES=1`）**按一下畫面就被登出**；後端 log 有 `Refresh token reused` | 後端說「重複使用」，但你沒有兩個分頁。前端有幾個 `refresh` 請求？`npm test` 說什麼？ |
+
+做完每一題記下三件事：你先看了哪裡、第幾步定位到、哪個工具（或眼睛）抓到的。這就是 `QUESTIONS.md` 的素材。
+
+### 答案
+
+<details>
+<summary>第 1 題</summary>
+
+**原因**：`routes/auth.py` 的 `set_refresh_cookie` 把 `path` 從 `/api/auth` 改成 `/auth`。cookie 設得進去（Application 分頁看得到），但請求路徑 `/api/auth/refresh` 不是以 `/auth` 開頭，瀏覽器不帶，refresh 回 401「No refresh token」。
+**哪個工具抓到**：`pytest` 紅一個（httpx 的 cookie jar 也照 Path 規則）；DevTools 的 Request Headers 沒有 `Cookie`。
+**對應**：故障演練清單第 6 條、`DEBUGGING.md`「cookie 看得到但 refresh 沒帶」、關卡 19 觀念 3。
+
+</details>
+
+<details>
+<summary>第 2 題</summary>
+
+**原因**：`security.py` 的 `timedelta(minutes=...)` 變成 `timedelta(seconds=...)`，access token 30 秒就過期。功能全部正常（攔截器每次都成功換證），只是每 30 秒多一次 refresh，流量變好幾倍，而且每次 refresh 都在輪替、寫資料庫。
+**哪個工具抓到**：**沒有**。52 個測試全綠，因為沒有測試在等 token 過期。只有看 Network 的時間間隔、或 jwt.io 解開 token 看 `exp - iat` 才看得到。這是「全綠但壞了」的典型，也是為什麼上線後要看 log 的 `path` 分布。
+**對應**：故障演練清單第 14 條。要讓測試抓到，可以加一個單元測試解開 token 檢查 `exp - iat` 等於設定的分鐘數。
+
+</details>
+
+<details>
+<summary>第 3 題</summary>
+
+**原因**：`models.py` 的 `User` 多了 `nickname` 欄位，沒有產生遷移檔。本機測試用 `create_all` 建表，表裡有這個欄位，全綠；正式資料庫是用遷移建的，沒有這個欄位，`SELECT ... nickname` 直接 500 `column user.nickname does not exist`。
+**哪個工具抓到**：`uv run alembic check`（CI 的「遷移檢查」那步）：`New upgrade operations detected`。
+**修法**：`uv run alembic revision --autogenerate --rev-id 0005 -m "add user nickname"`，檢查產生的檔案，一起 commit。或者這次演練直接還原。
+**對應**：故障演練清單第 4 條、關卡 11 動手玩 3。
+
+</details>
+
+<details>
+<summary>第 4 題</summary>
+
+**原因**：`security.py` 的 `decode_access_token` 只接受 `HS512`，但簽的時候是 `HS256`。簽發（登入、refresh）都成功，驗證（`get_current_user`）全部失敗，所以 `/me` 401 → 攔截器 refresh（成功）→ 重送 `/me` 又 401 → `_retry` 放棄 → `clearSession`「登入已過期」。
+**哪個工具抓到**：`pytest`：`test_帶access_token可以取得自己的資料` 和後面所有需要登入的測試紅；`test_rules.py` 的 `test_access_token可以簽發並解開` 也紅。
+**定位技巧**：登入 200、refresh 200、`/me` 401，三段裡只有「驗 token」那段壞，直接去看 `decode_access_token` 和 `get_current_user`。
+**對應**：故障演練清單第 2 條的變形（第 2 條是換 `JWT_SECRET`，症狀一模一樣）。
+
+</details>
+
+<details>
+<summary>第 5 題</summary>
+
+**原因**：`client.ts` 的 single-flight 被關掉（`if (!refreshPromise)` 變成永遠 true）。token 過期後畫面同時發的幾個請求各自去 refresh，第一個把 A 換成 B，後面的拿著 A 再換，後端判定重複使用、撤銷全部，使用者被登出。
+**哪個工具抓到**：`npm test`：「single-flight：同時三個請求 401，只送一次 refresh」紅（`refresh` 被呼叫 3 次）。後端 log 有 `"status": 401` 且 `detail` 是 `Refresh token reused`。
+**定位技巧**：後端說「重複使用」但你只有一個分頁 → 是前端送了多次 refresh → Network 篩 `refresh` 數有幾個。
+**對應**：關卡 1「前端 single-flight」、關卡 6 動手玩 3、關卡 16 的測試。
+
+</details>
+
+### 動手玩
+
+1. **自己出一題**：挑 `PLAN.md` 故障演練清單裡沒做的（例如第 11 條 `--host 127.0.0.1`、第 1 條少環境變數），改壞、`git diff > docs/drills/06.patch`、還原，隔一天再套上來找。或請 AI 出：「照 `docs/drills/README.md` 的格式，從 PLAN.md 的清單出第 N 條，只給我 patch 和症狀，不要說原因」。
+2. **git bisect**：假設不知道是哪個 commit 弄壞的。`git bisect start`、`git bisect bad HEAD`、`git bisect good <關卡 12 的 commit>`，每一步跑 `uv run pytest -q -x`，`git bisect good/bad` 回報，幾步之後它指出第一個壞的 commit。用第 4 題的 patch 做成一個 commit 在分支上練，練完 `git bisect reset` 並刪分支。
+3. **request_id 串起來**：前端 Console `fetch("/api/me")` 後看回應標頭的 `x-request-id`，到後端 log 搜同一個 id。正式環境到 Render Logs 搜。
+4. **讓測試抓第 2 題**：`test_rules.py` 加一個測試：`payload = decode_access_token(create_access_token(1))`，assert `payload["exp"] - payload["iat"] == settings.jwt_expire_minutes * 60`。套上 `02.patch` 跑一次，應該紅。這就是「修完加一個測試」。
+5. **故意製造 500 看 log**：`ENABLE_DEBUG_ENDPOINTS=true` 打 `/api/_boom`，在 terminal 找那筆 ERROR，從最後一行往上讀到 `main.py` 的哪一行。
+
+### 想一想
+
+<details>
+<summary>Q1：第 2 題全綠但壞了。要怎麼決定「什麼該寫成測試、什麼靠眼睛」？</summary>
+
+寫得出「輸入 → 預期輸出」而且能在一秒內跑完的，寫測試（效期的秒數可以：解開 token 算差值）。要等真實時間、要真實網路、要真實瀏覽器的，靠端對端測試或眼睛，但次數要少、路徑要固定（登入、重新整理、登出）。原則：**便宜的檢查寫成測試，貴的檢查寫成清單**（`RUNBOOK.md` 第 0 節就是一張清單）。
+
+</details>
+
+<details>
+<summary>Q2：AI 修 bug 時，你要看什麼才能判斷它真的修好了？</summary>
+
+三件事：(1) 它說的根本原因能不能對上你看到的症狀（第 4 題如果 AI 說「cookie 問題」就是沒對上）；(2) 它有沒有加測試或指出哪個既有測試現在會過；(3) 修法有沒有碰到不該碰的東西（`git diff` 只改了相關的幾行）。做不到這三件事的「修好了」，等於沒修。
+
+</details>
+
+<details>
+<summary>Q3：正式環境壞了，第一分鐘做什麼？</summary>
+
+`RUNBOOK.md` 第 1 節：分段確認 → Render Events 看最近有沒有部署 → 剛部署完就壞直接退版（第 2 節）→ 退完再慢慢查。先止血再找原因，和本機除錯的順序相反。
+
+</details>
+
+---
+
 ## 之後還可以自己摸的（不排關卡）
 
-範例專案的程式到關卡 17 凍結；18～20 是只加文件與實驗的觀念關。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
+範例專案的程式到關卡 17 凍結；18～20 是觀念關（SQL、HTTP、除錯），全部 21 關（0～20）已完成。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
 
 | 主題 | 一句話 | 開場提示的關鍵字 |
 | --- | --- | --- |
