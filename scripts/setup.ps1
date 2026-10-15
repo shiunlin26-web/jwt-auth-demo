@@ -34,6 +34,17 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
+
+# Neon 後台複製出來的是 psycopg 格式，asyncpg 要改三個地方（README 第 1 節）。貼原始格式也會被轉對
+function Convert-NeonUrl($url) {
+    $url = $url.Trim()
+    if ($url -eq "") { return $url }
+    $url = $url -replace "^postgresql://", "postgresql+asyncpg://"
+    $url = $url -replace "^postgres://", "postgresql+asyncpg://"
+    $url = $url -replace "sslmode=require", "ssl=require"
+    $url = $url -replace "[&?]channel_binding=require", ""
+    return $url
+}
 function Has($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
 # 讓這個 PowerShell 視窗立刻看得到剛裝好的工具（不用重開終端機，DEBUGGING.md 第一條的坑）
@@ -128,9 +139,10 @@ if (-not (Test-Path ".env")) {
         Step "backend：從 $EnvFile 複製 .env"
         Copy-Item $EnvFile ".env"
     } else {
-        Step "backend：建立 .env（兩個連線字串到 Neon 後台複製；JWT_SECRET 自動產生）"
-        $db = Read-Host "DATABASE_URL（postgresql+asyncpg://...?ssl=require）"
-        $testDb = Read-Host "TEST_DATABASE_URL（測試資料庫，不能和上面相同；留空就不設）"
+        Step "backend：建立 .env（兩個連線字串到 Neon 後台複製，原始格式貼上即可；JWT_SECRET 自動產生）"
+        $db = Convert-NeonUrl (Read-Host "DATABASE_URL（Neon 的連線字串，直接貼）")
+        $testDb = Convert-NeonUrl (Read-Host "TEST_DATABASE_URL（測試資料庫，不能和上面相同；留空就不設）")
+        if ($db -eq $testDb) { throw "TEST_DATABASE_URL 不能和 DATABASE_URL 相同（測試會清空資料表）。重跑一次。" }
         $secret = (uv run python -c "import secrets; print(secrets.token_urlsafe(32))")
         $lines = @(
             "DATABASE_URL=$db",
