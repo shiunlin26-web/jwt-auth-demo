@@ -1,9 +1,12 @@
 /**
  * 【關卡 6】在任何元件裡取得登入狀態：
- *   const { status, user, login, logout } = useAuth();
+ *   const { status, login, logout } = useAuth();
  *
  * 【關卡 8】背後從 AuthContext 換成 Zustand，但用法完全一樣，所以元件一行都不用改。
  * 也不再需要在 main.tsx 包 <AuthProvider>：Zustand 的 store 不需要 Provider。
+ *
+ * 【關卡 12】user 和 reloadUser 從這裡拿掉了。使用者資料改用 useMe()（auth/useMe.ts）：
+ *   const { data: me, refetch } = useMe();
  */
 import { useShallow } from "zustand/react/shallow";
 import * as authService from "./authService";
@@ -15,7 +18,6 @@ export function useAuth() {
   const state = useAuthStore(
     useShallow((s) => ({
       status: selectStatus(s),
-      user: s.user,
       accessToken: s.accessToken,
       notice: s.notice,
     })),
@@ -27,6 +29,5 @@ export function useAuth() {
     logout: authService.logout,
     logoutAll: authService.logoutAll,
     changePassword: authService.changePassword,
-    reloadUser: authService.reloadUser,
   };
 }

@@ -8,6 +8,7 @@ import { useState, type CSSProperties } from "react";
 import { NavLink, Outlet } from "react-router";
 import { getErrorMessage } from "../api/client";
 import { useAuth } from "../auth/useAuth";
+import { useMe } from "../auth/useMe";
 
 // NavLink 會告訴我們「這個連結是不是目前所在的頁面」，用來把它加粗
 const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
@@ -16,7 +17,9 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }): CSSProperties => ({
 });
 
 export function AppLayout() {
-  const { status, user, notice, logout } = useAuth();
+  const { status, notice, logout } = useAuth();
+  // 【關卡 12】使用者資料改從 TanStack Query 拿（沒登入時 useMe 不會發請求，data 是 undefined）
+  const { data: me } = useMe();
   const [error, setError] = useState("");
 
   const handleLogout = async () => {
@@ -41,7 +44,7 @@ export function AppLayout() {
               <NavLink to="/settings" style={navLinkStyle}>
                 帳號設定
               </NavLink>
-              <span style={{ marginLeft: "auto", fontSize: 14, color: "gray" }}>{user?.email}</span>
+              <span style={{ marginLeft: "auto", fontSize: 14, color: "gray" }}>{me?.email}</span>
               <button onClick={handleLogout}>登出</button>
             </>
           )}

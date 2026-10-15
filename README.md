@@ -3,7 +3,7 @@
 練習前後端登入串接與 Refresh Token 的小專案。
 
 - **後端**：FastAPI + SQLModel（async）+ PostgreSQL（Neon 或本地 Postgres）
-- **前端**：React + TypeScript + Vite
+- **前端**：React + TypeScript + Vite（React Router、Zustand、axios、TanStack Query）
 
 ## 專案結構
 
@@ -39,8 +39,9 @@ jwt-auth-demo/
     ├── pages/             # 每個網址一個頁面：登入、註冊、首頁、帳號設定、404
     ├── api/
     │   ├── client.ts      # axios 設定：自動帶 token、401 自動 refresh（single-flight）
-    │   └── auth.ts        # 每個登入相關 API 一個函式：login()、getMe()……
-    ├── auth/              # 登入狀態（Zustand store、useAuth）與守門員（RequireAuth、GuestOnly）
+    │   ├── auth.ts        # 每個登入相關 API 一個函式：login()、getMe()……
+    │   └── queryClient.ts # TanStack Query 的快取（後端資料的副本放這裡；登出時清空）
+    ├── auth/              # 登入狀態（Zustand store、useAuth）、使用者資料（useMe）與守門員（RequireAuth、GuestOnly）
     └── components/        # 頁面裡的零件：登入表單、註冊表單、修改密碼……
     frontend/vercel.json   # Vercel 部署設定：把 /api/* 轉發到 Render、SPA 路由
     frontend/vite.config.ts  # 本機開發：把 /api/* 轉發到 localhost:8000

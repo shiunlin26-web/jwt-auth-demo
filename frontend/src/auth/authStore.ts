@@ -10,9 +10,11 @@
  * - 在元件外：useAuthStore.getState()       → 直接讀寫，axios 攔截器就是這樣拿 token 的
  *
  * 這裡只放「資料」和「改資料的小函式」，登入、登出等流程放在 authService.ts。
+ *
+ * 【關卡 12】user 搬走了。它是「後端資料的副本」，交給 TanStack Query 管（auth/useMe.ts）。
+ * 這裡只剩「前端自己的狀態」：token、初始化了沒、提示文字。
  */
 import { create } from "zustand";
-import type { User } from "../api/auth";
 
 export type AuthStatus =
   | "loading" // App 剛啟動，正在用 refresh token 檢查是否已登入
@@ -22,14 +24,12 @@ export type AuthStatus =
 type AuthState = {
   initialized: boolean; // App 啟動時的登入檢查做完了沒
   accessToken: string | null; // 存在記憶體（store 也是記憶體），重新整理就消失
-  user: User | null;
   notice: string; // 登入、登出等狀態變化的提示文字
 
   setAccessToken: (token: string | null) => void;
-  setUser: (user: User | null) => void;
   setNotice: (notice: string) => void;
   setInitialized: () => void;
-  /** 登出時共同要做的事：清掉 token 和使用者資料，顯示提示 */
+  /** 登出時共同要做的事：清掉 token，顯示提示（query 快取由 api/queryClient.ts 訂閱 store 自己清） */
   clearSession: (notice: string) => void;
 };
 
@@ -38,14 +38,12 @@ type AuthState = {
 export const useAuthStore = create<AuthState>()((set) => ({
   initialized: false,
   accessToken: null,
-  user: null,
   notice: "",
 
   setAccessToken: (accessToken) => set({ accessToken }),
-  setUser: (user) => set({ user }),
   setNotice: (notice) => set({ notice }),
   setInitialized: () => set({ initialized: true }),
-  clearSession: (notice) => set({ accessToken: null, user: null, notice }),
+  clearSession: (notice) => set({ accessToken: null, notice }),
 }));
 
 /**

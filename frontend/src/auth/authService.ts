@@ -5,9 +5,12 @@
  * 因為 Zustand 的 store 在 React 外面也能讀寫，這些函式不需要放在元件裡。
  *
  * 分工：
- *   authStore.ts   → 存資料（token、user、notice）
+ *   authStore.ts   → 存資料（token、notice）
  *   authService.ts → 做事情（呼叫 API，然後更新 store）
  *   useAuth.ts     → 給元件用的 hook，把兩者包在一起
+ *
+ * 【關卡 12】這裡不再呼叫 getMe()。登入成功只要把 token 放進 store，
+ * useMe() 看到 status 變成 authenticated 就會自己去抓使用者資料。reloadUser 也不需要了（改用 query 的 refetch）。
  */
 import * as authApi from "../api/auth";
 import { refreshAccessToken } from "../api/client";
@@ -28,7 +31,6 @@ export async function initializeAuth(): Promise<void> {
     const token = await refreshAccessToken();
     if (token) {
       store().setAccessToken(token);
-      store().setUser(await authApi.getMe());
     }
   } catch {
     // 沒登入過或網路錯誤，維持未登入狀態
@@ -41,7 +43,6 @@ export async function login(email: string, password: string): Promise<void> {
   store().setNotice("");
   const { access_token } = await authApi.login(email, password); // 失敗會丟出錯誤，交給元件顯示
   store().setAccessToken(access_token);
-  store().setUser(await authApi.getMe());
   store().setNotice("登入成功");
 }
 
@@ -60,8 +61,4 @@ export async function changePassword(currentPassword: string, newPassword: strin
   const { access_token } = await authApi.changePassword(currentPassword, newPassword);
   store().setAccessToken(access_token); // 後端撤銷了所有 refresh token，並發新的給這台裝置
   store().setNotice("密碼已更新，其他裝置都已登出");
-}
-
-export async function reloadUser(): Promise<void> {
-  store().setUser(await authApi.getMe());
 }
