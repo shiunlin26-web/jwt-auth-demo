@@ -1,3 +1,5 @@
+from collections.abc import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -19,6 +21,9 @@ engine = create_async_engine(
     connect_args=connect_args,
 )
 
-async def get_session() -> AsyncSession:
+
+# 【關卡 13】回傳型別寫清楚：這是一個「會 yield AsyncSession 的 async generator」。
+# FastAPI 的 Depends 看得懂 yield（結束時自動關 session），型別檢查器也需要這個標註才不會報錯
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSession(engine) as session:
         yield session

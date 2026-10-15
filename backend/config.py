@@ -9,6 +9,7 @@ CORS 網址、cookie 的 secure 直接寫死在程式碼裡。
 3. 啟動時就檢查：必填的沒填、格式不對，後端直接起不來（fail fast），
    不會等到有人登入時才爆 500
 """
+
 from pathlib import Path
 
 from pydantic import AliasChoices, Field
@@ -70,4 +71,5 @@ class Settings(BaseSettings):
 
 # 整個專案共用這一個 settings 物件：from config import settings
 # 建立的當下就會讀 .env 並驗證，有錯就直接丟例外 → 後端啟動失敗
-settings = Settings()
+# pyright 看不懂 pydantic-settings「必填欄位從環境變數來」的魔法，會以為少傳參數，這一行關掉它的檢查
+settings = Settings()  # pyright: ignore[reportCallIssue]

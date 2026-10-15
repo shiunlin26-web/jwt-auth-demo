@@ -52,10 +52,11 @@
 | 10 | 部署（Render + Vercel + Neon，前後端同站） | 真的上線，手機開得到 | ✅ 完成 |
 | 11 | 維護（healthcheck、log、Sentry、遷移回滾、換密鑰） | 壞掉時知道去哪看、怎麼復原 | ✅ 完成 |
 | 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ✅ 完成 |
-| 13（20 天後自學） | Zod + React Hook Form | 表單驗證 | ⬜ |
-| 14（20 天後自學） | Tailwind CSS | 樣式 | ⬜ |
-| 15（20 天後自學） | Vitest + MSW | 前端自動化測試 | ⬜ |
-| 16（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
+| 13 | 工程品質基線（型別檢查、格式化、Dependabot、幾個專業面的修正） | 什麼叫「專業水準」的 repo | ✅ 完成 |
+| 14 | Zod + React Hook Form | 表單驗證 | ⬜ |
+| 15 | Tailwind CSS | 樣式 | ⬜ |
+| 16 | Vitest + MSW | 前端自動化測試 | ⬜ |
+| 17（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -1594,6 +1595,8 @@ export async function getPosts(): Promise<Post[]> {
 
 （關卡 9～11 插在中間，是後端的 Docker、部署、維護，所以前端套件的編號往後移。）
 
+> 2026-10-15 註記：關卡 13 改為「工程品質基線」，上表的 Zod、Tailwind、Vitest 順延為關卡 14、15、16，路線圖為準。
+
 ### 用情境看懂
 
 **情境 1：沒登入，直接打開 `http://localhost:5173/settings`**
@@ -2688,48 +2691,158 @@ const create = useCreateTodo();
 
 ---
 
-## 關卡 13 ～ 16（20 天後自學）
+## 關卡 13：工程品質基線 ✅
 
-範例專案到關卡 12 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
+**改動的檔案**：
+- 後端：`pyproject.toml`（加 `pyright` 與 `[tool.pyright]`）、`uv.lock`、新增 `.python-version`、`security.py`（bcrypt 丟到執行緒池、假雜湊、JWT 強制 `exp`/`sub`）、`routes/auth.py`（註冊競態、登入 timing、`col()`、`assert id`）、`dependencies.py`（只接 PyJWT 的錯誤）、`database.py`（型別標註）、`main.py`（lifespan 關連線池、health 改用底層連線）、`config.py`；全部檔案跑過 `ruff format`
+- 前端：`tsconfig.app.json` / `tsconfig.node.json`（`strict`、`noUncheckedIndexedAccess`）、新增 `.prettierrc`、`.prettierignore`、`.nvmrc`，`package.json`（`format`、`format:check`、`typecheck` 指令、`engines`）、`eslint.config.js`（接 `eslint-config-prettier`）、`index.html`（`lang`、`title`）；全部檔案跑過 Prettier
+- repo：新增 `.github/dependabot.yml`、`.editorconfig`；`ci.yml` 加 ruff format、pyright、prettier 三步
+- 測試：`tests/test_rules.py` 配合 async 的密碼函式，加 JWT 欄位的測試（共 42 個）
+
+### 一句話
+
+**「教學模板」不是降低標準的理由。這關把一個專業團隊會視為基本配備的東西一次裝齊：型別檢查、格式化、自動更新套件、固定執行版本，並順手修掉幾個「能跑但不專業」的地方。之後每一關、每個練習專案都站在這條基線上。**
+
+### 觀念 1：四種檢查，各抓不同的錯
+
+| 工具 | 抓什麼 | 後端 | 前端 | 沒有它會怎樣 |
+| --- | --- | --- | --- | --- |
+| Linter | 寫法：沒用到的 import、可疑的模式 | ruff check | eslint | 髒程式碼累積，真正的 bug 藏在雜訊裡 |
+| Formatter | 排版：縮排、引號、換行 | ruff format | Prettier | 每個 PR 都在吵排版；diff 裡一半是空白變動 |
+| 型別檢查 | 型別：`int \| None` 當 `int` 用、忘了 `await` | pyright | tsc（`strict`） | 要跑到那一行才炸；最常見的是「有時候是 None」的 500 |
+| 測試 | 行為：這個輸入該得到這個輸出 | pytest | （關卡 16） | 改 A 壞了 B，上線才知道 |
+
+四種都在 CI 跑，任何一個紅就不能合併。**本機先跑**（`AGENTS.md` 常用指令），不要用 CI 當第一道檢查。
+
+**pyright 和 ruff 的分工**：ruff 看單一檔案的「樣子」，pyright 跨檔案追型別。`routes/auth.py` 的 `user.id` 是 `int | None`（SQLModel 的主鍵在存進資料庫前是 None），直接傳給要 `int` 的函式，ruff 不會說話，pyright 會。
+
+**TypeScript 的 `strict`**：Vite 範本原本沒開。沒開 `strict`，`null` 檢查和隱含 `any` 全部放行，型別只是裝飾。這個專案開了之後**零錯誤**，因為前面幾關寫得還算乾淨，但新專案一定要一開始就開，之後才開會有幾百個錯誤。
+
+### 觀念 2：Formatter 的價值在「不用再討論」
+
+Prettier 和 ruff format 都是「幾乎沒有選項」的工具，這是刻意的：排版沒有對錯，有統一就好。設定檔只有四行（`.prettierrc`），之後所有人、所有 AI 寫的程式碼長得一樣，code review 只看邏輯。
+
+`eslint-config-prettier` 放在 ESLint 設定的最後：關掉 ESLint 裡跟排版有關的規則，不然兩個工具會互相改來改去。
+
+### 觀念 3：固定版本，三個地方要一樣
+
+| 哪裡 | 檔案 | 讀它的人 |
+| --- | --- | --- |
+| Python | `backend/.python-version` = 3.13 | uv（本機、CI 都會自動下載這個版本）；Dockerfile 原本就寫死 3.13 |
+| Node | `frontend/.nvmrc` = 22、`package.json` 的 `engines` | nvm / fnm 自動切換；`npm install` 版本不對會警告 |
+| 套件 | `uv.lock`、`package-lock.json`（關卡 9 就有） | `uv sync --frozen`、`npm ci` |
+
+目標是「本機、CI、Docker 跑的東西一模一樣」。以前只鎖套件沒鎖執行環境，本機 Python 3.12、Docker 3.13 這種差異抓不到。
+
+### 觀念 4：Dependabot，讓套件更新變成 PR
+
+套件不更新，安全漏洞會一直留著；但手動追每個套件的版本沒人做得到。`.github/dependabot.yml` 讓 GitHub 每週檢查，有新版就開 PR 跑 CI。你只要看 CI 綠不綠、changelog 有沒有破壞性變更，再決定合不合。
+
+設定裡把小版本更新（minor、patch）**合成一個 PR**，不然一週可能收到十幾個；大版本（major）另開，因為通常要改程式。這是故障演練第 9 條「套件升級後行為改變」的日常版：升級由 PR 承擔，壞了 CI 會紅，不會直接進 main。
+
+> 免費方案提醒：Dependabot 本身免費。它開的每個 PR 會跑一次 CI（約 1～2 分鐘），私有 repo 每月 2000 分鐘的額度足夠。
+
+### 觀念 5：順手修掉的四個「能跑但不專業」
+
+這些在教學關卡裡沒展開，但正式專案的 code review 一定會被挑出來：
+
+1. **bcrypt 擋住 event loop**（`security.py`）。bcrypt 刻意很慢（一次 100 毫秒以上）而且是純 CPU。直接在 `async def` 裡呼叫，那 100 毫秒整個後端什麼都不能做，連 `/api/ping` 都卡住。十個人同時登入，第十個人要等前面九個算完。改成 `asyncio.to_thread(...)` 丟到執行緒池，event loop 繼續服務別人。**async 不等於快，擋住 loop 的東西都要丟出去**，這是 async 後端最常見的效能錯誤。
+2. **登入的 timing attack**（`routes/auth.py`）。帳號不存在 → 不做 bcrypt → 1 毫秒回 401；密碼錯 → 做 bcrypt → 100 毫秒回 401。量一下時間就能列舉哪些 email 有註冊。修法：帳號不存在時也對一個假的雜湊比對一次，兩種失敗花的時間一樣。
+3. **註冊的競態**（`routes/auth.py`）。「先查 email 存不存在、再寫入」中間有空窗，兩個請求同時註冊同一個 email，第二個 commit 會撞到資料庫的 unique 索引丟 `IntegrityError`，以前會變 500。真正守住唯一性的是資料庫，程式只要接住那個錯誤回 400。
+4. **JWT 沒強制 `exp`**（`security.py`）。PyJWT 預設「有 `exp` 才檢查過期」，一個被竄改成沒有 `exp` 的 token 會永遠有效（簽章還是要對，所以要先拿到密鑰才做得到，但縱深防禦不該靠這個）。`options={"require": ["exp", "sub"]}` 一行解決，並加了測試。
+
+另外兩個小的：`dependencies.py` 只接 PyJWT 的錯誤而不是 `except Exception`（以前程式自己的 bug 也會被包成 401，查不到原因）；`main.py` 加 lifespan 在關機時 `engine.dispose()`（部署換版時連線好好關掉，免費方案的連線數上限很小）。
+
+### 驗證方式
+
+1. **後端**（在 `backend`）：`uv sync`（多了 pyright）→ `uv run ruff format --check .`、`uv run ruff check .`、`uv run pyright`、`uv run pytest -q` 四個都綠，測試 42 個
+2. **前端**（在 `frontend`）：`npm install` → `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm run build` 四個都綠
+3. **CI**：Actions 的 backend job 多了「Format check」「Type check」兩步，frontend job 多了「Format check」
+4. **GitHub → Insights → Dependency graph → Dependabot**：看得到三個 ecosystem 的設定；一週內會收到第一批 PR
+5. **登入 timing**：看後端 request log 的 `duration_ms`：用不存在的 email 登入，和用存在的 email 打錯密碼，兩者耗時接近（都有 bcrypt 的時間）。改之前的版本，前者會快 100 倍
+
+### 動手玩
+
+1. **看 pyright 抓到什麼**：`routes/auth.py` 的 login 裡把 `assert user.id is not None` 那行刪掉，`uv run pyright` 會指出下面三個呼叫傳了 `int | None`。這就是「跑到那一行才炸」被提前到「存檔就知道」。加回來。
+2. **看 strict 的效果**：`useMe.ts` 裡把 `queryFn: getMe` 改成 `queryFn: () => getMe().then((u) => u.email)`，`npm run typecheck` 會在 `HomePage.tsx` 說 `string` 沒有 `email`。沒開 strict 時這類錯誤只會在瀏覽器 Console 出現。改回來。
+3. **故意把 bcrypt 放回 event loop**：`security.py` 的 `verify_password` 改成直接 `return _verify_password_sync(plain, hashed)`（不 `to_thread`）。開兩個終端機：一個用 `curl` 連打 `/api/ping` 看耗時，另一個同時送 20 個登入請求（可以用瀏覽器 Console 的 `Promise.all`）。沒 `to_thread` 時 `/api/ping` 會跟著卡住幾百毫秒。改回來。
+4. **讓 Prettier 紅**：隨便一個 `.tsx` 把雙引號改單引號，`npm run format:check` 紅；`npm run format` 自動修好。ruff format 同理。
+5. **觸發註冊競態**：Console 裡 `const m = await import("/src/api/auth.ts"); await Promise.allSettled([m.register("x@y.com","Passw0rd!x"), m.register("x@y.com","Passw0rd!x")])`。兩個都是 400 或 201 + 400，沒有 500。把 `try/except IntegrityError` 拿掉再試，有機會看到 500。改回來。
+
+### 想一想
+
+<details>
+<summary>Q1：型別檢查和測試都在抓錯，有了測試還要型別檢查嗎？</summary>
+
+抓的層次不同。測試只覆蓋「你想到的情境」；型別檢查覆蓋「所有呼叫點」。`user.id` 可能是 None 這件事，測試不會特別去測（測試裡的 user 都是從 DB 來的），但型別檢查器看到每一個傳 `user.id` 的地方都會問「None 的時候呢」。而且型別檢查幾秒就跑完，測試要起資料庫。
+
+</details>
+
+<details>
+<summary>Q2：為什麼 bcrypt 要丟到執行緒，asyncpg 查資料庫卻不用？</summary>
+
+查資料庫是「等 I/O」：請求送出去，等回應的期間 CPU 是閒的，event loop 可以去做別的事，這正是 async 的用武之地。bcrypt 是「算 CPU」：那 100 毫秒 CPU 一直在忙，event loop 沒有任何「等待」的空檔可以切出去。所以 I/O 用 await，CPU 用 `to_thread`（或 process pool）。判斷方法：這段程式是在「等別人」還是在「自己算」？
+
+</details>
+
+<details>
+<summary>Q3：Dependabot 開的 PR，CI 綠了就可以直接合嗎？</summary>
+
+minor、patch 通常可以，但先看一眼 changelog。CI 綠只代表「現有測試過了」，前端沒有測試（關卡 16 之前），一個套件的行為改變 CI 抓不到。major 一定要看 migration guide，通常要改程式。原則：**小版本靠 CI，大版本靠人**。
+
+</details>
+
+<details>
+<summary>Q4：為什麼這些東西不在關卡 9（CI）就加？</summary>
+
+當時的目標是「把鏈打通」，一次加太多工具會模糊焦點。現在鏈通了、要凍結模板、要給練習專案當基線，才是加的時機。但新專案不用等：搬家清單（`CHAIN.md` 附錄 A）已經把這些設定檔列進去，練習專案從第一天就有。
+
+</details>
+
+---
+
+## 關卡 14 ～ 17（20 天後自學）
+
+範例專案到關卡 13 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
 建議順序就是編號順序；每一項都附「做完要看得到什麼」，當驗收標準。
 
-### 關卡 13：Zod + React Hook Form（表單驗證）
+### 關卡 14：Zod + React Hook Form（表單驗證）
 
 - **為什麼**：現在表單是 `useState` 一個欄位一個、`utils/password.ts` 手寫規則。欄位多了（練習專案的表單）會很難維護。Zod 用一份 schema 同時做型別和驗證，React Hook Form 管欄位狀態和錯誤訊息。
 - **先讀**：關卡 6 的 `LoginForm.tsx`、`utils/password.ts`；關卡 8「手寫版 vs 套件版」的對照寫法。
 - **開場提示**：
 
-  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 13：用 Zod + React Hook Form 取代 `RegisterForm`、`LoginForm`、`ChangePasswordForm` 的手寫驗證，密碼規則從 `utils/password.ts` 改成 Zod schema（規則不變：8～72 字元、可列印 ASCII）。先給我「觀念」和「手寫版 vs 套件版」對照表，等我說 OK 再寫程式。一關一個 commit，中文訊息，程式註解標【關卡 13】。做完列出你注意到但沒做的事。
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 14：用 Zod + React Hook Form 取代 `RegisterForm`、`LoginForm`、`ChangePasswordForm` 的手寫驗證，密碼規則從 `utils/password.ts` 改成 Zod schema（規則不變：8～72 字元、可列印 ASCII）。先給我「觀念」和「手寫版 vs 套件版」對照表，等我說 OK 再寫程式。一關一個 commit，中文訊息，程式註解標【關卡 14】。做完列出你注意到但沒做的事。
 
 - **做完要看得到**：三個表單行為跟以前一樣（含錯誤訊息即時顯示）；`utils/password.ts` 被刪掉或只剩 schema；`npm run lint`、`npm run build` 綠。
 
-### 關卡 14：Tailwind CSS（樣式）
+### 關卡 15：Tailwind CSS（樣式）
 
 - **為什麼**：現在是 inline style 和 `styles.ts`。Tailwind 是目前最常見的樣式方案，練習專案的頁面多了會需要。
 - **先讀**：`components/styles.ts`、`AppLayout.tsx` 的 style 寫法。
 - **開場提示**：
 
-  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 14：裝 Tailwind CSS（Vite 官方做法），把 `AppLayout`、`pages/`、`components/` 的 inline style 和 `styles.ts` 改成 Tailwind class，版面維持跟現在差不多就好，不要重新設計。先說明 Tailwind 的工作原理（為什麼 class 名字就是樣式、build 時發生什麼）再動手。一關一個 commit。
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 15：裝 Tailwind CSS（Vite 官方做法），把 `AppLayout`、`pages/`、`components/` 的 inline style 和 `styles.ts` 改成 Tailwind class，版面維持跟現在差不多就好，不要重新設計。先說明 Tailwind 的工作原理（為什麼 class 名字就是樣式、build 時發生什麼）再動手。一關一個 commit。
 
 - **做完要看得到**：`styles.ts` 消失；`npm run build` 後 CSS 檔比以前大一點但 JS 沒變；畫面在手機寬度不會跑版。
 
-### 關卡 15：Vitest + MSW（前端自動化測試）
+### 關卡 16：Vitest + MSW（前端自動化測試）
 
 - **為什麼**：後端有 39 個測試，前端一個都沒有。改 `client.ts` 的攔截器時，現在只能手動玩一遍。MSW 可以假裝成後端，讓測試不需要真的起伺服器。
 - **先讀**：關卡 4 的測試觀念（fixture、整合測試 vs 單元測試）；`client.ts` 的攔截器。
 - **開場提示**：
 
-  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 15：裝 Vitest + React Testing Library + MSW，寫三組測試：(1) `client.ts` 的 401 → refresh → 重送，以及 single-flight（同時三個請求只有一個 refresh）；(2) `RequireAuth` 在三種狀態下的行為；(3) `LoginForm` 密碼錯誤時顯示後端的錯誤訊息。CI 的前端 job 加一步跑測試。先對照後端 pytest 的概念說明每個工具是什麼，再動手。一關一個 commit。
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 16：裝 Vitest + React Testing Library + MSW，寫三組測試：(1) `client.ts` 的 401 → refresh → 重送，以及 single-flight（同時三個請求只有一個 refresh）；(2) `RequireAuth` 在三種狀態下的行為；(3) `LoginForm` 密碼錯誤時顯示後端的錯誤訊息。CI 的前端 job 加一步跑測試。先對照後端 pytest 的概念說明每個工具是什麼，再動手。一關一個 commit。
 
 - **做完要看得到**：`npm test` 綠；把 `client.ts` 的 `_retry` 拿掉，測試會紅；CI 多一步。
 
-### 關卡 16：登入頻率限制（slowapi，選做）
+### 關卡 17：登入頻率限制（slowapi，選做）
 
 - **為什麼**：現在 `/api/auth/login` 可以無限次嘗試，可以暴力猜密碼。
 - **先讀**：`routes/auth.py` 的 login；關卡 11 的 middleware（頻率限制也是一層）。
 - **開場提示**：
 
-  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 16：用 slowapi 給 `/api/auth/login` 和 `/api/auth/register` 加頻率限制（例如每個 IP 每分鐘 10 次），超過回 429，並寫測試。說明在 Vercel 代理後面「客戶端 IP」要從哪個 header 拿、為什麼不能信任任意 header。一關一個 commit。
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 17：用 slowapi 給 `/api/auth/login` 和 `/api/auth/register` 加頻率限制（例如每個 IP 每分鐘 10 次），超過回 429，並寫測試。說明在 Vercel 代理後面「客戶端 IP」要從哪個 header 拿、為什麼不能信任任意 header。一關一個 commit。
 
 - **做完要看得到**：連續打 11 次登入第 11 次是 429；測試綠；正式環境（經過 Vercel）限制的是真正的客戶端 IP，不是 Vercel 的 IP。
 

@@ -17,6 +17,10 @@
     "jsx": "react-jsx",
 
     /* Linting */
+    /* 【關卡 13】strict：TypeScript 最重要的開關。沒開的話 null 檢查、隱含 any 全部放行，型別等於裝飾。
+       noUncheckedIndexedAccess：arr[0]、obj[key] 的型別變成 T | undefined，逼你處理「可能不存在」 */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,

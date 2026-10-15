@@ -45,7 +45,10 @@ export async function logoutAll(): Promise<void> {
   await api.post("/auth/logout-all");
 }
 
-export async function changePassword(currentPassword: string, newPassword: string): Promise<TokenResponse> {
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<TokenResponse> {
   const { data } = await api.post<TokenResponse>("/auth/change-password", {
     current_password: currentPassword,
     new_password: newPassword,

@@ -21,7 +21,9 @@ export function UserPanel() {
   return (
     <div>
       {/* 學習用：顯示 access token 的前 40 個字，正式專案不需要 */}
-      <p style={{ fontSize: 12, wordBreak: "break-all", color: "gray" }}>Token: {accessToken?.slice(0, 40)}...</p>
+      <p style={{ fontSize: 12, wordBreak: "break-all", color: "gray" }}>
+        Token: {accessToken?.slice(0, 40)}...
+      </p>
 
       {/* 第 8 關這顆按鈕要自己 try/catch、自己管錯誤訊息；現在只是叫 query 重抓 */}
       <button onClick={() => refetch()} disabled={isFetching}>
@@ -36,7 +38,15 @@ export function UserPanel() {
 
       {isPending && <p>載入中...</p>}
       {me && (
-        <pre style={{ background: "#f0f0f0", color: "#333", padding: 12, borderRadius: 4, overflowX: "auto" }}>
+        <pre
+          style={{
+            background: "#f0f0f0",
+            color: "#333",
+            padding: 12,
+            borderRadius: 4,
+            overflowX: "auto",
+          }}
+        >
           {JSON.stringify(me, null, 2)}
         </pre>
       )}

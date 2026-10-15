@@ -7,8 +7,8 @@
 # 怎麼看結果：GitHub repo → Actions 分頁 → 點進去看每一步的 log。紅色就是失敗，點開看哪一步、為什麼。
 #
 # 這裡有兩個 job（互相獨立、同時跑）：
-#   backend：起一個 Postgres container → 裝套件 → ruff → pytest → build Docker image → 真的跑起來打 /ping
-#   frontend：裝套件 → eslint → tsc + vite build
+#   backend：起一個 Postgres container → 裝套件 → ruff（lint + format）→ pyright → 遷移檢查 → pytest → build Docker image → 真的跑起來打 /ping
+#   frontend：裝套件 → eslint → prettier → tsc + vite build
 # 任何一步失敗，整個 job 就紅，PR 上會顯示 ❌。
 
 name: CI
@@ -76,6 +76,14 @@ jobs:
 
       - name: Lint（ruff）
         run: uv run ruff check .
+
+      # 【關卡 13】格式沒照 ruff format 排就紅。本機跑 uv run ruff format . 就會過
+      - name: Format check（ruff format）
+        run: uv run ruff format --check .
+
+      # 【關卡 13】型別檢查。ruff 抓寫法，pyright 抓型別（int | None 當 int 用、忘了 await……）
+      - name: Type check（pyright）
+        run: uv run pyright
 
       # 【關卡 11】遷移檔和 models.py 對不對得上？
       # 先把 DATABASE_URL 那個資料庫用遷移升到最新，再用 alembic check 比對 models.py：
@@ -156,6 +164,10 @@ jobs:
 
       - name: Lint（eslint）
         run: npm run lint
+
+      # 【關卡 13】格式沒照 Prettier 排就紅。本機跑 npm run format 就會過
+      - name: Format check（prettier）
+        run: npm run format:check
 
       # tsc -b 先做型別檢查，再 vite build 打包。型別錯誤在這裡就會被擋下來
       - name: Build（tsc + vite）

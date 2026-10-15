@@ -40,6 +40,7 @@ dev = [
     "pytest-asyncio",
     "httpx",
     "ruff",
+    "pyright>=1.1.414",
 ]
 
 # ---------- ruff：Python 的 linter + formatter（一個工具取代 flake8 + isort + black）----------
@@ -57,3 +58,15 @@ ignore = [
     "E501",  # 行太長：中文註解常常超過，交給 formatter 處理程式碼的部分就好
     "B008",  # 參數預設值呼叫函式：FastAPI 的 Depends()、Cookie() 就是這樣用的，是正常寫法
 ]
+
+# ---------- pyright：Python 的型別檢查器（和 TypeScript 的 tsc 是同一種東西）----------
+# 【關卡 13】ruff 抓的是「寫法」問題（沒用到的 import、風格），pyright 抓的是「型別」問題：
+# 把 int | None 當 int 用、async 函式忘了 await、回傳型別對不上……這些 ruff 看不出來，要跑起來才會炸。
+# uv run pyright
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+# 遷移檔是自動產生的，跟 ruff 一樣不檢查
+exclude = [".venv", "migrations/versions"]

@@ -36,13 +36,15 @@ uv sync                        # 安裝套件
 uv run uvicorn main:app --reload --port 8000
 uv run pytest -q               # 測試（會清空 TEST_DATABASE_URL 的資料表）
 uv run ruff check --fix .      # lint
+uv run ruff format .           # 格式化（CI 會檢查）
+uv run pyright                 # 型別檢查（CI 會檢查）
 uv run alembic upgrade head    # 套用遷移
 uv run alembic revision --autogenerate --rev-id 000X -m "說明"   # 改完 models.py 後產生遷移
 uv run alembic check           # models.py 和遷移檔是否一致
 
 # 前端（在 frontend/）
 npm ci && npm run dev
-npm run lint && npm run build
+npm run format && npm run lint && npm run typecheck && npm run build
 ```
 
 ## 慣例
@@ -51,7 +53,7 @@ npm run lint && npm run build
 - 程式裡的註解用中文，說「為什麼」不說「做什麼」；新加的東西標 `【關卡 N】`。
 - 改了 `models.py` **一定**要產生遷移檔；不手改既有的遷移檔；不用 `create_all`。
 - 改了 `pyproject.toml` 要跑 `uv sync` 並把 `uv.lock` 一起 commit；改了 `package.json` 要把 `package-lock.json` 一起 commit。
-- 推之前本機跑：`uv run ruff check .`、`uv run pytest -q`、`npm run lint`、`npm run build`。
+- 推之前本機跑：`uv run ruff format .`、`uv run ruff check .`、`uv run pyright`、`uv run pytest -q`、`npm run format`、`npm run lint`、`npm run typecheck`、`npm run build`。
 - `.env` 永遠不進 git；密鑰只放平台的環境變數。
 - **架構與程式碼以現代開發的專業水準為準**。這是教學模板，但教學註解是加在專業程式碼上，不是降低標準的理由：型別檢查、格式化、lint、測試、CI 全綠才合併；安全與效能細節照正式專案做。
 - **會碰到付費門檻的事，動手前先說**。部署平台的設定、第三方服務的方案，只要可能跳出付費頁，先告訴學習者「這步可能要錢，免費替代是＿＿」，由他決定。已知邊界列在 `docs/HANDOFF.md` 第 5 節第 11 條。

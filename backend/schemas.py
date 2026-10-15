@@ -24,11 +24,12 @@ def check_password_chars(v: str) -> str:
 
 class UserCreate(BaseModel):
     """註冊用：套用完整的密碼規則"""
+
     email: EmailStr
     password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
 
     @field_validator("password")  # 這個函式負責驗證 password 欄位
-    @classmethod                  # Pydantic 規定驗證器要是 classmethod
+    @classmethod  # Pydantic 規定驗證器要是 classmethod
     def validate_password(cls, v: str) -> str:
         return check_password_chars(v)
 
@@ -40,6 +41,7 @@ class UserLogin(BaseModel):
     哪天規則改了，用舊規則註冊的人就再也登不進來了。
     密碼對不對，交給 verify_password 判斷就好。
     """
+
     email: EmailStr
     password: str
 
@@ -50,6 +52,7 @@ class ChangePasswordRequest(BaseModel):
     - current_password：目前的密碼，不套用規則（理由和 UserLogin 一樣：舊密碼可能是舊規則設的）
     - new_password：新密碼，套用和註冊一樣的規則
     """
+
     current_password: str
     new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
 

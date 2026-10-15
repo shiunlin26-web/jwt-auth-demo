@@ -12,6 +12,7 @@ class User(SQLModel, table=True):
     # 舊資料沒有這個值，所以要允許 None（資料庫裡是 NULL）
     last_login_at: datetime | None = None
 
+
 class RefreshToken(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     # 【關卡 1】DB 只存雜湊，不存原始 token（原本欄位叫 token）
