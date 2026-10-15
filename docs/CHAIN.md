@@ -270,7 +270,7 @@
 | `src/app/router.tsx`、`src/app/AppLayout.tsx` | 加新頁面的路由（要登入的放在 `RequireAuth` 底下）、導覽列加連結 |
 | `src/pages/`（Login、Register、Home、Settings、NotFound） | 保留；Home 改成你的功能頁或留著 |
 | `src/components/`（LoginForm、RegisterForm、ChangePasswordForm、UserPanel、styles.ts） | 保留；`UserPanel` 顯示 token 的那行是學習用，正式專案拿掉 |
-| `src/utils/password.ts`、`src/index.css` | 不用改 |
+| `src/schemas/auth.ts`、`src/index.css` | 不用改。新功能的表單規則照 `schemas/auth.ts` 的樣子另開 `src/schemas/<功能>.ts` |
 
 ### 其他
 

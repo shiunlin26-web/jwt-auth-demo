@@ -53,7 +53,7 @@
 | 11 | 維護（healthcheck、log、Sentry、遷移回滾、換密鑰） | 壞掉時知道去哪看、怎麼復原 | ✅ 完成 |
 | 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ✅ 完成 |
 | 13 | 工程品質基線（型別檢查、格式化、Dependabot、幾個專業面的修正） | 什麼叫「專業水準」的 repo | ✅ 完成 |
-| 14 | Zod + React Hook Form | 表單驗證 | ⬜ |
+| 14 | Zod + React Hook Form | 表單驗證（Zod 是前端的 Pydantic） | ✅ 完成 |
 | 15 | Tailwind CSS | 樣式 | ⬜ |
 | 16 | Vitest + MSW | 前端自動化測試 | ⬜ |
 | 17（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
@@ -2801,20 +2801,148 @@ minor、patch 通常可以，但先看一眼 changelog。CI 綠只代表「現�
 
 ---
 
-## 關卡 14 ～ 17（20 天後自學）
+## 關卡 14：Zod + React Hook Form ✅
 
-範例專案到關卡 13 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
+**改動的檔案**：`frontend/package.json`（新增 `zod`、`react-hook-form`、`@hookform/resolvers`）、`frontend/src/`：新增 `schemas/auth.ts`，改寫 `components/LoginForm.tsx`、`RegisterForm.tsx`、`ChangePasswordForm.tsx`，刪除 `utils/password.ts`
+
+### 一句話
+
+**表單有兩件事：「規則是什麼」和「欄位狀態怎麼管」。第 6 關兩件都手寫；這關把規則交給 Zod（一份 schema 同時給型別和驗證），把狀態交給 React Hook Form。元件只剩「送出後要做什麼」。**
+
+### 觀念：Zod 是前端的 Pydantic
+
+後端 `schemas.py` 用 Pydantic 做的事：宣告欄位、規則、自動產生型別、進來的資料不對就回錯誤。前端以前沒有對應的東西，規則散在 `utils/password.ts` 的 if 和每個表單的 `canSubmit` 裡。Zod 就是那個對應：
+
+| | 後端 Pydantic（`schemas.py`） | 前端 Zod（`schemas/auth.ts`） |
+| --- | --- | --- |
+| 宣告 | `class UserCreate(BaseModel)` | `z.object({...})` |
+| 規則 | `Field(min_length=8)`、`@field_validator` | `.min(8)`、`.regex()`、`.refine()` |
+| 型別 | class 本身就是型別 | `z.infer<typeof schema>` |
+| 錯在哪 | 422 的 `detail` 陣列 | `errors.password.message` |
+
+**兩邊規則要一樣**（8～72 個可列印 ASCII），但前端那份只是為了即時提示，真正把關的是後端。這個原則從第 0 關到現在沒變。
+
+### 手寫版 → 套件版對照（`LoginForm.tsx`）
+
+| 第 6 關手寫 | 第 14 關 | 誰做 |
+| --- | --- | --- |
+| `useState` 一個欄位一個 | `useForm()` 一次管所有欄位 | React Hook Form |
+| `onChange={(e) => setEmail(e.target.value)}` | `{...register("email")}` | React Hook Form |
+| `canLogin = email.trim() !== "" && password !== ""` | `formState.isValid` | Zod 算、RHF 回報 |
+| `useState` 存錯誤訊息 + `try/catch` | `setError("root", { message })` | React Hook Form |
+| `event.preventDefault()` | `handleSubmit(onSubmit)` | React Hook Form |
+| `utils/password.ts` 的 if 鏈 | `passwordSchema` | Zod |
+| 沒有「送出中」狀態 | `isSubmitting` | React Hook Form |
+
+元件從「管狀態」變成「宣告規則 + 說送出後要做什麼」。欄位從兩個變十個，程式碼長度幾乎不變。
+
+### 程式怎麼寫
+
+**1. 規則（`schemas/auth.ts`）**
+
+```ts
+export const passwordSchema = z
+  .string()
+  .regex(/^[\x20-\x7E]*$/, "密碼只能包含英文字母、數字、空白與符號")
+  .min(8, "密碼至少 8 個字元")
+  .max(72, "密碼最多 72 個字元");
+
+export const registerSchema = z.object({ email: z.email("Email 格式不正確"), password: passwordSchema });
+export type RegisterInput = z.infer<typeof registerSchema>;
+```
+
+- 每條規則帶自己的錯誤訊息，第一條沒過的會出現在 `errors.password.message`
+- **`z.infer`**：型別從 schema 推出來，不用手寫 `type RegisterInput = { email: string; password: string }`，改了 schema 型別自動跟著變
+- **`.refine()`**：跨欄位的規則。改密碼的「新密碼不能和目前密碼相同」要看兩個欄位，`path` 指定錯誤掛在哪個欄位上
+- 登入的 schema 刻意**不**套密碼規則，理由和後端 `UserLogin` 一樣（關卡 0）
+
+**2. 表單（`LoginForm.tsx`）**
+
+```tsx
+const { register, handleSubmit, setError, formState: { errors, isValid, isSubmitting } } =
+  useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    mode: "onChange",
+    defaultValues: { email: defaultEmail, password: "" },
+  });
+
+const onSubmit = async (data: LoginInput) => {
+  try {
+    await login(data.email, data.password);
+  } catch (error) {
+    setError("root", { message: `登入失敗：${getErrorMessage(error)}` });
+  }
+};
+
+<form onSubmit={handleSubmit(onSubmit)}>
+  <input {...register("email")} />
+  <button type="submit" disabled={!isValid || isSubmitting}>登入</button>
+  {errors.root && <p>{errors.root.message}</p>}
+</form>
+```
+
+- **`resolver`**：驗證規則交給 Zod。RHF 本身不管規則，它只管「什麼時候驗、結果放哪」
+- **`mode: "onChange"`**：每次輸入都驗，`isValid` 才會即時更新；預設是送出時才驗
+- **`register("email")`**：回傳 `name`、`onChange`、`onBlur`、`ref` 四樣，展開到 input 上就接好了。RHF 是**非受控**的：值存在 DOM 裡，不是每個鍵盤事件都重新渲染，欄位多了效能明顯比 `useState` 好
+- **`handleSubmit(onSubmit)`**：先 `preventDefault`，跑 Zod，全過才呼叫 `onSubmit` 並把**型別正確的資料**傳進來
+- **`setError("root")`**：後端回的錯誤（密碼錯、email 已註冊）不屬於任何欄位，掛在 `root`
+- **`isSubmitting`**：`onSubmit` 還在 `await` 時是 true，按鈕 disabled，擋住連點兩次
+
+**3. `RegisterForm` 的 `register` 撞名**：`useForm` 回傳的 `register` 和 `api/auth.ts` 的 `register` 同名，import 時改名 `register as registerUser`。
+
+### 驗證方式
+
+1. `frontend` 跑 `npm install`，`npm run dev`
+2. **註冊頁**：一打開「註冊」按鈕是灰的；email 打 `abc` 出現「Email 格式不正確」；密碼打 `short` 出現「密碼至少 8 個字元」、打中文出現「只能包含英文字母…」；兩個都合法按鈕才亮
+3. **登入頁**：密碼打錯，按鈕下方出現「登入失敗：Incorrect email or password」（後端的訊息，掛在 `root`）
+4. **改密碼**：新舊密碼打一樣，新密碼下方出現「新密碼不能和目前密碼相同」且按鈕灰（`refine`）；改成功後兩個欄位清空（`reset()`）
+5. 送出時按鈕文字變「登入中...」（DevTools Network 調成 Slow 4G 比較看得到）
+6. `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm run build` 綠
+
+### 動手玩
+
+1. **改一條規則，兩邊都動**：`passwordSchema` 的 `.min(8)` 改成 `.min(12)`。註冊頁的提示立刻變，而且 `RegisterInput` 型別沒變（還是 string），因為規則和型別是分開的兩層。改回來。
+2. **拿掉 `mode: "onChange"`**：按鈕一開始就是亮的，按下去才驗證、才出現錯誤訊息。這是 RHF 的預設（`onSubmit`），比較不吵但少了即時提示。改回來。
+3. **拿掉 `resolver`**：沒有任何驗證，空白表單也能送，後端回 422，訊息出現在 `root`。這就是「前端驗證是體驗，後端驗證是安全」。改回來。
+4. **前後端規則不一致**：`passwordSchema` 的 `.max(72)` 改成 `.max(80)`，用 75 個字元的密碼註冊：前端放行、後端 422「at most 72 characters」。使用者會看到一個前端沒提示過的錯誤，這就是為什麼兩邊要一致。改回來。
+5. **看 `z.infer`**：在 `schemas/auth.ts` 最下面加 `const x: RegisterInput = { email: "a" };`，`npm run typecheck` 會說少了 `password`。刪掉。
+
+### 想一想
+
+<details>
+<summary>Q1：後端已經有 Pydantic 驗證了，前端為什麼還要一份？不能只靠 422 的訊息嗎？</summary>
+
+可以，功能上沒差。差在體驗和流量：使用者要等請求來回才知道密碼太短；每一次打錯都是一個請求。前端那份是「提早告訴他」，後端那份是「不信任前端」。兩份都要，而且規則要一樣（動手玩 4）。
+
+</details>
+
+<details>
+<summary>Q2：為什麼 React Hook Form 用「非受控」（值在 DOM 裡），不像 useState 那樣每個字都進 state？</summary>
+
+受控元件每個鍵盤事件都觸發重新渲染，表單一大（十幾個欄位、每個欄位有驗證）會卡。非受控把值留在 DOM，只在需要時（驗證、送出）讀出來。代價是你不能隨時從 state 拿到值，要用 `watch()` 或 `getValues()`。對登入表單差別感覺不到，對練習專案的「待辦編輯表單」會。
+
+</details>
+
+<details>
+<summary>Q3：Zod 和 TypeScript 型別有什麼不一樣？都開 strict 了為什麼還要 Zod？</summary>
+
+TypeScript 只在**編譯時**存在，跑起來就沒了。使用者在 input 打的字、後端回的 JSON，TypeScript 完全管不到，它只能相信你寫的型別標註。Zod 在**執行時**真的檢查，而且順便產生型別。原則：**邊界（使用者輸入、API 回應、環境變數）用 Zod 驗，內部用 TypeScript 型別**。練習專案可以用 Zod 驗 API 回應，確保後端改了格式前端立刻知道。
+
+</details>
+
+<details>
+<summary>Q4：為什麼登入表單不驗 email 格式，註冊表單驗？</summary>
+
+註冊時擋掉格式錯的 email 是幫使用者；登入時驗格式只會多一種「登入失敗」的訊息，而且萬一規則改了，舊帳號會登不進去。後端的 `UserLogin` 也是同一個決定（關卡 0 的原則：規則只在設定時檢查）。
+
+</details>
+
+---
+
+## 關卡 15 ～ 17（20 天後自學）
+
+範例專案到關卡 14 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
 建議順序就是編號順序；每一項都附「做完要看得到什麼」，當驗收標準。
-
-### 關卡 14：Zod + React Hook Form（表單驗證）
-
-- **為什麼**：現在表單是 `useState` 一個欄位一個、`utils/password.ts` 手寫規則。欄位多了（練習專案的表單）會很難維護。Zod 用一份 schema 同時做型別和驗證，React Hook Form 管欄位狀態和錯誤訊息。
-- **先讀**：關卡 6 的 `LoginForm.tsx`、`utils/password.ts`；關卡 8「手寫版 vs 套件版」的對照寫法。
-- **開場提示**：
-
-  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 14：用 Zod + React Hook Form 取代 `RegisterForm`、`LoginForm`、`ChangePasswordForm` 的手寫驗證，密碼規則從 `utils/password.ts` 改成 Zod schema（規則不變：8～72 字元、可列印 ASCII）。先給我「觀念」和「手寫版 vs 套件版」對照表，等我說 OK 再寫程式。一關一個 commit，中文訊息，程式註解標【關卡 14】。做完列出你注意到但沒做的事。
-
-- **做完要看得到**：三個表單行為跟以前一樣（含錯誤訊息即時顯示）；`utils/password.ts` 被刪掉或只剩 schema；`npm run lint`、`npm run build` 綠。
 
 ### 關卡 15：Tailwind CSS（樣式）
 

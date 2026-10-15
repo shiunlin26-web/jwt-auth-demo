@@ -45,7 +45,8 @@ jwt-auth-demo/
     │   ├── auth.ts        # 每個登入相關 API 一個函式：login()、getMe()……
     │   └── queryClient.ts # TanStack Query 的快取（後端資料的副本放這裡；登出時清空）
     ├── auth/              # 登入狀態（Zustand store、useAuth）、使用者資料（useMe）與守門員（RequireAuth、GuestOnly）
-    └── components/        # 頁面裡的零件：登入表單、註冊表單、修改密碼……
+    ├── components/        # 頁面裡的零件：登入表單、註冊表單、修改密碼……（React Hook Form）
+    └── schemas/           # 表單規則（Zod），和後端 schemas.py 一致
     frontend/vercel.json   # Vercel 部署設定：把 /api/* 轉發到 Render、SPA 路由
     frontend/vite.config.ts  # 本機開發：把 /api/* 轉發到 localhost:8000
     frontend/.prettierrc, .nvmrc  # 格式化規則、Node 版本
