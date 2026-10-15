@@ -5,14 +5,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import sentry_sdk
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config import settings
 from database import engine, get_session
 from logging_config import setup_logging
+from rate_limit import get_client_ip, limiter
 from routes import auth, users
 
 # 【關卡 11】log 設定要在最前面做，之後所有 logger 都會用同一個格式
@@ -51,6 +54,25 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+# 【關卡 17】頻率限制：slowapi 要從 app.state 找到 limiter；超過上限時用我們自己的 429 回應
+app.state.limiter = limiter
+
+
+def rate_limit_exceeded(request: Request, exc: Exception) -> Response:
+    # slowapi 內建的 handler 回 {"error": ...}，前端的 getErrorMessage 讀的是 detail，所以自己寫一個。
+    # exc.detail 長得像 "10 per 1 minute"
+    assert isinstance(exc, RateLimitExceeded)
+    response = JSONResponse(
+        status_code=429,
+        content={"detail": f"請求太頻繁，請稍後再試（上限 {exc.detail}）"},
+    )
+    # 補上 Retry-After 等標頭（和內建 handler 做法相同）
+    return limiter._inject_headers(response, request.state.view_rate_limit)
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded)
 
 app.add_middleware(
     CORSMiddleware,
@@ -170,6 +192,23 @@ async def boom():
     if not settings.enable_debug_endpoints:
         raise HTTPException(status_code=404, detail="Not Found")
     raise RuntimeError("演練：這是故意丟出來的錯誤")
+
+
+@api.get("/_ip", include_in_schema=False)
+async def whoami(request: Request):
+    """【關卡 17】除錯用：看 X-Forwarded-For 長什麼樣、頻率限制會把你算成哪個 IP。
+
+    用來決定 TRUSTED_PROXY_HOPS 要設幾：從前端網址打一次、直接打 Render 網址再打一次，比較兩者。
+    和 /_boom 一樣預設關閉。
+    """
+    if not settings.enable_debug_endpoints:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return {
+        "x_forwarded_for": request.headers.get("X-Forwarded-For"),
+        "client_host": request.client.host if request.client else None,
+        "trusted_proxy_hops": settings.trusted_proxy_hops,
+        "rate_limit_key": get_client_ip(request),
+    }
 
 
 app.include_router(api)

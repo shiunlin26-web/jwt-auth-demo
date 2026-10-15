@@ -21,6 +21,7 @@ jwt-auth-demo/
 │   │   └── users.py       # /me（需要登入）
 │   ├── config.py          # 所有設定集中在這裡（讀 .env）
 │   ├── logging_config.py  # log 格式（文字 / JSON）
+│   ├── rate_limit.py      # 登入 / 註冊的頻率限制，與代理後面的客戶端 IP
 │   ├── alembic.ini        # Alembic（資料庫遷移）設定
 │   ├── migrations/        # 資料庫遷移檔，記錄資料表結構的每一次變更
 │   ├── tests/             # pytest 自動化測試
@@ -46,7 +47,9 @@ jwt-auth-demo/
     │   └── queryClient.ts # TanStack Query 的快取（後端資料的副本放這裡；登出時清空）
     ├── auth/              # 登入狀態（Zustand store、useAuth）、使用者資料（useMe）與守門員（RequireAuth、GuestOnly）
     ├── components/        # 頁面裡的零件：登入表單、註冊表單、修改密碼……（React Hook Form）；ui.tsx 是共用的 Tailwind 元件
-    └── schemas/           # 表單規則（Zod），和後端 schemas.py 一致
+    ├── schemas/           # 表單規則（Zod），和後端 schemas.py 一致
+    └── test/              # Vitest 的 setup 與 MSW 假後端；測試檔放在被測檔案旁邊（*.test.ts、*.test.tsx）
+    frontend/vitest.config.ts  # 前端測試設定（沿用 vite.config.ts）
     frontend/vercel.json   # Vercel 部署設定：把 /api/* 轉發到 Render、SPA 路由
     frontend/vite.config.ts  # 本機開發：把 /api/* 轉發到 localhost:8000
     frontend/.prettierrc, .nvmrc  # 格式化規則、Node 版本
@@ -59,7 +62,7 @@ jwt-auth-demo/
 
 | 工具 | 版本 |
 | --- | --- |
-| Python | 3.10 以上（程式有用到 `int \| None` 語法），用 `python --version` 確認。沒有的話 uv 會自動幫你下載 |
+| Python | 3.13（`backend/.python-version` 固定），**不用自己裝**：uv 會自動下載這個版本 |
 | uv | Python 的套件管理工具（取代 pip + venv）。安裝方式見 [uv 官方文件](https://docs.astral.sh/uv/getting-started/installation/)：macOS / Linux 用 `curl -LsSf https://astral.sh/uv/install.sh \| sh`，Windows PowerShell 用 `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"`。裝完用 `uv --version` 確認 |
 | Node.js | **22.22 以上**（React Router 8 的要求），用 `node -v` 確認 |
 | PostgreSQL | 用 [Neon](https://neon.tech) 免費雲端資料庫，或本地 Postgres（見下方） |
@@ -221,7 +224,7 @@ uv run ruff check .          # 找出沒用到的 import、排序錯的 import�
 uv run ruff check --fix .    # 能自動修的直接修掉
 ```
 
-推上 GitHub 之後，`.github/workflows/ci.yml` 會自動跑 ruff、pytest、Docker build 和前端 build，
+推上 GitHub 之後，`.github/workflows/ci.yml` 會自動跑：後端 ruff（lint + format）、pyright、alembic check、pytest、Docker build/run/smoke；前端 eslint、prettier、vitest、tsc + vite build，
 結果在 repo 的 **Actions** 分頁看。說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 9。
 
 ## API 一覽
@@ -230,8 +233,8 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 | --- | --- | --- | --- |
 | GET | `/api/ping` | 活著嗎（不碰資料庫，Render health check 用） | – |
 | GET | `/api/health` | 能服務嗎：資料庫連線、遷移版本、目前 commit | – |
-| POST | `/api/auth/register` | 註冊 `{ email, password }` | – |
-| POST | `/api/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie | – |
+| POST | `/api/auth/register` | 註冊 `{ email, password }`（每個 IP 每分鐘 10 次，超過回 429） | – |
+| POST | `/api/auth/login` | 登入，回傳 access token，並設定 `refresh_token` cookie（每個 IP 每分鐘 10 次，超過回 429） | – |
 | POST | `/api/auth/refresh` | 用 cookie 裡的 refresh token 換新的 access token（同時輪替 refresh token） | Cookie |
 | POST | `/api/auth/logout` | 刪除 refresh token 並清 cookie | Cookie |
 | POST | `/api/auth/logout-all` | 登出所有裝置（刪除此使用者所有 refresh token） | Bearer |
