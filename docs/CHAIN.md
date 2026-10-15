@@ -262,7 +262,7 @@
 
 | 檔案 | 搬過去要改什麼 |
 | --- | --- |
-| `package.json`、`package-lock.json`、`.nvmrc` | 改 `name`。搬完 `npm ci` |
+| `package.json`、`package-lock.json`、`.nvmrc`、`.env.example` | 改 `name`。搬完 `npm ci` |
 | `vite.config.ts`、`vitest.config.ts`、`vercel.json`、`tsconfig*.json`、`eslint.config.js`、`.prettierrc`、`.prettierignore`、`index.html` | `vercel.json` 的 `destination` 改成新的 Render 網址；`index.html` 的 `<title>`；其他不用改 |
 | `src/test/setup.ts`、`src/test/server.ts`、`src/api/client.test.ts`、`src/auth/RequireAuth.test.tsx`、`src/components/LoginForm.test.tsx` | 不用改。新功能的測試照 `LoginForm.test.tsx` 的樣子寫在被測檔案旁邊；`server.ts` 的 `handlers` 加新 API 的預設回應 |
 | `src/main.tsx` | 不用改（`initializeAuth()`、`QueryClientProvider`、`RouterProvider`） |

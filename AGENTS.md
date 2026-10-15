@@ -23,7 +23,7 @@ backend/            FastAPI。入口 main.py，設定 config.py，資料表 mode
   tests/            pytest，需要 TEST_DATABASE_URL
 frontend/src/       React + Vite。api/（axios、TanStack Query 快取）、auth/（Zustand store、useMe、守門員）、pages/、components/（含 ui.tsx）、schemas/（Zod）
   test/             Vitest 的 setup 與 MSW 假後端；測試檔放在被測檔案旁邊（*.test.ts、*.test.tsx）
-.github/workflows/  CI：ruff、alembic check、pytest、Docker build/run/smoke、前端 lint/build
+.github/workflows/  CI：後端 ruff（lint + format）、pyright、alembic check、pytest、Docker build/run/smoke；前端 eslint、prettier、vitest、tsc + build
 render.yaml         Render 後端設定；frontend/vercel.json：Vercel 轉發 /api 到 Render
 ```
 

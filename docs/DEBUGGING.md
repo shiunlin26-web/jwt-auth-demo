@@ -69,6 +69,11 @@
 | 500 但 log 裡找不到 | middleware 之前就壞了（例如 `config.py` 讀設定失敗），或 log 等級設太高 | 看 Render Logs 啟動段；`LOG_LEVEL` 不要高於 INFO | 11 |
 | Render Logs 裡的 log 是一整段 JSON 看不懂 | 正式環境 `LOG_JSON=true` 是刻意的，一行一筆、可搜尋 | 用 Logs 的搜尋欄搜 `request_id`、`"status": 500` | 11 |
 | 直接 push main 被拒絕：`protected branch` | branch protection 生效了 | 開分支、開 PR、CI 綠了再 Merge | 11 |
+
+## 頻率限制（關卡 17）
+
+| 症狀 | 原因 | 修法 | 關卡 |
+| --- | --- | --- | --- |
 | 登入回 429「請求太頻繁」，但只試了一兩次 | 頻率限制把所有人算成同一個 IP：`TRUSTED_PROXY_HOPS` 比實際代理層數少（正式環境要 2） | 開 `ENABLE_DEBUG_ENDPOINTS` 看 `/api/_ip` 的 `x_forwarded_for` 有幾段，據此設 hops | 17 |
 | 後端啟動或第一次登入就 500：`parameter \`response\` must be an instance of starlette.responses.Response` | 被 `@limiter.limit` 裝飾的端點少了 `response: Response` 參數 | 加上參數（slowapi 要用它塞標頭） | 17 |
 
