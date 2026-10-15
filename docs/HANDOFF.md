@@ -10,7 +10,7 @@
 
 1. `AGENTS.md`：這個 repo 的規矩（5 分鐘）
 2. 這份文件全部（15 分鐘）
-3. `docs/LEARNING.md` 開頭到「路線圖」（10 分鐘），然後**跳著看**關卡 8、11、12 的結構，知道一關長什麼樣
+3. `docs/LEARNING.md` 開頭到「路線圖」（10 分鐘），然後**跳著看**關卡 12、13、17 的結構，知道一關長什麼樣（17 最貼近第 3 節的固定格式）
 4. `docs/TOUR.md` 第 0 站、第 7 站、第 12 站、第 13 站（20 分鐘）
 5. `docs/CHAIN.md`（10 分鐘）：練習專案要走的七環
 
@@ -29,13 +29,13 @@
 
 **進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。此刻（2026-10-15）：
 
-- 關卡 0～17 全部完成（0～12 合併於 PR #5，13 起各自一個 PR），正式環境在線上（Render + Vercel + Neon）。
+- 關卡 0～17 全部完成並合併到 `main`（每關一個 PR，`git log --oneline --merges` 看得到），正式環境在線上（Render + Vercel + Neon）。
 - 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
-- **範例專案（本 repo）已凍結**：之後只改文件、修 bug、合 Dependabot 的 PR，不加功能。它的用途是被複製到其他專案當登入模板。
+- **範例專案（本 repo）已凍結**：不加業務功能（待辦、分類那種），只改文件、修 bug、合 Dependabot 的 PR。「教學用的延伸關卡」（例如分頁同步登出）**可以**做在本 repo，編號接在 17 之後，照第 3 節的格式；業務功能一律在練習專案。它的用途是被複製到其他專案當登入模板。
 - 路線圖已無待做項目；`LEARNING.md` 末尾「之後還可以自己摸的」是不排關卡的延伸清單。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次。
 
-接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-15，關卡 12 的 CI 綠；線上 health 由學習者自己開一次。
+接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-15，關卡 17 的 CI 綠；線上 health 由學習者自己開一次。
 
 ## 3. 一關要長什麼樣（給 AI 產出新關卡用）
 
@@ -73,11 +73,11 @@
 
 1. 每天 4 小時。
 2. 只用免費方案：Render、Vercel、Neon、Sentry、GitHub Actions。不買網域。
-3. 技術棧固定：FastAPI + SQLModel + Alembic + pytest + uv + ruff；React 19 + Vite + React Router + Zustand + axios + TanStack Query。**練習專案用同一套**，換棧是 20 天後自己的事。
+3. 技術棧固定：FastAPI + SQLModel + Alembic + pytest + uv + ruff + pyright + slowapi；React 19 + Vite + React Router + Zustand + axios + TanStack Query + React Hook Form + Zod + Tailwind + Vitest + MSW + Prettier。**練習專案用同一套**，換棧是 20 天後自己的事。
 4. 正式環境**前後端同站**：Vercel rewrites 把 `/api/*` 轉到 Render，cookie 保持 `SameSite=Lax`。不用 `SameSite=None` 硬撐（理由見 `QA.md`）。
 5. 遷移在容器啟動時跑（`alembic upgrade head && uvicorn ...`），不用付費的 Pre-Deploy。
 6. CI 綠了才部署；main 有 branch protection，一律走 PR。「CI 綠了才部署」是用 Render Dashboard 的 Auto-Deploy: After CI Checks Pass（`ci.yml` 裡沒有 Deploy Hook，所以不是那條備案）。接手時到 Render → Settings → Build & Deploy 看一眼確認。
-7. 刻意不碰：Kubernetes、Terraform、docker compose、前端 Dockerfile、自訂網域、slowapi。
+7. 刻意不碰：Kubernetes、Terraform、docker compose、前端 Dockerfile、自訂網域。（slowapi 原本也在這裡，後來做成關卡 17。）
 8. 範例專案凍結。練習專案題目由學習者決定，AI 不要代選（`PLAN.md` 原本寫「待辦含分類」，2026-10-15 改為另行決定，PLAN 本文保留歷史）；他說題目之前，先做跟題目無關的事（開 repo、環 1～6 都不需要題目）。
 9. 文件全中文；AI 指引放 `AGENTS.md`，`CLAUDE.md` 只指向它，避免綁定單一工具。
 10. **架構與程式碼要是現代開發的專業水準**（2026-10-15 補充）。「這是教學模板」不是降低標準的理由：型別檢查、格式化、lint、測試、CI 全綠才合併，安全細節（例如 bcrypt 不能擋住 event loop、註冊的競態要處理）照正式專案的標準做。教學註解是加在專業程式碼上，不是用來解釋為什麼偷懶。
@@ -149,5 +149,5 @@
 - `PLAN.md` 的 20 天時程已經過期（實際進度比它快），只當設計理由看，不當行事曆。
 - 兩個分頁同時重新整理可能觸發 refresh token 的重複使用偵測而雙雙登出（關卡 1 Q2、關卡 6 Q4），刻意沒解，練習專案知道有這回事就好。
 - 免費方案的條款會變；`PLAN.md` 的查證是 2026-10-12 的結果。
-- 各關卡文件裡的「測試有幾個」是當時的數字（關卡 4 寫 34、關卡 11 寫 39），以 `uv run pytest -q` 的輸出為準。
+- 各關卡文件裡的「測試有幾個」是當時的數字（關卡 4 寫 34、關卡 11 寫 39、關卡 13 寫 42、關卡 17 寫 51；前端關卡 16 寫 11），以 `uv run pytest -q`、`npm test` 的輸出為準。
 - 這份文件的第 2 節會過期。每次合併 PR、換工具、進度變，都要更新它。
