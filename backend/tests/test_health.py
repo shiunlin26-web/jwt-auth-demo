@@ -17,6 +17,12 @@ async def test_health會回報資料庫狀態(client):
     assert body["migration"] == "unknown"
 
 
+async def test_每個回應都不准快取(client):
+    # 【關卡 19】/api/me 被瀏覽器或 proxy 快取會把 A 的資料給 B，所以 API 一律 no-store
+    res = await client.get("/api/ping")
+    assert res.headers["cache-control"] == "no-store"
+
+
 async def test_每個回應都有request_id(client):
     r = await client.get("/api/ping")
     assert r.headers.get("X-Request-ID")

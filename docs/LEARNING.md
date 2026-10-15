@@ -58,7 +58,7 @@
 | 16 | Vitest + MSW | 前端自動化測試（攔截器、守門員、表單） | ✅ 完成 |
 | 17 | 登入頻率限制（slowapi） | 防暴力破解；代理後面的客戶端 IP | ✅ 完成 |
 | 18 | SQL 與資料庫（看 ORM 底下） | 索引、執行計畫、交易與鎖、N+1 | ✅ 完成 |
-| 19 | HTTP 與瀏覽器規則 | 狀態碼、標頭、cookie、CORS、快取 | ⬜ |
+| 19 | HTTP 與瀏覽器規則 | 狀態碼、標頭、cookie、CORS、快取 | ✅ 完成 |
 | 20 | 讀 log 與除錯（故障演練） | 分段確認、request id、用測試抓 bug | ⬜ |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
@@ -3402,6 +3402,137 @@ COMMIT
 <summary>Q4：為什麼不要 <code>SELECT *</code>？程式裡 <code>select(User)</code> 不就是嗎？</summary>
 
 兩層原因。效能：欄位多、有大欄位（長文字、JSON）時，只取需要的欄位省很多傳輸。穩定：之後加欄位，`SELECT *` 的回傳形狀會悄悄變。`select(User)` 在這個專案可以接受，因為表很小、而且 ORM 需要整個物件；練習專案的「列表頁」只需要 id、title、done，就該 `select(Todo.id, Todo.title, Todo.done)`。
+
+</details>
+
+---
+
+## 關卡 19：HTTP 與瀏覽器規則 ✅
+
+**改動的檔案**：`backend/main.py`（所有 `/api` 回應加 `Cache-Control: no-store`）、`backend/tests/test_health.py`（加一個測試，共 52 個）。其餘是用 curl 和 DevTools 動手。
+
+### 一句話
+
+**關卡 10 踩的每一個坑（cookie 不帶、CORS、拿到 HTML 不是 JSON）都不是 FastAPI 或 React 的問題，是 HTTP 和瀏覽器的規則。這些規則換任何技術棧都一樣，而且 AI 常常答錯，值得自己弄清楚。**
+
+### 觀念 1：一個請求、一個回應，各有三層
+
+```
+POST /api/auth/login HTTP/1.1          ← 請求行：方法、路徑
+Host: localhost:5173                    ← 標頭：給中間人和伺服器看的資訊
+Content-Type: application/json
+Cookie: refresh_token=...               ← 瀏覽器自動帶，程式碼裡看不到
+                                        ← 空行
+{"email":"a@b.com","password":"..."}    ← 內容（body）
+
+HTTP/1.1 200 OK                         ← 狀態行
+Set-Cookie: refresh_token=...; HttpOnly; Path=/api/auth; SameSite=Lax
+X-Request-ID: 3f2a...                   ← 關卡 11 加的
+Cache-Control: no-store                 ← 這關加的
+
+{"access_token":"...","token_type":"bearer"}
+```
+
+看得懂這張圖，DevTools 的 Network 分頁就全看得懂：Headers 頁籤是標頭、Payload 是請求內容、Response 是回應內容、Cookies 是哪些 cookie 被帶上或設定。
+
+### 觀念 2：這個專案用到的狀態碼，各代表什麼決定
+
+| 碼 | 哪裡用 | 意思 | 為什麼是這個不是別的 |
+| --- | --- | --- | --- |
+| 200 | 大多數成功 | 成功、有內容 | |
+| 201 | 註冊 | 成功、而且**建立**了東西 | 讓呼叫端知道有新資源 |
+| 204 | 登出 | 成功、沒內容 | 不用回 body，省一次 JSON |
+| 400 | email 重複、目前密碼錯 | 你送的東西有問題 | 改密碼時目前密碼錯**不能**用 401，攔截器會以為 token 過期去 refresh（關卡 3） |
+| 401 | 沒 token、token 過期、密碼錯 | 你是誰我不認得 | 前端攔截器的觸發條件，所以只能用在「身分」問題 |
+| 404 | 別人的資料、關掉的除錯端點 | 沒這東西 | 練習專案的授權檢查回 404 不回 403：403 等於告訴對方「有這筆，但不是你的」 |
+| 422 | Pydantic 驗證失敗 | 格式不對 | FastAPI 預設；前端 `getErrorMessage` 會解它的陣列格式 |
+| 429 | 頻率限制 | 太頻繁 | 帶 `Retry-After` |
+| 500 | 沒接住的例外 | 我壞了 | middleware 保證有 log（關卡 11） |
+
+原則：**狀態碼是給程式（攔截器、監控）看的決定，`detail` 才是給人看的文字**。選錯狀態碼會讓攔截器做錯事，關卡 3 的 400 vs 401 就是例子。
+
+### 觀念 3：cookie 的五個屬性，各擋什麼
+
+`routes/auth.py` 的 `set_refresh_cookie`：
+
+| 屬性 | 值 | 擋什麼 | 設錯會怎樣 |
+| --- | --- | --- | --- |
+| `HttpOnly` | 開 | JS 讀不到 | XSS 一行 `document.cookie` 就把 refresh token 拿走 |
+| `Secure` | 正式環境開 | 只走 HTTPS | 本機 http 開了 cookie 根本設不進去（關卡 10 的坑） |
+| `SameSite` | `Lax` | 跨站請求不帶 | 設 `None` 等於放棄 CSRF 保護；跨站又要 `Lax` 就會不帶（關卡 10 同站的理由） |
+| `Path` | `/api/auth` | 只有這個路徑開頭的請求才帶 | 設 `/` 每個請求都帶著 refresh token 滿天飛；設 `/auth` 對不上 `/api/auth`，refresh 永遠拿不到（故障演練第 6 條） |
+| `Max-Age` | 7 天 | 多久過期 | 不設就是 session cookie，關瀏覽器就沒了，「關掉再開還在」做不到 |
+
+刪 cookie（logout）時 `Path` 要和設定時**一模一樣**，否則瀏覽器當成另一個 cookie、刪不掉。
+
+### 觀念 4：CORS 不是安全機制，是瀏覽器的「同源」規則
+
+瀏覽器規定：網頁只能讀「同源」（協定 + 網域 + port 都一樣）的回應。`localhost:5173` 打 `localhost:8000` 就不同源，請求會送出去（伺服器真的收到、真的處理），只是**瀏覽器不讓 JS 讀回應**，除非伺服器回 `Access-Control-Allow-Origin` 說可以。
+
+所以兩件事要分清楚：
+
+- CORS 擋的是「瀏覽器裡的 JS 讀回應」，curl、Postman、別的伺服器完全不受影響。**它不保護你的 API**，保護的是使用者（防止惡意網站用使用者的 cookie 偷讀別站資料）。
+- 這個專案同站之後（Vite proxy、Vercel rewrites），瀏覽器看到的永遠是同源，所以 `CORSMiddleware` 平常用不到，留著只是給「直接打後端」的除錯情境。
+
+### 觀念 5：快取，這關加的那一行
+
+瀏覽器、Vercel 的 CDN、公司的 proxy 都可能把 **GET** 的回應存起來下次直接給。`/api/me` 被存起來，同一台電腦換人登入，或同一個 proxy 後面的另一個人，就會拿到上一個人的資料。所以 `main.py` 的 middleware 對所有 API 回應加：
+
+```python
+response.headers.setdefault("Cache-Control", "no-store")
+```
+
+`no-store` 是「連存都不要存」，比 `no-cache`（可以存，但每次用之前要問伺服器）更嚴。登入相關的 API 一律 `no-store` 是業界慣例。`setdefault` 讓之後個別端點想設不同的值（例如公開的列表允許快取 60 秒）可以自己覆蓋。靜態檔（Vite 打包出來的 JS、CSS）是相反的：檔名帶 hash（`index-DAu28CMg.js`），可以永久快取，改了程式檔名就變，這就是關卡 15 切 vendor chunk 的理由。
+
+### 驗證方式
+
+下面的指令在 PowerShell 用 `curl.exe`（Windows 內建），macOS / Linux 用 `curl`。後端先起來。
+
+1. **看完整的請求與回應**（`-v`）：
+   ```bash
+   curl -v -X POST localhost:8000/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"你的帳號\",\"password\":\"你的密碼\"}"
+   ```
+   `>` 開頭是請求、`<` 開頭是回應。找到 `Set-Cookie` 那行，對照觀念 3 的五個屬性；找到 `Cache-Control: no-store` 和 `X-Request-ID`。
+2. **cookie 怎麼來回**：加 `-c jar.txt` 存 cookie，再用 `-b jar.txt -X POST localhost:8000/api/auth/refresh`，看回應 200 和新的 `Set-Cookie`。再打一次同一個舊 cookie（`jar.txt` 已更新所以要先備份一份），看 401「Refresh token reused」。這是關卡 1 的重複使用偵測，用 curl 最清楚。
+3. **Path 的效果**：`-b jar.txt localhost:8000/api/me` 的請求（`-v`）裡**沒有** `Cookie:` 標頭，因為路徑不是 `/api/auth` 開頭；refresh 的請求才有。
+4. **CORS 只擋瀏覽器**：curl 打 `localhost:8000` 什麼都正常；前端 `.env` 設 `VITE_API_URL=http://localhost:8000/api`（直接打後端）重啟，瀏覽器 Console 出現 CORS 錯誤（因為 `CORS_ORIGINS` 預設是 `http://localhost:5173`，對上的話其實會過；改成 `127.0.0.1:5173` 開網頁就會被擋）。刪掉那行。
+5. **快取標頭**：DevTools → Network 點 `/api/me` → Response Headers 有 `cache-control: no-store`；`uv run pytest -q` 52 個綠。
+
+### 動手玩
+
+1. **狀態碼選錯會怎樣**：`routes/auth.py` 的 change_password 把「目前密碼錯誤」的 400 改成 401。前端改密碼時故意打錯目前密碼：Network 會看到 401 → 攔截器去 `refresh` → 重送 → 又 401 → 顯示「登入已過期」然後被登出。改回 400。這就是「狀態碼是給攔截器看的」。
+2. **SameSite 的實驗**：`set_refresh_cookie` 的 `samesite="lax"` 改成 `"strict"`。從別的網站（例如在 Google 搜尋結果）點連結進你的網站，第一次載入 refresh 不會帶 cookie，看起來像沒登入，重新整理才正常。`Strict` 比 `Lax` 嚴在「從外站連過來的 GET 也不帶」。改回來。
+3. **Path 設錯**：`path="/api/auth"` 改成 `"/auth"`，登入後重新整理掉登入；DevTools → Application → Cookies 看得到 cookie，但 `/api/auth/refresh` 的 Request Headers 沒有 `Cookie`。這是故障演練第 6 條。改回來。
+4. **拿掉 no-store**：註解掉那行，`uv run pytest -q` 紅一個。這是「先有規則，再用測試守住」。改回來。
+5. **MDN 三篇**：HTTP cookies、CORS、HTTP caching。每篇 20 分鐘，讀完回頭看觀念 3～5 應該全部對得上。
+
+### 想一想
+
+<details>
+<summary>Q1：既然 CORS 不保護 API，API 的安全靠什麼？</summary>
+
+靠認證（token）和授權（這筆資料是不是你的）。任何人都能用 curl 打你的 API，所以每個端點都要假設「對方不是瀏覽器、什麼標頭都能偽造」。CORS 和 SameSite 保護的是「瀏覽器裡的使用者不被惡意網站利用」，是另一個層次的事。
+
+</details>
+
+<details>
+<summary>Q2：access token 放 Authorization 標頭，refresh token 放 cookie，為什麼不都放同一邊？</summary>
+
+cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是風險（CSRF：別的網站也能讓瀏覽器帶著你的 cookie 送請求）。所以只把「只在 `/api/auth` 路徑用、而且 `SameSite=Lax`」的 refresh token 放 cookie，影響範圍最小；access token 放標頭，要 JS 主動加，別的網站加不了。兩種放法各取所長。
+
+</details>
+
+<details>
+<summary>Q3：Vercel 的 rewrite 是 302 轉址嗎？</summary>
+
+不是。轉址（301/302）是回給瀏覽器說「你去別的網址」，瀏覽器會真的換網址，變成跨站。rewrite 是 Vercel **自己**去打 Render 再把回應給瀏覽器，瀏覽器從頭到尾只看到 `*.vercel.app`。這就是反向代理，同站的關鍵。DevTools 裡看不到 Render 的網址，就是因為這樣。
+
+</details>
+
+<details>
+<summary>Q4：為什麼 GET 不該有副作用？</summary>
+
+因為中間人（瀏覽器預先載入、CDN、爬蟲）都假設 GET 可以隨便重送、可以快取。如果 `GET /api/auth/logout` 能登出，瀏覽器的連結預覽就可能把你登出。所以登出是 POST，改資料是 POST / PUT / PATCH / DELETE。練習專案的每個端點選方法時照這個原則。
 
 </details>
 
