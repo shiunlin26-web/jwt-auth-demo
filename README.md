@@ -24,14 +24,17 @@ jwt-auth-demo/
 │   ├── alembic.ini        # Alembic（資料庫遷移）設定
 │   ├── migrations/        # 資料庫遷移檔，記錄資料表結構的每一次變更
 │   ├── tests/             # pytest 自動化測試
-│   ├── pyproject.toml     # 套件清單 + ruff 設定（用 uv 安裝）
+│   ├── pyproject.toml     # 套件清單 + ruff、pyright 設定（用 uv 安裝）
+│   ├── .python-version    # 固定 Python 3.13，uv 會自動用這個版本
 │   ├── uv.lock            # 鎖定每個套件的實際版本，本機 / CI / Docker 裝出來一模一樣
 │   ├── Dockerfile         # 把後端打包成 image（部署用）
 │   ├── .dockerignore      # build image 時排除 .env、.venv 等
 │   └── .env.example
 ├── render.yaml                # Render 部署設定（後端）
 ├── AGENTS.md                  # 給 AI 工具（與人）看的專案規矩；CLAUDE.md 指向它
-├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pytest、Docker build、前端 build
+├── .editorconfig              # 編輯器共用的縮排、換行規則
+├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pyright、pytest、Docker build、前端 prettier / lint / build
+├── .github/dependabot.yml     # 每週自動開 PR 更新套件
 └── frontend/src/
     ├── app/
     │   ├── router.tsx     # 路由表：哪個網址顯示哪個頁面、哪些頁面要登入
@@ -45,6 +48,7 @@ jwt-auth-demo/
     └── components/        # 頁面裡的零件：登入表單、註冊表單、修改密碼……
     frontend/vercel.json   # Vercel 部署設定：把 /api/* 轉發到 Render、SPA 路由
     frontend/vite.config.ts  # 本機開發：把 /api/* 轉發到 localhost:8000
+    frontend/.prettierrc, .nvmrc  # 格式化規則、Node 版本
 ```
 
 **前後端怎麼接**：前端只打「自己網域的 `/api/...`」。本機由 Vite 轉發到 `localhost:8000`，正式環境由 Vercel 轉發到 Render。

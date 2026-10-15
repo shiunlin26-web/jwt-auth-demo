@@ -9,6 +9,7 @@ Python 內建的 logging 就夠用，不需要額外套件。這裡做兩件事�
 1. 自訂一個 Formatter，可以輸出純文字（本機）或 JSON（正式環境）
 2. 把 uvicorn 自己的 logger 也接到同一個格式，不然會有兩種長相的 log 混在一起
 """
+
 import json
 import logging
 import sys
@@ -55,9 +56,27 @@ class TextFormatter(logging.Formatter):
 
 # LogRecord 內建的屬性，輸出時要跳過，剩下的才是我們用 extra= 加的
 _STANDARD_ATTRS = {
-    "name", "msg", "args", "levelname", "levelno", "pathname", "filename", "module",
-    "exc_info", "exc_text", "stack_info", "lineno", "funcName", "created", "msecs",
-    "relativeCreated", "thread", "threadName", "processName", "process", "message",
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "message",
     "taskName",
     "color_message",  # uvicorn 自己加的，只是帶顏色的訊息副本，不用輸出
 }

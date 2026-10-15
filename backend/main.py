@@ -1,6 +1,8 @@
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import sentry_sdk
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -9,7 +11,7 @@ from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config import settings
-from database import get_session
+from database import engine, get_session
 from logging_config import setup_logging
 from routes import auth, users
 
@@ -32,12 +34,23 @@ if settings.sentry_dsn:
     )
     logger.info("Sentry 已啟用")
 
-# 【關卡 5】原本這裡有 lifespan，啟動時用 SQLModel.metadata.create_all 自動建表。
+
+# 【關卡 5】原本這裡的 lifespan 在啟動時用 SQLModel.metadata.create_all 自動建表。
 # create_all 只會建「不存在的表」，改欄位時不會更新已存在的表（關卡 1 就踩過）。
 # 現在資料表結構改由 Alembic 管理：改完 models.py 後執行
 #   alembic revision --autogenerate --rev-id 000X -m "說明"   ← 產生遷移檔
 #   alembic upgrade head                                     ← 套用到資料庫
-app = FastAPI()
+#
+# 【關卡 13】lifespan 回來了，但只做一件事：關機時把連線池的連線好好關掉。
+# 沒有這段，部署換版（平台送 SIGTERM）時連線會被硬切，資料庫端留下一堆「對方消失」的連線，
+# 免費方案的連線數上限很小，累積幾次就連不上。yield 之前是啟動、之後是關機。
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    await engine.dispose()
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -123,10 +136,13 @@ async def health(session: AsyncSession = Depends(get_session)):
     """
     db_status = "ok"
     migration = None
+    # 【關卡 13】原始 SQL 不走 session.exec（它是給 select(Model) 用的，型別上不接受 text()），
+    # 也不走 session.execute（SQLModel 會發棄用警告），直接拿底層的連線來跑
     try:
-        await session.exec(text("SELECT 1"))
+        conn = await session.connection()
+        await conn.execute(text("SELECT 1"))
         try:
-            result = await session.exec(text("SELECT version_num FROM alembic_version"))
+            result = await conn.execute(text("SELECT version_num FROM alembic_version"))
             migration = result.scalar_one_or_none()
         except Exception:
             # 測試環境用 create_all 建表，沒有 alembic_version 這張表，不算錯

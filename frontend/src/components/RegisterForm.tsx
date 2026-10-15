@@ -28,7 +28,12 @@ export function RegisterForm({ onSuccess }: { onSuccess: (email: string) => void
 
   return (
     <form onSubmit={handleRegister}>
-      <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+      <input
+        placeholder="Email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        style={inputStyle}
+      />
       <input
         placeholder="Password"
         type="password"

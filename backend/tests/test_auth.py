@@ -3,6 +3,7 @@
 這些測試把關卡 0～3 手動驗證過的情境，全部寫成程式。
 以後改任何程式，跑一次 pytest 就知道有沒有把之前的功能改壞。
 """
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +23,7 @@ async def count_refresh_tokens() -> int:
 
 
 # ---------- 註冊 ----------
+
 
 async def test_註冊成功(client):
     res = await register(client)
@@ -44,6 +46,7 @@ async def test_中文密碼註冊回422(client):
 
 
 # ---------- 登入 ----------
+
 
 async def test_登入成功拿到access_token和refresh_cookie(client):
     await register(client)
@@ -69,6 +72,7 @@ async def test_登入時密碼太短也回401而不是422(client):
 
 
 # ---------- /me ----------
+
 
 async def test_帶access_token可以取得自己的資料(client):
     await register(client)
@@ -96,6 +100,7 @@ async def test_沒帶access_token回401(client):
 
 
 # ---------- 關卡 1：refresh token 輪替與重複使用偵測 ----------
+
 
 async def test_refresh會換發新的refresh_token(client):
     await register(client)
@@ -160,6 +165,7 @@ async def test_DB只存refresh_token的雜湊(client):
 
 # ---------- 登出 ----------
 
+
 async def test_登出後refresh失敗(client):
     await register(client)
     await login(client)
@@ -186,6 +192,7 @@ async def test_登出只影響自己這台裝置(make_client):
 
 # ---------- 關卡 3：登出所有裝置 ----------
 
+
 async def test_登出所有裝置(make_client):
     phone, laptop = make_client(), make_client()
     await register(phone)
@@ -211,6 +218,7 @@ async def test_登出所有裝置需要access_token(client):
 
 # ---------- 關卡 3：修改密碼 ----------
 
+
 async def change_password(client, token, current, new):
     return await client.post(
         "/api/auth/change-password",
@@ -229,9 +237,9 @@ async def test_改密碼成功(make_client):
 
     assert res.status_code == 200
     assert "access_token" in res.json()
-    assert (await phone.post("/api/auth/refresh")).status_code == 200   # 這台保持登入
+    assert (await phone.post("/api/auth/refresh")).status_code == 200  # 這台保持登入
     assert (await laptop.post("/api/auth/refresh")).status_code == 401  # 其他裝置被登出
-    assert (await login(make_client())).status_code == 401          # 舊密碼不能用
+    assert (await login(make_client())).status_code == 401  # 舊密碼不能用
     assert (await login(make_client(), password="new-password-1")).status_code == 200
 
 
@@ -261,6 +269,7 @@ async def test_新密碼不符合規則回422(client):
 
 # ---------- 關卡 3：登入時清理過期 token ----------
 
+
 async def test_登入時會清掉過期的refresh_token(client):
     await register(client)
     await login(client)
@@ -283,5 +292,7 @@ async def test_登入時會清掉過期的refresh_token(client):
     # 過期那筆被清掉，剩下：第一次登入的 1 筆 + 這次登入的 1 筆
     assert await count_refresh_tokens() == 2
     async with AsyncSession(test_engine) as session:
-        expired = (await session.exec(select(RefreshToken).where(RefreshToken.token_hash == "expired"))).first()
+        expired = (
+            await session.exec(select(RefreshToken).where(RefreshToken.token_hash == "expired"))
+        ).first()
     assert expired is None

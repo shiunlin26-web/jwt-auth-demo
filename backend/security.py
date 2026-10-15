@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -7,12 +8,18 @@ import jwt
 
 from config import settings
 
+# 【關卡 13】bcrypt 刻意很慢（一次約 50～300 毫秒），而且是純 CPU 運算。
+# 直接在 async 函式裡呼叫，整個 event loop 會被卡住：那幾百毫秒內後端不能處理任何其他請求，
+# 包含 /api/ping。十個人同時登入，第十個人要等前面九個算完。
+# 解法：丟到執行緒池（asyncio.to_thread），event loop 繼續服務別人，算完再回來。
+# 這是 async 後端最常見的效能錯誤之一：「async 不等於快，擋住 loop 的東西都要丟出去」。
 
-def hash_password(password: str) -> str:
+
+def _hash_password_sync(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
-def verify_password(plain: str, hashed: str) -> bool:
+def _verify_password_sync(plain: str, hashed: str) -> bool:
     plain_bytes = plain.encode()
     # 【關卡 0】bcrypt 遇到超過 72 bytes 會直接丟錯（→ 500）。
     # 註冊時已經擋掉這種密碼，所以超過的一定是錯的密碼，直接回傳 False
@@ -21,17 +28,39 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain_bytes, hashed.encode())
 
 
+async def hash_password(password: str) -> str:
+    return await asyncio.to_thread(_hash_password_sync, password)
+
+
+async def verify_password(plain: str, hashed: str) -> bool:
+    return await asyncio.to_thread(_verify_password_sync, plain, hashed)
+
+
+# 【關卡 13】登入時「帳號不存在」也要做一次 bcrypt 比對，用這個假的雜湊值。
+# 不然「帳號不存在」會在 1 毫秒內回 401，「密碼錯」要花 100 毫秒以上，
+# 攻擊者量一下回應時間就能列舉出哪些 email 有註冊（timing attack / user enumeration）。
+DUMMY_PASSWORD_HASH = _hash_password_sync(secrets.token_urlsafe(16))
+
+
 def create_access_token(user_id: int) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
-        "exp": expire,
+        "iat": now,  # 【關卡 13】簽發時間。除錯和之後要做「某時間點前的 token 全部作廢」會用到
+        "exp": now + timedelta(minutes=settings.jwt_expire_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
 def decode_access_token(token: str) -> dict:
-    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    # 【關卡 13】require：沒有 exp 或 sub 的 token 直接拒絕。
+    # PyJWT 預設「有 exp 才檢查過期」，一個被竄改成沒有 exp 的 token 會永遠有效
+    return jwt.decode(
+        token,
+        settings.jwt_secret,
+        algorithms=[settings.jwt_algorithm],
+        options={"require": ["exp", "sub"]},
+    )
 
 
 def create_refresh_token() -> str:

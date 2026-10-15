@@ -8,6 +8,7 @@
 - 連線字串改從 config.py 讀
 - target_metadata 指向 SQLModel 的資料表定義
 """
+
 import asyncio
 from logging.config import fileConfig
 

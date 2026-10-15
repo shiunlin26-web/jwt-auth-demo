@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy import delete
-from sqlmodel import select
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config import settings
@@ -11,6 +12,7 @@ from dependencies import get_current_user
 from models import RefreshToken, User
 from schemas import ChangePasswordRequest, Token, UserCreate, UserLogin, UserRead
 from security import (
+    DUMMY_PASSWORD_HASH,
     create_access_token,
     create_refresh_token,
     hash_password,
@@ -27,11 +29,11 @@ def set_refresh_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key="refresh_token",
         value=token,
-        httponly=True,        # JS 讀不到
-        samesite="lax",       # 防 CSRF
+        httponly=True,  # JS 讀不到
+        samesite="lax",  # 防 CSRF
         secure=settings.cookie_secure,  # 【關卡 2】改從設定讀：本機 http 用 False，正式環境 True
         max_age=settings.refresh_token_expire_days * 24 * 3600,  # 天數換算成秒
-        path="/api/auth",     # 只在 /api/auth/* 路徑帶上（【關卡 10】API 全部搬到 /api 底下）
+        path="/api/auth",  # 只在 /api/auth/* 路徑帶上（【關卡 10】API 全部搬到 /api 底下）
     )
 
 
@@ -53,7 +55,9 @@ async def revoke_all_refresh_tokens(session: AsyncSession, user_id: int) -> None
     （重複使用偵測、登出所有裝置、改密碼都會用到，所以抽成共用函式）
     注意：只有排進待辦，呼叫的人要自己 commit
     """
-    await session.exec(delete(RefreshToken).where(RefreshToken.user_id == user_id))
+    # 【關卡 13】col()：告訴型別檢查器「這是資料表的欄位，不是普通的 int」，
+    # 否則 pyright 會把 RefreshToken.user_id == user_id 當成普通的 bool 比較而報錯。執行結果完全一樣
+    await session.exec(delete(RefreshToken).where(col(RefreshToken.user_id) == user_id))
 
 
 async def delete_expired_refresh_tokens(session: AsyncSession, user_id: int) -> None:
@@ -62,8 +66,8 @@ async def delete_expired_refresh_tokens(session: AsyncSession, user_id: int) -> 
     """
     await session.exec(
         delete(RefreshToken).where(
-            RefreshToken.user_id == user_id,
-            RefreshToken.expires_at < datetime.now(timezone.utc),
+            col(RefreshToken.user_id) == user_id,
+            col(RefreshToken.expires_at) < datetime.now(timezone.utc),
         )
     )
 
@@ -73,7 +77,7 @@ async def register(
     data: UserCreate,
     session: AsyncSession = Depends(get_session),
 ):
-    # 檢查 email 是否已存在
+    # 檢查 email 是否已存在（給使用者看得懂的錯誤）
     result = await session.exec(select(User).where(User.email == data.email))
     existing = result.first()
     if existing:
@@ -85,12 +89,23 @@ async def register(
     # 建立新用戶
     user = User(
         email=data.email,
-        hashed_password=hash_password(data.password),
+        hashed_password=await hash_password(data.password),
     )
     session.add(user)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # 【關卡 13】競態（race condition）：上面查過「不存在」，但在 commit 前另一個請求剛好註冊了同一個 email。
+        # 「先查再寫」永遠有這個空窗，真正守住唯一性的是資料庫的 unique 索引（models.py）。
+        # 它丟出 IntegrityError 時要接住回 400，不然會變成 500
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        ) from None
     await session.refresh(user)
     return user
+
 
 @router.post("/login", response_model=Token)
 async def login(
@@ -101,23 +116,31 @@ async def login(
     # 查用戶
     result = await session.exec(select(User).where(User.email == data.email))
     user = result.first()
-    if not user or not verify_password(data.password, user.hashed_password):
+    # 【關卡 13】帳號不存在也要做一次 bcrypt 比對（對著假的雜湊），讓兩種失敗花的時間一樣，
+    # 不然從回應時間就能猜出哪些 email 有註冊（security.py 的 DUMMY_PASSWORD_HASH 有說明）
+    hashed = user.hashed_password if user else DUMMY_PASSWORD_HASH
+    password_ok = await verify_password(data.password, hashed)
+    if not user or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
         )
+    # 【關卡 13】User.id 的型別是 int | None（新物件還沒存進 DB 時是 None），
+    # 從 DB 查出來的一定有值。assert 告訴型別檢查器這件事，也在不該發生時立刻炸出來
+    assert user.id is not None
+    user_id = user.id
 
     # 簽 access token
-    access_token = create_access_token(user.id)
+    access_token = create_access_token(user_id)
 
     # 【關卡 5】記錄最後登入時間（下面 commit 時一起寫入）
     user.last_login_at = datetime.now(timezone.utc)
 
     # 【關卡 3】順便清掉這個使用者過期的 refresh token，避免資料表一直變大
-    await delete_expired_refresh_tokens(session, user.id)
+    await delete_expired_refresh_tokens(session, user_id)
 
     # 產生並儲存 refresh token
-    refresh_token = await issue_refresh_token(session, user.id)
+    refresh_token = await issue_refresh_token(session, user_id)
     await session.commit()
 
     set_refresh_cookie(response, refresh_token)
@@ -224,6 +247,7 @@ async def logout_all(
     ⚠️ 其他裝置手上的 access token 在過期前（最多 JWT_EXPIRE_MINUTES 分鐘）還是能用，
     因為驗證 access token 不查 DB。等它過期、要 refresh 時才會失敗被登出。
     """
+    assert current_user.id is not None
     await revoke_all_refresh_tokens(session, current_user.id)
     await session.commit()
 
@@ -243,7 +267,7 @@ async def change_password(
     # 1. 確認目前密碼正確
     #    用 400 而不是 401：401 代表「沒登入 / token 失效」，
     #    前端 apiFetch 看到 401 會以為 token 過期而去 refresh，這裡不是那種情況
-    if not verify_password(data.current_password, current_user.hashed_password):
+    if not await verify_password(data.current_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="目前密碼錯誤",
@@ -257,10 +281,11 @@ async def change_password(
         )
 
     # commit 之後 current_user 的屬性會過期（關卡 1 的坑），先存起來
+    assert current_user.id is not None
     user_id = current_user.id
 
     # 3. 更新密碼
-    current_user.hashed_password = hash_password(data.new_password)
+    current_user.hashed_password = await hash_password(data.new_password)
 
     # 4. 撤銷所有 refresh token → 其他裝置之後 refresh 會失敗、被登出
     #    （密碼可能就是因為外洩才改的，舊的登入狀態都不該再信任）

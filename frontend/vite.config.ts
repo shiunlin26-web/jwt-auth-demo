@@ -1,5 +1,5 @@
-import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -10,10 +10,10 @@ export default defineConfig({
     // 對瀏覽器來說前後端是同一個網站，所以：不需要 CORS、cookie 直接帶上、localhost 和 127.0.0.1 都能用。
     // 正式環境由 Vercel 的 rewrites 做同一件事（vercel.json）。
     proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
+      "/api": {
+        target: "http://localhost:8000",
         changeOrigin: true,
       },
     },
   },
-})
+});

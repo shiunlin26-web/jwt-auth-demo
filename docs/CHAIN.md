@@ -242,7 +242,7 @@
 
 | 檔案 | 搬過去要改什麼 |
 | --- | --- |
-| `pyproject.toml`、`uv.lock` | 改 `name`、`description`；套件清單不用改。搬完跑 `uv sync` |
+| `pyproject.toml`、`uv.lock`、`.python-version` | 改 `name`、`description`；套件清單、ruff / pyright 設定不用改。搬完跑 `uv sync` |
 | `config.py` | 不用改。所有設定都從這裡讀，新專案的新設定加在這裡 |
 | `database.py` | 不用改 |
 | `models.py` | `User`、`RefreshToken` 保留；練習專案的表加在後面，都要有 `user_id` 外鍵 |
@@ -262,8 +262,8 @@
 
 | 檔案 | 搬過去要改什麼 |
 | --- | --- |
-| `package.json`、`package-lock.json` | 改 `name`。搬完 `npm ci` |
-| `vite.config.ts`、`vercel.json`、`tsconfig*.json`、`eslint.config.js`、`index.html` | `vercel.json` 的 `destination` 改成新的 Render 網址；其他不用改 |
+| `package.json`、`package-lock.json`、`.nvmrc` | 改 `name`。搬完 `npm ci` |
+| `vite.config.ts`、`vercel.json`、`tsconfig*.json`、`eslint.config.js`、`.prettierrc`、`.prettierignore`、`index.html` | `vercel.json` 的 `destination` 改成新的 Render 網址；`index.html` 的 `<title>`；其他不用改 |
 | `src/main.tsx` | 不用改（`initializeAuth()`、`QueryClientProvider`、`RouterProvider`） |
 | `src/api/client.ts`、`src/api/auth.ts`、`src/api/queryClient.ts` | 不用改。新功能的 API 另開 `src/api/todos.ts`，用 `api.get` / `api.post`（會自動帶 token、自動 refresh） |
 | `src/auth/authStore.ts`、`authService.ts`、`useAuth.ts`、`useMe.ts`、`RequireAuth.tsx`、`GuestOnly.tsx` | 不用改。新功能的 query / mutation 照 `useMe.ts` 的樣子另開 `src/features/<功能>/queries.ts`（`LEARNING.md` 關卡 12 有範例） |
@@ -276,7 +276,7 @@
 
 | 檔案 | 搬過去要改什麼 |
 | --- | --- |
-| `.github/workflows/ci.yml` | `TRUNCATE`、資料庫名稱不用改；如果後端 / 前端資料夾名稱一樣就完全不用改 |
+| `.github/workflows/ci.yml`、`.github/dependabot.yml`、`.editorconfig` | 如果後端 / 前端資料夾名稱一樣就完全不用改 |
 | `render.yaml` | 改 `name`；其他不用改 |
 | `.gitignore`、`CLAUDE.md` | 不用改 |
 | `AGENTS.md` | 用附錄 B 的範本，不要直接複製本 repo 的（它有學習專案專屬的規矩） |
