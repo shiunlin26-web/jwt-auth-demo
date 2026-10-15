@@ -55,7 +55,7 @@ refresh cookie 是 `SameSite=Lax`。前端在 `*.vercel.app`、後端在 `*.onre
 瀏覽器只在請求路徑以 `/api/auth` 開頭時帶上它。`/api/me`、之後的 `/api/todos` 都不會帶，refresh token 不會跟著每個請求滿天飛。這也是為什麼前端的 baseURL 一定要是 `/api`：寫成後端網址，路徑就對不上了。詳見 `DEBUGGING.md`「部署：前端」。
 
 **Q15：同站之後還需要 CORS 嗎？**
-不需要。CORS 是跨網域才有的事。程式裡的 CORS 設定留著是為了「除錯時直接打後端網址」這條逃生口，平常用不到。
+不需要。CORS 是跨網域才有的事。程式裡的 CORS 設定留著是為了「除錯時直接打後端網址」這條逃生口，平常用不到。而且 CORS 不保護 API（curl 不受影響），它保護的是瀏覽器裡的使用者。詳見 `LEARNING.md` 關卡 19 觀念 4。
 
 ## 部署
 

@@ -109,6 +109,10 @@ async def log_requests(request: Request, call_next):
         )
         raise
     response.headers["X-Request-ID"] = request_id
+    # 【關卡 19】API 的回應一律不准快取。瀏覽器、Vercel 的 CDN、公司的 proxy 都可能把 GET 的回應存起來，
+    # /api/me 被存起來就會把 A 的資料給 B（同一台共用電腦、同一個 proxy 後面）。
+    # no-store 是「連存都不要存」，比 no-cache（存了但每次要問）更嚴。登入相關的 API 一律 no-store 是業界慣例
+    response.headers.setdefault("Cache-Control", "no-store")
     logger.info(
         "request",
         extra={
