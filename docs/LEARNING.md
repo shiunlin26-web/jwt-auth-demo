@@ -51,7 +51,7 @@
 | **9** | **Docker 與 CI**（uv、ruff、Dockerfile、GitHub Actions） | 把後端打包成 image、每次 push 自動跑測試 | ✅ 完成 |
 | 10 | 部署（Render + Vercel + Neon，前後端同站） | 真的上線，手機開得到 | ✅ 完成 |
 | 11 | 維護（healthcheck、log、Sentry、遷移回滾、換密鑰） | 壞掉時知道去哪看、怎麼復原 | ✅ 完成 |
-| 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ⬜ |
+| 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ✅ 完成 |
 | 13（20 天後自學） | Zod + React Hook Form | 表單驗證 | ⬜ |
 | 14（20 天後自學） | Tailwind CSS | 樣式 | ⬜ |
 | 15（20 天後自學） | Vitest + MSW | 前端自動化測試 | ⬜ |
@@ -1453,6 +1453,8 @@ return status === "authenticated"
 ### ⭐ 之後其他專案怎麼用
 
 > **第 8 關之後檔案有變**：要複製的是 `src/api/`（`client.ts`、`auth.ts`）和 `src/auth/`（`authStore.ts`、`authService.ts`、`useAuth.ts`、`RequireAuth.tsx`、`GuestOnly.tsx`），並在 `main.tsx` 呼叫 `initializeAuth()`，**不需要再包 `<AuthProvider>`**。新的 API 用 `api.get(...)`、`api.post(...)`（axios）呼叫。下面是第 6 關當時的版本。
+>
+> **第 12 關之後再加兩個檔案**：`src/api/queryClient.ts`、`src/auth/useMe.ts`，並在 `main.tsx` 包 `<QueryClientProvider client={queryClient}>`。使用者資料改用 `useMe().data` 拿（`useAuth()` 不再有 `user`）。新專案自己的資料照 `useMe.ts` 的樣子寫 `useQuery`，改資料用 `useMutation` + `invalidateQueries`（關卡 12 有範例）。完整清單見 `docs/CHAIN.md` 附錄。
 
 這關最重要的目的。新專案要做登入時：
 
@@ -2498,9 +2500,247 @@ log 是全部的紀錄，包含正常的請求，用來「查某一次發生了�
 
 ---
 
-## 關卡 12 ～ 16
+## 關卡 12：TanStack Query ✅
 
-做到時再補上詳細內容。關卡 12（TanStack Query）排在 20 天計畫內，13～16 是 20 天後的自學清單，見 [`PLAN.md`](PLAN.md)。
+**改動的檔案**：`frontend/package.json`（新增 `@tanstack/react-query`，開發用 `@tanstack/react-query-devtools`）、`frontend/src/`：新增 `api/queryClient.ts`、`auth/useMe.ts`，改寫 `auth/authStore.ts`（拿掉 `user`）、`auth/authService.ts`（不再呼叫 `getMe`、刪 `reloadUser`）、`auth/useAuth.ts`、`main.tsx`（包 `QueryClientProvider`）、`components/UserPanel.tsx`、`pages/HomePage.tsx`、`app/AppLayout.tsx`
+
+### 一句話
+
+**前端有兩種狀態：「自己的」和「後端資料的副本」。第 8 關把兩種都塞進 Zustand；這關把第二種交給 TanStack Query，因為副本會過期、要重抓、要顯示載入中和錯誤，這些事每一種後端資料都要做一遍，不該每次手寫。**
+
+### 觀念：client state 和 server state 是兩回事
+
+| | client state（前端自己的） | server state（後端資料的副本） |
+| --- | --- | --- |
+| 例子 | access token、「初始化了沒」、提示文字、表單輸入 | 使用者資料、之後練習專案的待辦清單、分類 |
+| 正本在哪 | 前端 | **後端資料庫** |
+| 會不會自己變 | 不會，只有你的程式會改它 | 會。別的分頁、別的裝置、別人都可能改 |
+| 要煩惱什麼 | 幾乎不用 | 什麼時候過期？要不要重抓？抓的時候畫面顯示什麼？失敗呢？兩個元件都要用，抓一次還是兩次？ |
+| 誰管 | **Zustand**（`authStore.ts`） | **TanStack Query**（`queryClient.ts` + `useMe.ts`） |
+
+第 8 關的 `user` 是 server state，卻被當成 client state 管：`login`、`initializeAuth`、`reloadUser` 三個地方各自呼叫 `getMe()` 再 `setUser()`，沒有「載入中」，錯誤要元件自己 `useState` 接。資料只有一種時還撐得住，練習專案有 todo、category 之後，每一種都要再寫一套。TanStack Query 就是把這套流程寫好一次給所有資料用。
+
+### 手寫版 → 套件版對照
+
+| 第 8 關手寫 | 第 12 關 TanStack Query | 套件幫你做了什麼 |
+| --- | --- | --- |
+| `store.user` + `setUser` | `useMe().data` | 存在 query 快取，所有元件共用同一份 |
+| `login()` 裡呼叫 `getMe()` | `enabled: status === "authenticated"` | 一變成已登入就自動抓，不用在每個登入路徑手動呼叫 |
+| `reloadUser()` | `refetch()` | 手動重抓 |
+| 沒有「載入中」 | `isPending`、`isFetching` | 第一次抓 / 背景重抓，兩種狀態分開 |
+| 元件自己 `useState` 存錯誤 | `error` | 最後一次失敗的錯誤 |
+| 兩個元件都要 user → 各自呼叫或靠 store 共用 | 同一個 `queryKey` | 同時 mount 也只送一個請求 |
+| 沒有 | `staleTime`、`refetchOnWindowFocus` | 切回分頁時如果資料過期就自動重抓 |
+| 沒有 | Devtools | 右下角圖示，看得到每個 query 的狀態和快取內容 |
+
+**`useAuth()` 的用法只少了 `user` 和 `reloadUser`**，其他元件一行都不用改。這是第 6 關分層的好處第二次派上用場。
+
+### 程式怎麼寫
+
+**1. 快取本體（`api/queryClient.ts`）**
+
+```ts
+export const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
+});
+```
+
+- **`staleTime`**：抓回來的資料多久內算「新鮮」。新鮮的資料再被要求時直接用快取、不重抓；過期的會先給你舊資料、同時在背景重抓。預設 0（永遠算過期）對這個專案太頻繁，設 30 秒。
+- **`retry`**：失敗重試幾次。401 已經由 axios 攔截器處理（第 8 關），走到這裡的失敗通常是後端掛了，重試太多次只是拖長「載入中」。
+
+這個檔案還**訂閱了 Zustand store**：token 從有變成沒有（登出、登出所有裝置、refresh 失敗）就 `queryClient.clear()`。為什麼不寫在 `logout()` 裡？因為清 token 的地方有三個，盯著「token 消失」這一件事，三條路都不會漏。沒有這段會怎樣，見動手玩 4。
+
+**2. 宣告一份資料（`auth/useMe.ts`）**
+
+```ts
+export const meQueryKey = ["me"] as const;
+
+export function useMe() {
+  const status = useAuthStore(selectStatus);
+  return useQuery({
+    queryKey: meQueryKey,
+    queryFn: getMe,
+    enabled: status === "authenticated",
+  });
+}
+```
+
+- **`queryKey`**：快取裡的名字。同名的資料在所有元件之間共用。之後要讓它過期：`queryClient.invalidateQueries({ queryKey: meQueryKey })`。
+- **`queryFn`**：怎麼抓。直接用第 8 關的 `getMe()`，走 axios 攔截器，token 過期會自動 refresh。**TanStack Query 不管 HTTP，只管「什麼時候呼叫你給的函式、結果存哪」**。
+- **`enabled`**：條件不成立就不抓。沒登入時 `/me` 註定 401，不該送。
+
+**3. 包 Provider（`main.tsx`）**
+
+```tsx
+<QueryClientProvider client={queryClient}>
+  <RouterProvider router={router} />
+  <ReactQueryDevtools initialIsOpen={false} />
+</QueryClientProvider>
+```
+
+Zustand 不需要 Provider，TanStack Query 需要：快取要跟著 React 樹的生命週期走，測試時也要能換一份乾淨的。Devtools 只在開發模式出現，正式 build 自動拿掉。
+
+**4. 元件裡用（`components/UserPanel.tsx`）**
+
+```tsx
+const { data: me, isPending, isFetching, error, refetch, dataUpdatedAt } = useMe();
+
+<button onClick={() => refetch()} disabled={isFetching}>
+  {isFetching ? "更新中..." : "重新取得我的資料"}
+</button>
+{error && <p>{getErrorMessage(error)}</p>}
+{isPending && <p>載入中...</p>}
+{me && <pre>{JSON.stringify(me, null, 2)}</pre>}
+```
+
+對照第 8 關同一個檔案：`useState` 存訊息、`try/catch`、`handleReload` 全部消失。`isPending` 和 `isFetching` 的差別：前者是「還沒有任何資料」（第一次），後者是「正在抓」（包含背景重抓，這時 `data` 還是舊的，畫面不會閃成空白）。
+
+**5. Zustand 瘦身（`auth/authStore.ts`、`auth/authService.ts`）**
+
+store 拿掉 `user`、`setUser`；`login` 和 `initializeAuth` 只放 token，不再 `getMe()`；`reloadUser` 刪掉。`useAuthStore.getState()` 在 Console 裡現在看不到 `user` 了（第 8 關動手玩 1 的輸出會少一個欄位）。
+
+### 練習專案怎麼用：列表 + 新增
+
+這關只示範「讀」。練習專案的 CRUD 會用到「寫」，模式長這樣（以待辦為例，**不在這個 repo 裡**，只是給你看樣子）：
+
+```ts
+// src/features/todos/queries.ts
+export const todosKey = ["todos"] as const;
+
+export function useTodos() {
+  return useQuery({ queryKey: todosKey, queryFn: getTodos });
+}
+
+export function useCreateTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createTodo,
+    // 新增成功後讓列表過期 → 正在顯示列表的元件自動重抓
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: todosKey }),
+  });
+}
+```
+
+```tsx
+const { data: todos, isPending } = useTodos();
+const create = useCreateTodo();
+<button onClick={() => create.mutate({ title })} disabled={create.isPending}>新增</button>
+```
+
+**規則只有一條：改了後端資料，就 `invalidateQueries` 對應的 key。** 列表會自己重抓，不用手動更新陣列。這就是為什麼 `queryKey` 要集中定義成常數：寫的時候才找得到要讓誰過期。登入、登出這類「不是在改一筆資料」的動作留在 `authService`，不用硬套 `useMutation`。
+
+### 驗證方式
+
+1. **`frontend` 跑 `npm install`**（`package.json` 變了），然後 `npm run dev`
+2. **登入後**：首頁右下角有一個小圖示（Devtools），點開看到 `["me"]` 這個 query，狀態是 `fresh`，30 秒後變 `stale`
+3. **Network**：登入後只有**一個** `/api/me`，雖然 `AppLayout` 和 `HomePage`、`UserPanel` 三個元件都在用它
+4. **重新整理**：還在登入狀態，一樣只有一個 `/api/me`
+5. **按「重新取得我的資料」**：按鈕短暫變成「更新中...」，「上次更新」的時間跟著變，Network 多一個 `/api/me`
+6. **登出再登入**：Network 沒有多餘的 `/api/me`（登出後 `enabled` 是 false）
+7. **過期的 token 還是會自動 refresh**：`backend/.env` 加 `JWT_EXPIRE_MINUTES=1`，重啟後端，登入後等 1 分鐘再按「重新取得我的資料」，Network 是 `me` 401 → `refresh` 200 → `me` 200，畫面沒有錯誤。這條路是第 8 關的攔截器在做，跟 query 無關。玩完刪掉這行
+8. `npm run lint`、`npm run build` 都要通過
+
+### 動手玩
+
+1. **看 `staleTime` 的效果**：開**兩個**分頁都登入。在分頁 B 登出再登入（`last_login_at` 會變）。切回分頁 A：30 秒內切回去沒反應（還新鮮），超過 30 秒切回去 Network 會自動多一個 `/api/me`，畫面上的 `last_login_at` 更新了，**你什麼都沒按**。這就是 `refetchOnWindowFocus`。把 `staleTime` 改成 `0`，每次切回來都重抓；改成 `Infinity`，永遠不自動重抓。改回來。
+2. **拿掉 `enabled`**：`useMe.ts` 那行註解掉。登出後 Network 立刻多一個 401 的 `/api/me`，接著攔截器去 `refresh` 又 401。這就是「沒登入就不要抓」的理由。改回來。
+3. **`isPending` 和 `isFetching` 的差別**：DevTools → Network → 把速度調成 `Slow 4G`。按「重新取得我的資料」：按鈕變「更新中...」但舊資料還在（`isFetching`）。重新整理頁面：變成「載入中...」（`isPending`，沒有任何資料）。調回 `No throttling`。
+4. **拿掉登出清快取**：`queryClient.ts` 最後那段 `subscribe` 註解掉。用帳號 A 登入，登出，用帳號 B 登入：首頁標題會**先閃一下 A 的 email** 再變成 B。因為 `["me"]` 這個 key 沒有使用者 id，快取還留著 A 的資料。改回來。
+5. **Devtools 裡手動操作**：點開 Devtools，選 `["me"]`，按 `Invalidate`（資料過期，立刻重抓）、`Reset`、`Remove`，一邊看 Network 和畫面。這是除錯時最快的方法。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼 access token 不也交給 TanStack Query 管？它也是後端給的。</summary>
+
+它不是「資料的副本」，是「憑證」。沒有人會想「重抓」token、沒有「列表」可以顯示它、也不需要「過期就在背景更新」（過期是攔截器的事）。它是前端拿來做事的工具，屬於 client state。判斷方法：**這東西有沒有一個後端的正本，而且你想讓畫面跟著那個正本走？** 有就是 server state。
+
+</details>
+
+<details>
+<summary>Q2：<code>["me"]</code> 這個 key 為什麼不加使用者 id，像 <code>["me", userId]</code>？</summary>
+
+抓到 `/me` 之前根本不知道 id。所以改用「登出就清掉整個快取」解決。練習專案的 todo 列表也一樣：`["todos"]` 不用加 user id，因為後端只會回「這個 token 的人」的資料，換人時快取已經被清掉了。
+
+</details>
+
+<details>
+<summary>Q3：TanStack Query 和 Zustand 會不會重複？要不要全部改用其中一個？</summary>
+
+不會。Zustand 是「一個全域變數加上自動通知畫面」，什麼都能放，但什麼都不幫你做。TanStack Query 專門管「從後端抓來的資料」的生命週期，但它不適合放 token 這種不是抓來的東西。兩個都留，各管各的，是目前 React 社群最常見的組合。
+
+</details>
+
+<details>
+<summary>Q4：登入動作為什麼不用 <code>useMutation</code>？</summary>
+
+可以用，但沒必要。`useMutation` 的價值在 `onSuccess` 之後讓某個 query 過期、以及幫你管 `isPending`。登入成功要做的是「把 token 放進 store」，不是「讓某份資料過期」，而且 `LoginForm` 的 `useState` 已經處理了錯誤訊息。練習專案的新增、修改、刪除才是 `useMutation` 的主場。
+
+</details>
+
+<details>
+<summary>Q5：<code>queryFn</code> 失敗時 TanStack Query 會重試，axios 攔截器又會 refresh 重送，兩個會不會打架？</summary>
+
+不會，層次不同。攔截器在**一次** `getMe()` 呼叫裡面處理 401（refresh、重送、回傳結果或丟錯誤）；TanStack Query 只看到 `getMe()` 最後成功還是失敗，失敗才重試。所以過期 token 的流程是：query 呼叫 `getMe()` → 攔截器 401 → refresh → 重送 200 → query 收到成功。query 完全不知道中間發生過 401。
+
+</details>
+
+---
+
+## 關卡 13 ～ 16（20 天後自學）
+
+範例專案到關卡 12 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
+建議順序就是編號順序；每一項都附「做完要看得到什麼」，當驗收標準。
+
+### 關卡 13：Zod + React Hook Form（表單驗證）
+
+- **為什麼**：現在表單是 `useState` 一個欄位一個、`utils/password.ts` 手寫規則。欄位多了（練習專案的表單）會很難維護。Zod 用一份 schema 同時做型別和驗證，React Hook Form 管欄位狀態和錯誤訊息。
+- **先讀**：關卡 6 的 `LoginForm.tsx`、`utils/password.ts`；關卡 8「手寫版 vs 套件版」的對照寫法。
+- **開場提示**：
+
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做 `docs/LEARNING.md` 的關卡 13：用 Zod + React Hook Form 取代 `RegisterForm`、`LoginForm`、`ChangePasswordForm` 的手寫驗證，密碼規則從 `utils/password.ts` 改成 Zod schema（規則不變：8～72 字元、可列印 ASCII）。先給我「觀念」和「手寫版 vs 套件版」對照表，等我說 OK 再寫程式。一關一個 commit，中文訊息，程式註解標【關卡 13】。做完列出你注意到但沒做的事。
+
+- **做完要看得到**：三個表單行為跟以前一樣（含錯誤訊息即時顯示）；`utils/password.ts` 被刪掉或只剩 schema；`npm run lint`、`npm run build` 綠。
+
+### 關卡 14：Tailwind CSS（樣式）
+
+- **為什麼**：現在是 inline style 和 `styles.ts`。Tailwind 是目前最常見的樣式方案，練習專案的頁面多了會需要。
+- **先讀**：`components/styles.ts`、`AppLayout.tsx` 的 style 寫法。
+- **開場提示**：
+
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 14：裝 Tailwind CSS（Vite 官方做法），把 `AppLayout`、`pages/`、`components/` 的 inline style 和 `styles.ts` 改成 Tailwind class，版面維持跟現在差不多就好，不要重新設計。先說明 Tailwind 的工作原理（為什麼 class 名字就是樣式、build 時發生什麼）再動手。一關一個 commit。
+
+- **做完要看得到**：`styles.ts` 消失；`npm run build` 後 CSS 檔比以前大一點但 JS 沒變；畫面在手機寬度不會跑版。
+
+### 關卡 15：Vitest + MSW（前端自動化測試）
+
+- **為什麼**：後端有 39 個測試，前端一個都沒有。改 `client.ts` 的攔截器時，現在只能手動玩一遍。MSW 可以假裝成後端，讓測試不需要真的起伺服器。
+- **先讀**：關卡 4 的測試觀念（fixture、整合測試 vs 單元測試）；`client.ts` 的攔截器。
+- **開場提示**：
+
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 15：裝 Vitest + React Testing Library + MSW，寫三組測試：(1) `client.ts` 的 401 → refresh → 重送，以及 single-flight（同時三個請求只有一個 refresh）；(2) `RequireAuth` 在三種狀態下的行為；(3) `LoginForm` 密碼錯誤時顯示後端的錯誤訊息。CI 的前端 job 加一步跑測試。先對照後端 pytest 的概念說明每個工具是什麼，再動手。一關一個 commit。
+
+- **做完要看得到**：`npm test` 綠；把 `client.ts` 的 `_retry` 拿掉，測試會紅；CI 多一步。
+
+### 關卡 16：登入頻率限制（slowapi，選做）
+
+- **為什麼**：現在 `/api/auth/login` 可以無限次嘗試，可以暴力猜密碼。
+- **先讀**：`routes/auth.py` 的 login；關卡 11 的 middleware（頻率限制也是一層）。
+- **開場提示**：
+
+  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 16：用 slowapi 給 `/api/auth/login` 和 `/api/auth/register` 加頻率限制（例如每個 IP 每分鐘 10 次），超過回 429，並寫測試。說明在 Vercel 代理後面「客戶端 IP」要從哪個 header 拿、為什麼不能信任任意 header。一關一個 commit。
+
+- **做完要看得到**：連續打 11 次登入第 11 次是 429；測試綠；正式環境（經過 Vercel）限制的是真正的客戶端 IP，不是 Vercel 的 IP。
+
+### 之後還可以自己摸的（不排關卡）
+
+| 主題 | 一句話 | 開場提示的關鍵字 |
+| --- | --- | --- |
+| docker compose | 一個檔案同時起後端 + Postgres，本機不用裝 Postgres（要先有本機 Docker） | 「寫 `docker-compose.yml`，服務有 backend 和 postgres，用 `.env` 注入設定，說明 volume 是什麼」 |
+| 自訂網域與 DNS | 把 `*.vercel.app` 換成自己的網域，HTTPS 自動 | 「說明 A / CNAME 記錄差別、Vercel 怎麼接自訂網域、HTTPS 憑證誰發」 |
+| GitHub Codespaces | 瀏覽器裡的開發環境，有 Docker | 「幫這個 repo 寫 `.devcontainer`，讓 Codespaces 打開就能跑後端和前端」 |
+| 分頁之間同步登入狀態 | 關卡 6 Q4 提到的 `BroadcastChannel` | 「一個分頁登出，其他分頁立刻跟著登出」 |
+| Postgres Row Level Security | 授權檢查從程式搬到資料庫層 | 「說明 RLS 和在程式裡加 `WHERE user_id` 的取捨」 |
 
 ---
 

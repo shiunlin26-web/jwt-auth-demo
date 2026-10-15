@@ -1,4 +1,4 @@
-# 專案導覽：從零讀懂整個專案（到關卡 8）
+# 專案導覽：從零讀懂整個專案（到關卡 12）
 
 給**剛接手這個專案的人**，也給**複習用**。
 
@@ -37,8 +37,8 @@
 | **前端** | | | |
 | 10 | 前端怎麼啟動、換頁 | `main.tsx`、`app/router.tsx`、`app/AppLayout.tsx` | ⭐⭐ |
 | 11 | 守門員 | `auth/RequireAuth.tsx`、`auth/GuestOnly.tsx` | ⭐⭐ |
-| 12 | 登入狀態放哪 | `auth/authStore.ts`、`auth/authService.ts`、`auth/useAuth.ts` | ⭐⭐⭐ |
-| 13 | 跟後端講話 | `api/client.ts`、`api/auth.ts` | ⭐⭐⭐ |
+| 12 | 登入狀態放哪 | `auth/authStore.ts`、`auth/authService.ts`、`auth/useAuth.ts`、`auth/useMe.ts` | ⭐⭐⭐ |
+| 13 | 跟後端講話 | `api/client.ts`、`api/auth.ts`、`api/queryClient.ts` | ⭐⭐⭐ |
 | 14 | 畫面 | `pages/`、`components/`、`utils/` | ⭐ |
 | **總複習** | | | |
 | 15 | 前後端串起來走一遍 + 踩過的坑 | — | ⭐⭐⭐ |
@@ -424,6 +424,7 @@ cookie 裡的 refresh token
 **⭐⭐ `main.tsx`**
 - `initializeAuth()`：網頁一打開就拿會員卡試著換通行證（第 12 站）
 - 不等它做完就先畫畫面（顯示「載入中」），檢查完畫面自動更新
+- `<QueryClientProvider>`：包住整個 App，底下所有元件共用一份「後端資料的快取」（第 12、13 站）；右下角的小圖示是它的 Devtools
 
 **⭐⭐ `router.tsx`：路由是一棵樹**（詳見 LEARNING.md 關卡 7）
 
@@ -486,17 +487,18 @@ AppLayout（導覽列）
 
 ## 第 12 站：登入狀態放哪
 
-**讀**：`auth/authStore.ts` → `auth/authService.ts` → `auth/useAuth.ts`
+**讀**：`auth/authStore.ts` → `auth/authService.ts` → `auth/useAuth.ts` → `auth/useMe.ts`
 
 ### 一句話
 
-**公布欄**（store）記資料、**辦事員**（service）去後端辦事、**服務窗口**（useAuth）給畫面用。
+**公布欄**（store）記前端自己的狀態、**辦事員**（service）去後端辦事、**服務窗口**（useAuth）給畫面用；**使用者資料**另外放在快取裡（useMe）。
 
 | 檔案 | 比喻 | 內容 |
 |---|---|---|
-| `authStore.ts` | 📋 公布欄 | accessToken、user、notice、initialized |
-| `authService.ts` | 🧑‍💼 辦事員 | initializeAuth、login、logout、logoutAll、changePassword、reloadUser |
-| `useAuth.ts` | 🪟 服務窗口 | 元件用 `const { status, user, login } = useAuth()` |
+| `authStore.ts` | 📋 公布欄 | accessToken、notice、initialized（**前端自己的狀態**） |
+| `authService.ts` | 🧑‍💼 辦事員 | initializeAuth、login、logout、logoutAll、changePassword |
+| `useAuth.ts` | 🪟 服務窗口 | 元件用 `const { status, login } = useAuth()` |
+| `useMe.ts` | 🗂️ 資料櫃的一格 | 元件用 `const { data: me, refetch } = useMe()`（**後端資料的副本**，由 TanStack Query 管） |
 
 ### 重點
 
@@ -515,22 +517,28 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 
 **⭐⭐ 每個辦事員函式都是同一個模式**：呼叫 API → 把結果寫上公布欄。畫面不用知道細節。
 
+**⭐⭐ 兩種狀態，兩個工具**（詳見 LEARNING.md 關卡 12）
+- token、initialized、notice 是**前端自己的**狀態 → Zustand
+- user 是**後端資料的副本**，會過期、要重抓、要顯示載入中 → TanStack Query（`useMe.ts`）
+- `useMe` 只在 `status === "authenticated"` 時抓；登入成功後**不用**手動呼叫 `getMe()`，它看到狀態變了會自己去抓
+
 **⭐ `useAuth` 的好處**：關卡 8 把底層從 Context 換成 Zustand，但 `useAuth()` 的用法沒變，**所有元件一行都不用改**。
 
 ### 自我檢查
 
 - [ ] 為什麼 access token 放在 store（記憶體）而不是 localStorage？
-- [ ] `clearSession` 被呼叫後，畫面會發生哪些連鎖反應？
+- [ ] `clearSession` 被呼叫後，畫面會發生哪些連鎖反應？（提示：包含 `queryClient.ts` 裡的那段 `subscribe`）
+- [ ] 如果練習專案多了「待辦清單」，它該放 Zustand 還是 TanStack Query？為什麼？
 
 ---
 
 ## 第 13 站：跟後端講話
 
-**讀**：`api/client.ts` → `api/auth.ts`
+**讀**：`api/client.ts` → `api/auth.ts` → `api/queryClient.ts`
 
 ### 一句話
 
-所有請求都經過 axios。需要登入的請求有**攔截器**：自動貼通行證，被退回（401）就自動換證重寄。
+所有請求都經過 axios。需要登入的請求有**攔截器**：自動貼通行證，被退回（401）就自動換證重寄。抓回來的**後端資料**放進 TanStack Query 的快取。
 
 ### ⭐⭐⭐ 兩個 axios 實例
 
@@ -564,6 +572,8 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 **⭐ `getErrorMessage`**：把後端的 `detail`（字串或 422 的陣列）整理成人看得懂的文字。
 
 **⭐ `api/auth.ts`**：一個後端 API 對應一個函式，型別 `User` 對應後端的 `UserRead`。
+
+**⭐⭐ `api/queryClient.ts`**：快取本體。`staleTime` 決定資料多久算過期；最後那段**訂閱 store**，token 一消失就清掉整個快取，換帳號時才不會看到上一個人的資料。TanStack Query **不管 HTTP**，它只負責「什麼時候呼叫 `getMe()`、結果存哪、誰要重新渲染」；401 換證還是攔截器的事。
 
 ### 自我檢查
 
@@ -609,8 +619,8 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 | 1 | `LoginForm` → `authService.login` → `publicApi.post("/auth/login")`（baseURL 是 `/api`，所以實際送到 `/api/auth/login`） | | |
 | 2 | | `UserLogin` 檢查格式 → 比對密碼 → 簽 access token | 查 user |
 | 3 | | 產生 refresh token，`Set-Cookie` | 新增 refreshtoken（雜湊） |
-| 4 | 把 access token 寫進 store → 呼叫 `api.get("/me")`（攔截器自動貼 token） | `get_current_user` 驗 JWT | 查 user |
-| 5 | user 寫進 store → 狀態變「已登入」→ GuestOnly 導到首頁 | | |
+| 4 | 把 access token 寫進 store → 狀態變「已登入」→ GuestOnly 導到首頁 | | |
+| 5 | `useMe` 看到已登入 → `api.get("/me")`（攔截器自動貼 token）→ 存進 query 快取 → 畫面顯示 email | `get_current_user` 驗 JWT | 查 user |
 
 ### 情境 B：重新整理網頁
 
@@ -618,16 +628,16 @@ axios 不是元件，以前用 React Context 拿不到 token，Zustand 兩邊都
 |---|---|---|
 | 1 | 記憶體清空，store 回到初始值（loading） | |
 | 2 | `initializeAuth` → `refreshAccessToken()`（瀏覽器自動帶 cookie） | `refresh`：輪替，回傳新 access token + 新 cookie |
-| 3 | 寫進 store → `getMe()` → 狀態變「已登入」 | |
+| 3 | 寫進 store → 狀態變「已登入」→ `useMe` 自動 `getMe()` | |
 
 ### 情境 C：30 分鐘後點「重新取得我的資料」
 
 | # | 前端 | 後端 |
 |---|---|---|
-| 1 | `api.get("/me")`，帶著過期的 token | `get_current_user` → 401 |
+| 1 | `refetch()` → `getMe()` → `api.get("/me")`，帶著過期的 token | `get_current_user` → 401 |
 | 2 | 回應攔截器：蓋 `_retry` 章 → refresh | 輪替，回傳新 token |
 | 3 | 寫進 store → 重寄 `/api/me` | 200 |
-| 4 | 使用者完全沒感覺 | |
+| 4 | query 只看到「`getMe()` 成功了」→ 更新快取 → 「上次更新」時間變了，使用者沒感覺到中間換過證 | |
 
 ### 情境 D：7 天後回來
 
@@ -657,5 +667,5 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 
 - 每一站的「自我檢查」都答得出來，就代表你讀懂這個專案了
 - 想知道某一關**為什麼**這樣設計 → `LEARNING.md` 對應的關卡
-- 要把登入功能**搬到別的專案** → `LEARNING.md` 關卡 6「之後其他專案怎麼用」（注意關卡 8 之後的檔案清單）
-- 下一步 → `LEARNING.md` 關卡 9：Docker 與 CI（之後是關卡 10 部署、11 維護）
+- 要把登入功能**搬到別的專案** → `LEARNING.md` 關卡 6「之後其他專案怎麼用」（注意關卡 8、12 之後的檔案清單）
+- 下一步 → 關卡 0～12 都完成了。要開練習專案 → `CHAIN.md`；關卡 13～16 的自學清單在 `LEARNING.md` 末尾；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`

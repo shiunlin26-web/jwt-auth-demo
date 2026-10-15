@@ -8,10 +8,12 @@
 JWT 登入的教學範本：FastAPI 後端 + React 前端 + Neon Postgres，已部署在 Render（後端）與 Vercel（前端）。
 它的用途是**被複製到其他專案當登入模板**，所以每個檔案都有中文註解說明「為什麼這樣寫」。
 
+- **要帶學習者（不只是改程式）→ 先讀 `docs/HANDOFF.md`**：學習者是誰、走到哪、一關的固定格式、已經定了的事
 - 學習路線與每一關的說明：`docs/LEARNING.md`
 - 照「一個請求怎麼跑」讀程式：`docs/TOUR.md`
-- 壞掉時查：`docs/DEBUGGING.md`；維運流程：`docs/RUNBOOK.md`
-- 20 天計畫：`docs/PLAN.md`
+- 開練習專案、搬登入模板：`docs/CHAIN.md`（七環任務書 + 搬家清單）
+- 壞掉時查：`docs/DEBUGGING.md`；維運流程：`docs/RUNBOOK.md`；觀念問答：`docs/QA.md`
+- 20 天計畫（設計理由，時程已過期）：`docs/PLAN.md`
 
 ## 結構
 
