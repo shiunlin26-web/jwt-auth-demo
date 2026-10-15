@@ -18,7 +18,7 @@
 
 ## 1. 學習者是誰
 
-- **背景**：JS/TS 出身，Python 新手（`LEARNING.md` 末尾的「Python 速查」就是為此而寫）。本機是 **Windows**（文件裡的 PowerShell 指令、`$env:Path` 都是為此），**沒有本機 Docker**。
+- **背景**：JS/TS 出身，Python 新手（`LEARNING.md` 末尾的「Python 速查」就是為此而寫）。本機是 **Windows**（文件裡的 PowerShell 指令、`$env:Path` 都是為此），**沒有本機 Docker**（VM 裝不了，已確認）。**電腦每次開機都是乾淨系統**：每次都要重裝工具、重拉 repo、重填 `.env`，所以有 `scripts/setup.ps1` 一鍵建置；帶他做任何需要本機的事之前，先確認他跑過這個腳本。
 - **目標**：全端。之後要能自己開新專案把前端、後端、登入、部署整條鏈串起來，再擴充功能；概念貫通後換技術棧也能移植。
 - **時間**：每天約 4 小時。
 - **學習模式**（這是最重要的一條）：**讀懂 → 跑起來 → 動手改一點**。AI 寫完整的範例並解釋為什麼，學習者讀 commit、照「驗證方式」親眼看到效果、做「動手玩」弄壞再修好、回答「想一想」。**練的是指揮與驗收，不是打字**；但「讀得懂 log 和關鍵的二十行程式」不能省。
@@ -77,7 +77,7 @@
 4. 正式環境**前後端同站**：Vercel rewrites 把 `/api/*` 轉到 Render，cookie 保持 `SameSite=Lax`。不用 `SameSite=None` 硬撐（理由見 `QA.md`）。
 5. 遷移在容器啟動時跑（`alembic upgrade head && uvicorn ...`），不用付費的 Pre-Deploy。
 6. CI 綠了才部署；main 有 branch protection，一律走 PR。「CI 綠了才部署」是用 Render Dashboard 的 Auto-Deploy: After CI Checks Pass（`ci.yml` 裡沒有 Deploy Hook，所以不是那條備案）。接手時到 Render → Settings → Build & Deploy 看一眼確認。
-7. 刻意不碰：Kubernetes、Terraform、docker compose、前端 Dockerfile、自訂網域。（slowapi 原本也在這裡，後來做成關卡 17。）
+7. 刻意不碰：Kubernetes、Terraform、docker compose、前端 Dockerfile、自訂網域。（slowapi 原本也在這裡，後來做成關卡 17。）GitHub Codespaces 評估過，學習者偏好本機腳本，不用。
 8. 範例專案凍結。練習專案題目由學習者決定，AI 不要代選（`PLAN.md` 原本寫「待辦含分類」，2026-10-15 改為另行決定，PLAN 本文保留歷史）；他說題目之前，先做跟題目無關的事（開 repo、環 1～6 都不需要題目）。
 9. 文件全中文；AI 指引放 `AGENTS.md`，`CLAUDE.md` 只指向它，避免綁定單一工具。
 10. **架構與程式碼要是現代開發的專業水準**（2026-10-15 補充）。「這是教學模板」不是降低標準的理由：型別檢查、格式化、lint、測試、CI 全綠才合併，安全細節（例如 bcrypt 不能擋住 event loop、註冊的競態要處理）照正式專案的標準做。教學註解是加在專業程式碼上，不是用來解釋為什麼偷懶。
