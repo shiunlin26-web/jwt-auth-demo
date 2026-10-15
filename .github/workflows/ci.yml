@@ -8,7 +8,7 @@
 #
 # 這裡有兩個 job（互相獨立、同時跑）：
 #   backend：起一個 Postgres container → 裝套件 → ruff（lint + format）→ pyright → 遷移檢查 → pytest → build Docker image → 真的跑起來打 /ping
-#   frontend：裝套件 → eslint → prettier → tsc + vite build
+#   frontend：裝套件 → eslint → prettier → vitest → tsc + vite build
 # 任何一步失敗，整個 job 就紅，PR 上會顯示 ❌。
 
 name: CI
@@ -168,6 +168,10 @@ jobs:
       # 【關卡 13】格式沒照 Prettier 排就紅。本機跑 npm run format 就會過
       - name: Format check（prettier）
         run: npm run format:check
+
+      # 【關卡 16】前端測試：Vitest + Testing Library + MSW 假後端，不需要真的後端
+      - name: 測試（vitest）
+        run: npm test
 
       # tsc -b 先做型別檢查，再 vite build 打包。型別錯誤在這裡就會被擋下來
       - name: Build（tsc + vite）

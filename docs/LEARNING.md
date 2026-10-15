@@ -55,7 +55,7 @@
 | 13 | 工程品質基線（型別檢查、格式化、Dependabot、幾個專業面的修正） | 什麼叫「專業水準」的 repo | ✅ 完成 |
 | 14 | Zod + React Hook Form | 表單驗證（Zod 是前端的 Pydantic） | ✅ 完成 |
 | 15 | Tailwind CSS | 樣式（v4、深色模式、共用 UI 元件） | ✅ 完成 |
-| 16 | Vitest + MSW | 前端自動化測試 | ⬜ |
+| 16 | Vitest + MSW | 前端自動化測試（攔截器、守門員、表單） | ✅ 完成 |
 | 17（選做） | 登入頻率限制（slowapi） | 防暴力破解 | ⬜ |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
@@ -3055,20 +3055,128 @@ Tailwind 不執行你的程式，它只用正規表示式掃描原始碼裡「�
 
 ---
 
-## 關卡 16 ～ 17（20 天後自學）
+## 關卡 16：Vitest + MSW（前端自動化測試）✅
 
-範例專案到關卡 15 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
-建議順序就是編號順序；每一項都附「做完要看得到什麼」，當驗收標準。
+**改動的檔案**：`frontend/package.json`（開發用：`vitest`、`jsdom`、`@testing-library/react`、`@testing-library/jest-dom`、`@testing-library/user-event`、`msw`、`@vitest/coverage-v8`；指令 `test`、`test:watch`、`test:coverage`）、新增 `vitest.config.ts`、`src/test/setup.ts`、`src/test/server.ts`、`src/api/client.test.ts`、`src/auth/RequireAuth.test.tsx`、`src/components/LoginForm.test.tsx`；`tsconfig.node.json` / `tsconfig.app.json`（型別）；`.github/workflows/ci.yml` 加「測試（vitest）」
 
-### 關卡 16：Vitest + MSW（前端自動化測試）
+### 一句話
 
-- **為什麼**：後端有 39 個測試，前端一個都沒有。改 `client.ts` 的攔截器時，現在只能手動玩一遍。MSW 可以假裝成後端，讓測試不需要真的起伺服器。
-- **先讀**：關卡 4 的測試觀念（fixture、整合測試 vs 單元測試）；`client.ts` 的攔截器。
-- **開場提示**：
+**後端從第 4 關就有 42 個測試，前端一個都沒有：改攔截器只能手動在 Network 分頁看。這關把第 1、6、8、14 關手動驗證過的行為寫成 11 個測試，用 MSW 當假後端，不需要起 uvicorn。**
 
-  > 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做關卡 16：裝 Vitest + React Testing Library + MSW，寫三組測試：(1) `client.ts` 的 401 → refresh → 重送，以及 single-flight（同時三個請求只有一個 refresh）；(2) `RequireAuth` 在三種狀態下的行為；(3) `LoginForm` 密碼錯誤時顯示後端的錯誤訊息。CI 的前端 job 加一步跑測試。先對照後端 pytest 的概念說明每個工具是什麼，再動手。一關一個 commit。
+### 觀念：和後端 pytest 一一對照
 
-- **做完要看得到**：`npm test` 綠；把 `client.ts` 的 `_retry` 拿掉，測試會紅；CI 多一步。
+| pytest（關卡 4） | Vitest（這關） | 做什麼 |
+| --- | --- | --- |
+| `pytest.ini` + `conftest.py` | `vitest.config.ts` + `src/test/setup.ts` | 設定、每個測試前後要做的事 |
+| `TEST_DATABASE_URL` 測試資料庫 | **MSW** 假後端（`src/test/server.ts`） | 隔離外部依賴 |
+| `client` fixture（httpx 直接打 FastAPI app） | `render()` + `screen`（Testing Library） | 把被測的東西跑起來、觀察它 |
+| `TRUNCATE` 每個測試前清空資料表 | `afterEach`：還原 handler、清 store、清 query 快取、卸載畫面 | 測試之間不互相影響 |
+| `assert res.status_code == 401` | `expect(button).toBeDisabled()` | 檢查結果 |
+| `test_rules.py`（單元）/ `test_auth.py`（整合） | `client.test.ts`（攔截器）/ `LoginForm.test.tsx`（元件） | 同樣分兩層 |
+
+**MSW 的關鍵**：它在「網路層」攔截。axios 照常送請求，MSW 接住回假資料，**程式碼一行都不用改**，不用把 `getMe` 改成可注入的、不用 mock axios。這和「資料庫換成測試資料庫、程式碼不變」是同一個精神。
+
+**Testing Library 的關鍵**：用**使用者看得到的方式**找元素（`getByRole("button", { name: "登入" })`、`getByPlaceholderText`），不用 class 名或元件內部的 state。換了 Tailwind class、換了 useState 成 React Hook Form，測試都不用改。這就是為什麼關卡 15 的 `Alert` 要有 `role="alert"`。
+
+### 程式怎麼寫
+
+**1. 假後端（`src/test/server.ts`）**
+
+```ts
+export const handlers = [
+  http.get("*/api/me", () => HttpResponse.json(fakeUser)),
+  http.post("*/api/auth/refresh", () => HttpResponse.json({ access_token: "refreshed-token" })),
+];
+export const server = setupServer(...handlers);
+```
+
+- 這些是「預設行為」。個別測試要模擬 401、500：`server.use(http.get("*/api/me", () => HttpResponse.json({}, { status: 401 })))`，`afterEach` 會還原
+- `onUnhandledFrame: "error"`（`setup.ts`）：有請求沒對應的 handler 就讓測試失敗，不會默默打到真的網路（MSW 2 叫 `onUnhandledRequest`，v3 改名）
+
+**2. 攔截器測試（`src/api/client.test.ts`）**
+
+```ts
+it("single-flight：同時三個請求 401，只送一次 refresh", async () => {
+  useAuthStore.setState({ accessToken: "expired" });
+  const calls = acceptOnly("fresh"); // /me 只接受 "fresh"，其他 401；refresh 回 "fresh"
+
+  await Promise.all([getMe(), getMe(), getMe()]);
+
+  expect(calls.refresh).toBe(1);
+  expect(calls.me).toBe(6); // 3 次 401 + 3 次重送
+});
+```
+
+五個測試對應第 8 關攔截器的五條路：帶 token、401 換證重送、single-flight、refresh 失敗清 session、`_retry` 不無限循環。**拿掉 `_retry` 最後一個測試會 timeout，拿掉 single-flight 第三個會紅**，這就是測試的價值：以前只能靠眼睛看 Network。
+
+**3. 元件測試（`src/components/LoginForm.test.tsx`）**
+
+```ts
+await user.type(screen.getByPlaceholderText("Password"), "wrong");
+await user.click(screen.getByRole("button", { name: "登入" }));
+
+expect(await screen.findByRole("alert")).toHaveTextContent("登入失敗：Incorrect email or password");
+expect(screen.getByRole("button", { name: "登入" })).toBeEnabled(); // 關卡 15 修的 bug
+```
+
+- `userEvent`：模擬真的打字、點擊（會觸發 React Hook Form 的 onChange 驗證）
+- `findByRole`：等到出現為止（有 timeout），因為錯誤訊息是 await 後端回應之後才出現
+- 第二個 `expect` 就是關卡 15 修的「失敗後按鈕卡灰」：**先有 bug，再有測試擋它回來**，這是測試最常見的來源
+
+**4. 守門員測試（`src/auth/RequireAuth.test.tsx`）**：用 `MemoryRouter` 在記憶體裡建一張小路由表，設定 store 的三種狀態，看它顯示載入中、導去 `/login`、還是顯示頁面。
+
+### 驗證方式
+
+1. `frontend` 跑 `npm install`，`npm test`：3 個檔案、11 個測試全綠，約 2 秒
+2. `npm run test:watch`：改一個檔案自動重跑（開發時開著）
+3. `npm run test:coverage`：看哪些檔案沒被測到。`client.ts`、`RequireAuth.tsx`、`LoginForm.tsx` 應該接近 100%
+4. **CI**：frontend job 多了「測試（vitest）」
+5. `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm run build` 綠
+
+### 動手玩
+
+1. **拿掉 single-flight**：`client.ts` 的 `if (!refreshPromise) {` 改成 `if (true) {`，`npm test`：「single-flight」那個測試紅，`refresh` 被呼叫 3 次。改回來。
+2. **拿掉 `_retry`**：`client.ts` 的 `original._retry = true;` 註解掉，`npm test`：「不會無限 refresh」那個測試 timeout（5 秒）。改回來。這兩個就是第 6 關要你用眼睛在 Network 看的事。
+3. **把關卡 15 的 bug 放回去**：`LoginForm.tsx` 改回 `setError("root", ...)`，`npm test`：「按鈕恢復可按」那個 expect 紅。這就是回歸測試。改回來。
+4. **故意打一個沒有 handler 的 API**：任何測試裡加 `await api.get("/nope")`，MSW 會讓測試失敗並印出「Unhandled request」。這是 `onUnhandledFrame: "error"` 的效果。刪掉。
+5. **自己寫一個**：`RegisterForm.test.tsx`，模擬後端回 400「Email already registered」，assert 畫面出現「註冊失敗：Email already registered」。照 `LoginForm.test.tsx` 的樣子寫，十行以內。
+
+### 想一想
+
+<details>
+<summary>Q1：為什麼用 MSW 攔截網路，不直接 <code>vi.mock("axios")</code>？</summary>
+
+mock axios 等於「假裝攔截器不存在」：你 mock 掉的正是要測的東西。MSW 讓 axios、攔截器、single-flight 全部真的跑，只有「後端的回應」是假的。測試離真實越近，抓到的 bug 越真。原則：**mock 離你的程式越遠的那一層**。
+
+</details>
+
+<details>
+<summary>Q2：為什麼不用 Playwright 做端對端測試就好？它更真實。</summary>
+
+端對端要起後端、資料庫、瀏覽器，一輪幾十秒，而且壞了只知道「登入失敗」，不知道是哪一層。Vitest 兩秒跑完、壞了直接指到那個函式。兩種都要：單元 / 元件測試多而快，端對端少而真（登入、重新整理保持登入這幾條主路徑）。這關先做快的那種；端對端在練習專案要上線前再加。
+
+</details>
+
+<details>
+<summary>Q3：測試裡 <code>useAuthStore.setState({ accessToken: "expired" })</code> 直接改 store，這樣算作弊嗎？</summary>
+
+不算，這是「準備測試狀態」（Arrange），和後端測試先 `register()` 再 `login()` 一樣。差別是前端的 store 可以直接設，不用走完整個登入流程，測試更短、更專注在要測的那一件事。但元件測試（`LoginForm`）就真的打字、真的點，因為那正是要測的東西。
+
+</details>
+
+<details>
+<summary>Q4：覆蓋率要到 100% 嗎？</summary>
+
+不用。覆蓋率只說「這行被執行過」，不說「這行被檢查過」。有價值的是「會壞的地方有沒有測」：攔截器（邏輯複雜）、守門員（三種狀態）、表單（驗證 + 錯誤顯示）。`NotFoundPage` 這種一行的元件測了也沒意義。看覆蓋率是為了找「漏掉的重要東西」，不是追數字。
+
+</details>
+
+---
+
+## 關卡 17（選做、自學）
+
+範例專案到關卡 16 凍結。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示」整段貼過去就好，它會照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。做完自己把路線圖的 ⬜ 改成 ✅。
+每一項都附「做完要看得到什麼」，當驗收標準。
 
 ### 關卡 17：登入頻率限制（slowapi，選做）
 
