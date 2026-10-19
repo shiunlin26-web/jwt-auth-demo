@@ -19,6 +19,7 @@
 | `setup.ps1` 第一步就 `找不到 winget` | 舊版腳本；精簡的 VM 沒有 winget | `git pull` 拿最新版，現在沒有 winget 會改從官網下載 zip | 工具 |
 | `setup.ps1` 問連線字串時打錯了 | Read-Host 沒有上一步 | `Ctrl+C` → `Remove-Item backend\.env -ErrorAction SilentlyContinue` → 重跑；已經寫入的話 `notepad backend\.env` 直接改 | 工具 |
 | `& .\scripts\setup.ps1` 說「指令碼執行被停用」 | Windows 預設的執行原則擋 `.ps1` | 用 `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -SkipTests` 執行 | 工具 |
+| `setup.ps1` 一跑就一堆 `Unexpected token`、`Missing closing '}'`，錯誤訊息裡的中文是亂碼 | PowerShell 5.1 讀沒有 BOM 的 UTF-8 檔案會用系統 ANSI 編碼（繁中是 CP950），中文全錯、全形符號被當成語法 | 檔案要存成 UTF-8 **with BOM**（repo 裡已是；`.editorconfig` 有 `[*.ps1] charset = utf-8-bom`）。自己寫 `.ps1` 時 VS Code 右下角選「UTF-8 with BOM」 | 工具 |
 | 腳本印了「完成」但後端起不來 | 舊版腳本：PowerShell 5.1 不會因為外部程式失敗而停 | `git pull` 拿最新版，現在每一步都檢查 exit code，失敗會停並印紅字 | 工具 |
 | `setup.ps1` 跑到 `alembic upgrade head` 報 `sslmode` / `channel_binding` / `getaddrinfo` | 連線字串格式或主機名稱錯（舊版腳本不會自動轉格式） | `notepad backend\.env` 改成 `postgresql+asyncpg://...?ssl=require`；新版腳本貼 Neon 原始格式會自動轉 | 工具 |
 | `uv run pytest` 要跑三、四分鐘 | 測試資料庫在 Neon（新加坡），每個測試好幾趟網路來回 | 正常。平常用 `setup.ps1 -SkipTests`；本機有 Postgres 的話把 `TEST_DATABASE_URL` 指到本機會變 20 秒 | 18 |
