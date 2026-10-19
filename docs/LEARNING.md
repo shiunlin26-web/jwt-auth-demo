@@ -3316,7 +3316,7 @@ slowapi 內建的 429 回 `{"error": ...}`，前端的 `getErrorMessage` 讀的�
 
 ### 觀念 1：ORM 底下就是 SQL
 
-`DB_ECHO=true` 之後登入一次，你會看到大概四句：
+`DB_ECHO=true` 之後登入一次，你會看到大概四句（每句下面跟著一行 `[generated in ...] (參數...)`，那是真正送進去的值）：
 
 ```sql
 SELECT ... FROM "user" WHERE "user".email = $1          -- select(User).where(User.email == data.email)
