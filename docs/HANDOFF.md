@@ -8,6 +8,7 @@
 
 照順序讀，大約一小時：
 
+0. 要在本機跑東西：Windows 用 `scripts\setup.ps1 -SkipTests`（`README.md`「每次開機怎麼把專案跑起來」）。學習者的電腦每次開機都是乾淨的（連 repo 都會消失），他每次都是 clone + 跑這支；帶他做任何需要本機的步驟前先確認他跑過
 1. `AGENTS.md`：這個 repo 的規矩（5 分鐘）
 2. 這份文件全部（15 分鐘）
 3. `docs/LEARNING.md` 開頭到「路線圖」（10 分鐘），然後**跳著看**關卡 12、13、17 的結構，知道一關長什麼樣（17 最貼近第 3 節的固定格式）
@@ -27,15 +28,15 @@
 
 ## 2. 現在走到哪
 
-**進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。此刻（2026-10-15）：
+**進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。此刻（2026-10-19）：
 
-- 關卡 0～20 全部完成並合併到 `main`（每關一個 PR，`git log --oneline --merges` 看得到），正式環境在線上（Render + Vercel + Neon）。關卡 18～20 是觀念關（SQL、HTTP、除錯），程式幾乎不動，主要是 `docs/labs/` 的實驗。
+- 關卡 0～20 全部完成並合併到 `main`，正式環境在線上（Render + Vercel + Neon）。關卡 0～8 是直接 commit 到 main，關卡 9 在 PR #1 裡，關卡 10 起一關一個 PR（`git log --oneline --merges` 看得到）。關卡 18～20 是觀念關（SQL、HTTP、除錯），程式只有關卡 19 加了 `Cache-Control: no-store`，其餘是 `docs/labs/`、`docs/drills/`。
 - 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
-- **範例專案（本 repo）已凍結**：不加業務功能（待辦、分類那種），只改文件、修 bug、合 Dependabot 的 PR。「教學用的延伸關卡」（例如分頁同步登出）**可以**做在本 repo，編號接在 17 之後，照第 3 節的格式；業務功能一律在練習專案。它的用途是被複製到其他專案當登入模板。
+- **範例專案（本 repo）已凍結**：不加業務功能（待辦、分類那種），只改文件、修 bug、合 Dependabot 的 PR。「教學用的延伸關卡」（例如分頁同步登出）**可以**做在本 repo，編號接在路線圖最後一關之後，照第 3 節的格式；業務功能一律在練習專案。它的用途是被複製到其他專案當登入模板。
 - 路線圖已無待做項目；`LEARNING.md` 末尾「之後還可以自己摸的」是不排關卡的延伸清單。`docs/drills/` 是故障演練的 patch，可以照 README 的格式再出新題。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次。
 
-接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-15，關卡 17 的 CI 綠；線上 health 由學習者自己開一次。
+接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-19，main 的 CI 綠、線上 `/api/health` 的 `db` ok、`version` 對得上 main。
 
 ## 3. 一關要長什麼樣（給 AI 產出新關卡用）
 
@@ -110,7 +111,7 @@
 
 **環境變數名稱**（值在各平台，永遠不在 git；本機放 `backend/.env`，範本是 `backend/.env.example`）：
 
-- 必填：`DATABASE_URL`（`postgresql+asyncpg://`、Neon 用 `ssl=require`）、`JWT_SECRET`（至少 32 字元）
+- 必填：`DATABASE_URL`（`postgresql+asyncpg://`、Neon 用 `ssl=require`；`setup.ps1` 會把 Neon 原始格式自動轉好）、`JWT_SECRET`（至少 32 字元，`setup.ps1` 自動產生）
 - 正式環境另設：`COOKIE_SECURE=true`、`LOG_JSON=true`（這兩個在 `render.yaml`）、`SENTRY_DSN`
 - 測試：`TEST_DATABASE_URL`（不能和 `DATABASE_URL` 相同，測試會清空資料表）
 - 演練用：`ENABLE_DEBUG_ENDPOINTS=true` 開 `/api/_boom`，玩完關掉
@@ -130,7 +131,7 @@
 
 **接手帶範例專案的延伸主題（路線圖都做完了，從「之後還可以自己摸的」挑）：**
 
-> 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做一關：＿＿＿（例如「一個分頁登出，其他分頁立刻跟著登出」，`LEARNING.md` 末尾的表有關鍵字）。先給我「觀念」段落，等我讀完說 OK 再寫程式。一關一個 commit，中文訊息，編號接在關卡 17 之後。
+> 先讀 `AGENTS.md` 和 `docs/HANDOFF.md` 第 3 節。請照那個格式帶我做一關：＿＿＿（例如「一個分頁登出，其他分頁立刻跟著登出」，`LEARNING.md` 末尾的表有關鍵字）。先給我「觀念」段落，等我讀完說 OK 再寫程式。一關一個 commit，中文訊息，編號接在路線圖最後一關之後。
 
 **壞掉了：**
 
@@ -149,5 +150,5 @@
 - `PLAN.md` 的 20 天時程已經過期（實際進度比它快），只當設計理由看，不當行事曆。
 - 兩個分頁同時重新整理可能觸發 refresh token 的重複使用偵測而雙雙登出（關卡 1 Q2、關卡 6 Q4），刻意沒解，練習專案知道有這回事就好。
 - 免費方案的條款會變；`PLAN.md` 的查證是 2026-10-12 的結果。
-- 各關卡文件裡的「測試有幾個」是當時的數字（關卡 4 寫 34、關卡 11 寫 39、關卡 13 寫 42、關卡 17 寫 51；前端關卡 16 寫 11），以 `uv run pytest -q`、`npm test` 的輸出為準。
+- 各關卡文件裡的「測試有幾個」是當時的數字（關卡 4 寫 34、關卡 11 寫 39、關卡 13 寫 42、關卡 17 寫 51、關卡 19 寫 52；前端關卡 16 寫 11），以 `uv run pytest -q`、`npm test` 的輸出為準。
 - 這份文件的第 2 節會過期。每次合併 PR、換工具、進度變，都要更新它。
