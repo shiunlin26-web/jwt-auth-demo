@@ -48,7 +48,7 @@
 | 6 | 前端拆成 `api/` + `auth/` + `components/` | 之後其他專案可以直接複製這一套 | ✅ 完成 |
 | 7 | React Router：多頁面、需要登入的頁面 | 路由、守門員元件 | ✅ 完成 |
 | 8 | Zustand + axios | 用套件取代手寫的登入狀態與 apiFetch | ✅ 完成 |
-| **9** | **Docker 與 CI**（uv、ruff、Dockerfile、GitHub Actions） | 把後端打包成 image、每次 push 自動跑測試 | ✅ 完成 |
+| 9 | Docker 與 CI（uv、ruff、Dockerfile、GitHub Actions） | 把後端打包成 image、每次 push 自動跑測試 | ✅ 完成 |
 | 10 | 部署（Render + Vercel + Neon，前後端同站） | 真的上線，手機開得到 | ✅ 完成 |
 | 11 | 維護（healthcheck、log、Sentry、遷移回滾、換密鑰） | 壞掉時知道去哪看、怎麼復原 | ✅ 完成 |
 | 12 | TanStack Query | 管理後端資料：快取、loading、錯誤 | ✅ 完成 |
@@ -3689,7 +3689,7 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 
 ## 之後還可以自己摸的（不排關卡）
 
-範例專案的程式到關卡 17 凍結；18～20 是觀念關（SQL、HTTP、除錯），全部 21 關（0～20）已完成。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
+範例專案的程式到關卡 17 凍結（關卡 19 只多了 `Cache-Control: no-store`）；18～20 是觀念關（SQL、HTTP、除錯），全部 21 關（0～20）已完成。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
 
 | 主題 | 一句話 | 開場提示的關鍵字 |
 | --- | --- | --- |

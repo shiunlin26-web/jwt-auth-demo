@@ -4,21 +4,20 @@
 用途：學習者的電腦每次開機都是乾淨的系統，每次都要從頭裝工具、拉專案、裝套件、填 .env。
 這個腳本把整個流程壓成一個指令，三到五分鐘跑完。
 
-第一次（機器上還沒有 repo）：先用任何方式拿到 git（winget、官網安裝程式都可以），然後
+每次開機（連 repo 都會消失的乾淨機器）在 PowerShell 貼兩行：
     git clone https://github.com/shiunlin26-web/jwt-auth-demo.git $HOME\jwt-auth-demo
-    & $HOME\jwt-auth-demo\scripts\setup.ps1
-（git clone 會跳出瀏覽器登入 GitHub 一次，因為 repo 是私有的）
+    powershell -ExecutionPolicy Bypass -File $HOME\jwt-auth-demo\scripts\setup.ps1 -SkipTests
+（連 git 都沒有時先到 git-scm.com 裝；git clone 會跳瀏覽器登入 GitHub，因為 repo 是私有的）
+repo 還在的話只要第二行，腳本自己會 git pull。
 
-之後每次開機只要：
-    & $HOME\jwt-auth-demo\scripts\setup.ps1
-
-做的事（已經有的會跳過）：
-  1. 裝 git、Node.js（.nvmrc 的大版號）、uv。有 winget 用 winget，沒有就直接從官網下載 zip，不需要管理員權限
+做的事：
+  1. 沒有 Node.js、uv 就裝（Node 照 .nvmrc 的大版號）。有 winget 用 winget，沒有就直接從官網下載 zip，不需要管理員權限
   2. git pull 最新 main
   3. 設定 git 的 user.name / user.email（沒有的話會問你）
-  4. backend：uv sync、建立 .env（問你 Neon 的兩個連線字串，JWT_SECRET 自動產生）、alembic upgrade head
+  4. backend：uv sync、建立 .env（沒有的話問你 Neon 的兩個連線字串，貼原始格式即可；JWT_SECRET 自動產生）、alembic upgrade head
   5. frontend：npm ci
-  6. 跑一次 pytest 和 vitest 當基準線（-SkipTests 可以跳過）
+  6. 跑一次 pytest 和 vitest 當基準線（-SkipTests 跳過；沒填 TEST_DATABASE_URL 也會跳過 pytest）
+  任何一步失敗腳本就停在那一步並印出紅字，不會印「完成」。
 
 參數：
   -EnvFile <路徑>   不用手打連線字串，從一個檔案（例如 USB 上的 jwt.env）複製成 backend/.env
@@ -34,6 +33,13 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
+
+# Windows 內建的 PowerShell 5.1 不會因為外部程式（git、uv、npm）失敗而停下來，$ErrorActionPreference 管不到它們。
+# 所以每個外部指令都包在這裡面，exit code 不是 0 就停，不然 alembic 連不上資料庫還會繼續印「完成」
+function Must($label, [scriptblock]$block) {
+    & $block
+    if ($LASTEXITCODE -ne 0) { throw "「$label」失敗（exit code $LASTEXITCODE），停在這裡。看上面的錯誤訊息，修好再重跑。" }
+}
 
 # Neon 後台複製出來的是 psycopg 格式，asyncpg 要改三個地方（README 第 1 節）。貼原始格式也會被轉對
 function Convert-NeonUrl($url) {
@@ -117,7 +123,7 @@ Write-Host ("uv   " + (uv --version))
 
 # ---------- 2. 最新程式 ----------
 Step "git pull"
-git pull --ff-only origin main
+Must "git pull" { git pull --ff-only origin main }
 
 # ---------- 3. git 身分（乾淨機器每次都沒有，沒設 commit 會失敗） ----------
 if (-not (git config user.name)) {
@@ -132,7 +138,7 @@ if (-not (git config user.email)) {
 # ---------- 4. 後端 ----------
 Step "backend：uv sync"
 Set-Location "$RepoRoot\backend"
-uv sync
+Must "uv sync" { uv sync }
 
 if (-not (Test-Path ".env")) {
     if ($EnvFile -ne "" -and (Test-Path $EnvFile)) {
@@ -158,21 +164,25 @@ if (-not (Test-Path ".env")) {
 }
 
 Step "backend：alembic upgrade head"
-uv run alembic upgrade head
+Must "alembic upgrade head" { uv run alembic upgrade head }
 
 # ---------- 5. 前端 ----------
 Step "frontend：npm ci"
 Set-Location "$RepoRoot\frontend"
-npm ci
+Must "npm ci" { npm ci }
 
 # ---------- 6. 基準線 ----------
 if (-not $SkipTests) {
-    Step "基準線：pytest"
     Set-Location "$RepoRoot\backend"
-    uv run pytest -q
+    if (Select-String -Path ".env" -Pattern "^TEST_DATABASE_URL=." -Quiet) {
+        Step "基準線：pytest（測試資料庫在 Neon 時約 4 分鐘）"
+        Must "pytest" { uv run pytest -q }
+    } else {
+        Write-Host "backend\.env 沒有 TEST_DATABASE_URL，跳過 pytest" -ForegroundColor Yellow
+    }
     Step "基準線：vitest"
     Set-Location "$RepoRoot\frontend"
-    npm test
+    Must "vitest" { npm test }
 }
 
 Set-Location $RepoRoot

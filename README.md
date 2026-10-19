@@ -24,7 +24,7 @@ jwt-auth-demo/
 │   ├── rate_limit.py      # 登入 / 註冊的頻率限制，與代理後面的客戶端 IP
 │   ├── alembic.ini        # Alembic（資料庫遷移）設定
 │   ├── migrations/        # 資料庫遷移檔，記錄資料表結構的每一次變更
-│   ├── tests/             # pytest 自動化測試
+│   ├── tests/, pytest.ini # pytest 自動化測試
 │   ├── pyproject.toml     # 套件清單 + ruff、pyright 設定（用 uv 安裝）
 │   ├── .python-version    # 固定 Python 3.13，uv 會自動用這個版本
 │   ├── uv.lock            # 鎖定每個套件的實際版本，本機 / CI / Docker 裝出來一模一樣
@@ -34,8 +34,9 @@ jwt-auth-demo/
 ├── render.yaml                # Render 部署設定（後端）
 ├── AGENTS.md                  # 給 AI 工具（與人）看的專案規矩；CLAUDE.md 指向它
 ├── .editorconfig              # 編輯器共用的縮排、換行規則
-├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pyright、pytest、Docker build、前端 prettier / lint / build
+├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pyright、alembic check、pytest、Docker build；前端 prettier / lint / vitest / build
 ├── .github/dependabot.yml     # 每週自動開 PR 更新套件
+├── docs/                      # LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環任務書）、QA、DEBUGGING、RUNBOOK、PLAN
 ├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
 ├── scripts/setup.ps1          # 乾淨的 Windows 機器一鍵建置（裝工具、拉 main、.env、sync、測試）
 └── frontend/src/
@@ -52,9 +53,10 @@ jwt-auth-demo/
     ├── schemas/           # 表單規則（Zod），和後端 schemas.py 一致
     └── test/              # Vitest 的 setup 與 MSW 假後端；測試檔放在被測檔案旁邊（*.test.ts、*.test.tsx）
     frontend/vitest.config.ts  # 前端測試設定（沿用 vite.config.ts）
+    frontend/index.html, main.tsx, index.css  # 入口：HTML、掛上 React（QueryClientProvider、Router）、Tailwind
     frontend/vercel.json   # Vercel 部署設定：把 /api/* 轉發到 Render、SPA 路由
     frontend/vite.config.ts  # 本機開發：把 /api/* 轉發到 localhost:8000
-    frontend/.prettierrc, .nvmrc  # 格式化規則、Node 版本
+    frontend/.prettierrc, .nvmrc, eslint.config.js, tsconfig*.json  # 格式化、Node 版本、lint、TypeScript（strict）
 ```
 
 **前後端怎麼接**：前端只打「自己網域的 `/api/...`」。本機由 Vite 轉發到 `localhost:8000`，正式環境由 Vercel 轉發到 Render。
@@ -62,25 +64,19 @@ jwt-auth-demo/
 
 ## 每次開機怎麼把專案跑起來（乾淨機器，Windows）
 
-電腦每次開機都是乾淨系統的話，不用照後面的手動步驟，一支腳本搞定。
-
-**第一次（還沒有 repo）**，開 PowerShell：
+電腦每次開機都是乾淨系統（連 repo 都會消失）的話，不用照後面的手動步驟，每次開機在 PowerShell 貼兩行：
 
 ```powershell
 git clone https://github.com/shiunlin26-web/jwt-auth-demo.git $HOME\jwt-auth-demo
-& $HOME\jwt-auth-demo\scripts\setup.ps1
+powershell -ExecutionPolicy Bypass -File $HOME\jwt-auth-demo\scripts\setup.ps1 -SkipTests
 ```
 
-連 git 都沒有時，先到 git-scm.com 裝，或有 winget 的話 `winget install Git.Git`。`git clone` 會跳瀏覽器登入 GitHub 一次（repo 是私有的）。
+- 連 git 都沒有時，先到 git-scm.com 裝，或有 winget 的話 `winget install Git.Git`。
+- `git clone` 會跳瀏覽器登入 GitHub（repo 是私有的），每次開機都會問一次。
+- `-ExecutionPolicy Bypass -File` 是為了繞過 Windows 預設擋 `.ps1` 的設定；你的機器本來就允許的話，`& .\scripts\setup.ps1 -SkipTests` 也可以。
+- repo 還在（沒被清掉）的話只要第二行，腳本自己會 `git pull`。
 
-**之後每次開機**，只要：
-
-```powershell
-cd $HOME\jwt-auth-demo
-& .\scripts\setup.ps1 -SkipTests
-```
-
-腳本會（已經有的會跳過）：裝 Node 與 uv（有 winget 用 winget，沒有就從官網下載 zip，不需要管理員權限）→ `git pull` 最新 main → 設定 git 身分 → `uv sync` → 建立 `backend/.env`（問你 Neon 的兩個連線字串，**直接貼 Neon 後台的原始格式即可，會自動轉成 asyncpg 格式**；`JWT_SECRET` 自動產生）→ `alembic upgrade head` → `npm ci`。約三到五分鐘。
+腳本會：沒有 Node 與 uv 就裝（有 winget 用 winget，沒有就從官網下載 zip，不需要管理員權限）→ `git pull` → 設定 git 身分 → `uv sync` → 建立 `backend/.env`（問你 Neon 的兩個連線字串，**直接貼 Neon 後台的原始格式即可，會自動轉成 asyncpg 格式**；`JWT_SECRET` 自動產生）→ `alembic upgrade head` → `npm ci`。約三到五分鐘。**任何一步失敗會停在那一步印紅字**，不會印「完成」。
 
 | 參數 | 用途 |
 | --- | --- |
@@ -94,7 +90,7 @@ cd backend;  uv run uvicorn main:app --reload --port 8000
 cd frontend; npm run dev
 ```
 
-瀏覽器開 <http://localhost:5173>。連線字串打錯、腳本中途失敗：`Ctrl+C`，刪掉 `backend\.env`，重跑；其他症狀見 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)「安裝與啟動」。
+瀏覽器開 <http://localhost:5173>。連線字串打錯：`Ctrl+C`，`Remove-Item backend\.env -ErrorAction SilentlyContinue`，重跑第二行；其他症狀見 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)「安裝與啟動」。
 
 > 下面「需要先安裝」到「3. 啟動前端」是手動版，腳本做的就是這些事；想知道每一步為什麼、或不是 Windows，照手動版做。
 
@@ -204,7 +200,7 @@ uv run uvicorn main:app --reload --port 8000
 
 ```bash
 cd frontend
-npm install
+npm ci        # 照 package-lock.json 嚴格安裝（和 CI 一樣）；npm install 也可以，但可能更新 lock 檔
 npm run dev
 ```
 
@@ -305,9 +301,9 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 | --- | --- |
 | `backend/pyproject.toml` 或 `backend/uv.lock` | 在 `backend`：`uv sync` |
 | `backend/migrations/versions/` 多了新檔案 | 在 `backend`：`uv run alembic upgrade head` |
-| `frontend/package.json` | 在 `frontend`：`npm install` |
+| `frontend/package.json` | 在 `frontend`：`npm ci` |
 
-或者直接 `& .\scripts\setup.ps1 -SkipTests`，它會 `git pull` 並把這三件事都做一遍。
+或者直接 `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -SkipTests`，它會 `git pull` 並把這三件事都做一遍。
 
 ## 學習路線
 

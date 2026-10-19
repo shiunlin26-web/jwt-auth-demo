@@ -250,13 +250,13 @@
 | `security.py`、`rate_limit.py` | 不用改（密碼雜湊、JWT、refresh token；頻率限制與代理後的客戶端 IP）。正式環境記得設 `TRUSTED_PROXY_HOPS`（`render.yaml` 已有） |
 | `dependencies.py` | 不用改。新端點用 `Depends(get_current_user)` 拿目前使用者 |
 | `routes/auth.py`、`routes/users.py` | 不用改。新功能另開 `routes/todos.py` 之類，在 `main.py` 掛進 `api` router |
-| `main.py` | 保留 middleware、`/api` 前綴、`ping`、`health`、`_boom`；`include_router` 加新的 |
+| `main.py` | 保留 middleware（request id、no-store）、`/api` 前綴、`ping`、`health`、`_boom`、`_ip`；`include_router` 加新的 |
 | `logging_config.py` | 不用改 |
 | `alembic.ini`、`migrations/env.py`、`migrations/script.py.mako` | 不用改。**不要**複製 `migrations/versions/` 裡的檔案，新專案從頭產生：`uv run alembic revision --autogenerate --rev-id 0001 -m "init"` |
 | `tests/conftest.py`、`tests/helpers.py`、`tests/test_auth.py`、`tests/test_rules.py`、`tests/test_health.py`、`tests/test_rate_limit.py`、`pytest.ini` | 不用改。`conftest.py` 的 `TRUNCATE` 那行要把新專案的表名加進去 |
 | `Dockerfile`、`.dockerignore`、`.env.example` | 不用改 |
 
-搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"` → `uv run alembic upgrade head` → `uv run pytest -q`（51 個測試應該全綠）→ `uv run uvicorn main:app --reload --port 8000`。
+搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"` → `uv run alembic upgrade head` → `uv run pytest -q`（52 個測試應該全綠）→ `uv run uvicorn main:app --reload --port 8000`。
 
 ### 前端（`frontend/`）
 
@@ -271,7 +271,7 @@
 | `src/app/router.tsx`、`src/app/AppLayout.tsx` | 加新頁面的路由（要登入的放在 `RequireAuth` 底下）、導覽列加連結 |
 | `src/pages/`（Login、Register、Home、Settings、NotFound） | 保留；Home 改成你的功能頁或留著 |
 | `src/components/`（LoginForm、RegisterForm、ChangePasswordForm、UserPanel、ui.tsx） | 保留；`ui.tsx` 是共用的 Tailwind 元件，新頁面也用它；`UserPanel` 顯示 token 的那行是學習用，正式專案拿掉 |
-| `src/schemas/auth.ts`、`src/index.css` | 不用改（`index.css` 只有 Tailwind 的 import 和 body 底色）。新功能的表單規則照 `schemas/auth.ts` 的樣子另開 `src/schemas/<功能>.ts` |
+| `src/schemas/auth.ts`、`src/index.css`、`public/favicon.svg` | 不用改（`index.css` 只有 Tailwind 的 import 和 body 底色；`favicon.svg` 被 `index.html` 引用，不搬會 404）。新功能的表單規則照 `schemas/auth.ts` 的樣子另開 `src/schemas/<功能>.ts` |
 
 ### 其他
 
@@ -280,6 +280,7 @@
 | `.github/workflows/ci.yml`、`.github/dependabot.yml`、`.editorconfig` | 如果後端 / 前端資料夾名稱一樣就完全不用改 |
 | `render.yaml` | 改 `name`；其他不用改 |
 | `.gitignore`、`CLAUDE.md` | 不用改 |
+| `scripts/setup.ps1` | 第 8 行和 README 裡的 clone 網址改成新 repo；其餘不用改 |
 | `AGENTS.md` | 用附錄 B 的範本，不要直接複製本 repo 的（它有學習專案專屬的規矩） |
 | `docs/DEBUGGING.md`、`docs/RUNBOOK.md` | 複製過去當起點，練習專案踩到的坑加上去 |
 

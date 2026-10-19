@@ -17,7 +17,9 @@
 | --- | --- | --- | --- |
 | `uv: The term 'uv' is not recognized` | 剛裝好 uv，開著的終端機還是舊的 PATH | 關掉終端機重開；或在同一個視窗跑 `$env:Path = "C:\Users\<帳號>\.local\bin;$env:Path"`（`setup.ps1` 會自己處理） | 9 |
 | `setup.ps1` 第一步就 `找不到 winget` | 舊版腳本；精簡的 VM 沒有 winget | `git pull` 拿最新版，現在沒有 winget 會改從官網下載 zip | 工具 |
-| `setup.ps1` 問連線字串時打錯了 | Read-Host 沒有上一步 | `Ctrl+C` → `Remove-Item backend\.env` → 重跑；已經寫入的話 `notepad backend\.env` 直接改 | 工具 |
+| `setup.ps1` 問連線字串時打錯了 | Read-Host 沒有上一步 | `Ctrl+C` → `Remove-Item backend\.env -ErrorAction SilentlyContinue` → 重跑；已經寫入的話 `notepad backend\.env` 直接改 | 工具 |
+| `& .\scripts\setup.ps1` 說「指令碼執行被停用」 | Windows 預設的執行原則擋 `.ps1` | 用 `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -SkipTests` 執行 | 工具 |
+| 腳本印了「完成」但後端起不來 | 舊版腳本：PowerShell 5.1 不會因為外部程式失敗而停 | `git pull` 拿最新版，現在每一步都檢查 exit code，失敗會停並印紅字 | 工具 |
 | `setup.ps1` 跑到 `alembic upgrade head` 報 `sslmode` / `channel_binding` / `getaddrinfo` | 連線字串格式或主機名稱錯（舊版腳本不會自動轉格式） | `notepad backend\.env` 改成 `postgresql+asyncpg://...?ssl=require`；新版腳本貼 Neon 原始格式會自動轉 | 工具 |
 | `uv run pytest` 要跑三、四分鐘 | 測試資料庫在 Neon（新加坡），每個測試好幾趟網路來回 | 正常。平常用 `setup.ps1 -SkipTests`；本機有 Postgres 的話把 `TEST_DATABASE_URL` 指到本機會變 20 秒 | 18 |
 | `ModuleNotFoundError: No module named 'xxx'` | 指令沒用 `uv run` 開頭，用到系統的 Python | 指令前加 `uv run`；在 `backend` 跑 `uv sync` | 9 |
