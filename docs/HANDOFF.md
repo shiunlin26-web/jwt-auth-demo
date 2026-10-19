@@ -8,6 +8,7 @@
 
 照順序讀，大約一小時：
 
+0. 要在本機跑東西：Windows 用 `scripts\setup.ps1 -SkipTests`（`README.md` 第一節）。學習者的電腦每次開機都是乾淨的，他每次都會跑這支；帶他做任何需要本機的步驟前先確認他跑過
 1. `AGENTS.md`：這個 repo 的規矩（5 分鐘）
 2. 這份文件全部（15 分鐘）
 3. `docs/LEARNING.md` 開頭到「路線圖」（10 分鐘），然後**跳著看**關卡 12、13、17 的結構，知道一關長什麼樣（17 最貼近第 3 節的固定格式）
@@ -110,7 +111,7 @@
 
 **環境變數名稱**（值在各平台，永遠不在 git；本機放 `backend/.env`，範本是 `backend/.env.example`）：
 
-- 必填：`DATABASE_URL`（`postgresql+asyncpg://`、Neon 用 `ssl=require`）、`JWT_SECRET`（至少 32 字元）
+- 必填：`DATABASE_URL`（`postgresql+asyncpg://`、Neon 用 `ssl=require`；`setup.ps1` 會把 Neon 原始格式自動轉好）、`JWT_SECRET`（至少 32 字元，`setup.ps1` 自動產生）
 - 正式環境另設：`COOKIE_SECURE=true`、`LOG_JSON=true`（這兩個在 `render.yaml`）、`SENTRY_DSN`
 - 測試：`TEST_DATABASE_URL`（不能和 `DATABASE_URL` 相同，測試會清空資料表）
 - 演練用：`ENABLE_DEBUG_ENDPOINTS=true` 開 `/api/_boom`，玩完關掉

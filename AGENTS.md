@@ -32,6 +32,9 @@ render.yaml         Render 後端設定；frontend/vercel.json：Vercel 轉發 /
 ## 常用指令
 
 ```bash
+# 乾淨機器一鍵建置（Windows PowerShell，在 repo 根目錄；學習者的電腦每次開機都是乾淨的）
+.\scripts\setup.ps1 -SkipTests   # 裝工具、git pull、uv sync、.env、alembic、npm ci；拿掉 -SkipTests 會跑測試
+
 # 後端（在 backend/，不用啟用 venv）
 uv sync                        # 安裝套件
 uv run uvicorn main:app --reload --port 8000

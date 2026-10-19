@@ -1,6 +1,6 @@
 # JWT Auth Demo
 
-練習前後端登入串接與 Refresh Token 的小專案。
+練習前後端登入串接與 Refresh Token 的小專案。**每次都是乾淨機器？直接看「每次開機怎麼把專案跑起來」。**
 
 - **後端**：FastAPI + SQLModel（async）+ PostgreSQL（Neon 或本地 Postgres）
 - **前端**：React + TypeScript + Vite（React Router、Zustand、axios、TanStack Query、React Hook Form + Zod、Tailwind CSS）
@@ -60,16 +60,43 @@ jwt-auth-demo/
 **前後端怎麼接**：前端只打「自己網域的 `/api/...`」。本機由 Vite 轉發到 `localhost:8000`，正式環境由 Vercel 轉發到 Render。
 對瀏覽器來說前後端永遠是同一個網站，refresh cookie 才會被帶上，也不需要 CORS。說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10。
 
-## 乾淨機器一鍵建置（Windows）
+## 每次開機怎麼把專案跑起來（乾淨機器，Windows）
 
-電腦每次開機都是乾淨系統的話，不用照下面一步一步做，用 `scripts/setup.ps1`。第一次在 PowerShell 貼：
+電腦每次開機都是乾淨系統的話，不用照後面的手動步驟，一支腳本搞定。
+
+**第一次（還沒有 repo）**，開 PowerShell：
 
 ```powershell
 git clone https://github.com/shiunlin26-web/jwt-auth-demo.git $HOME\jwt-auth-demo
 & $HOME\jwt-auth-demo\scripts\setup.ps1
 ```
 
-（機器上連 git 都沒有時，先到 git-scm.com 裝 git，或有 winget 的話 `winget install Git.Git`。）之後每次開機只要最後一行。它會裝 Node 和 uv（有 winget 用 winget，沒有就從官網下載 zip，不需要管理員權限）、拉最新 main、問你 Neon 的連線字串（或用 `-EnvFile D:\jwt.env` 從 USB 讀）、`uv sync`、`npm ci`、跑一次測試當基準線。細節在腳本開頭的註解。
+連 git 都沒有時，先到 git-scm.com 裝，或有 winget 的話 `winget install Git.Git`。`git clone` 會跳瀏覽器登入 GitHub 一次（repo 是私有的）。
+
+**之後每次開機**，只要：
+
+```powershell
+cd $HOME\jwt-auth-demo
+& .\scripts\setup.ps1 -SkipTests
+```
+
+腳本會（已經有的會跳過）：裝 Node 與 uv（有 winget 用 winget，沒有就從官網下載 zip，不需要管理員權限）→ `git pull` 最新 main → 設定 git 身分 → `uv sync` → 建立 `backend/.env`（問你 Neon 的兩個連線字串，**直接貼 Neon 後台的原始格式即可，會自動轉成 asyncpg 格式**；`JWT_SECRET` 自動產生）→ `alembic upgrade head` → `npm ci`。約三到五分鐘。
+
+| 參數 | 用途 |
+| --- | --- |
+| `-SkipTests` | 跳過最後的 pytest + vitest（測試資料庫在 Neon，跑一次約 4 分鐘；想確認基準線時再拿掉） |
+| `-EnvFile D:\jwt.env` | 不手打連線字串，從 USB 或雲端硬碟上的檔案複製成 `backend/.env`（內容就是一份 `.env`，**不要**放進 repo） |
+
+**跑完之後**，開兩個終端機：
+
+```powershell
+cd backend;  uv run uvicorn main:app --reload --port 8000
+cd frontend; npm run dev
+```
+
+瀏覽器開 <http://localhost:5173>。連線字串打錯、腳本中途失敗：`Ctrl+C`，刪掉 `backend\.env`，重跑；其他症狀見 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)「安裝與啟動」。
+
+> 下面「需要先安裝」到「3. 啟動前端」是手動版，腳本做的就是這些事；想知道每一步為什麼、或不是 Windows，照手動版做。
 
 ## 需要先安裝
 
@@ -279,6 +306,8 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 | `backend/pyproject.toml` 或 `backend/uv.lock` | 在 `backend`：`uv sync` |
 | `backend/migrations/versions/` 多了新檔案 | 在 `backend`：`uv run alembic upgrade head` |
 | `frontend/package.json` | 在 `frontend`：`npm install` |
+
+或者直接 `& .\scripts\setup.ps1 -SkipTests`，它會 `git pull` 並把這三件事都做一遍。
 
 ## 學習路線
 
