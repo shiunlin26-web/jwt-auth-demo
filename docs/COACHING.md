@@ -63,15 +63,17 @@
 
 ### 關卡 0：密碼規則
 
+**搭配看的程式**：`backend/schemas.py` 第 10～45 行（`PRINTABLE_ASCII`、`check_password_chars`、`UserCreate`、`UserLogin`）；`backend/routes/auth.py` 第 78～113 行（`register`）；`backend/security.py` 的 `hash_password`、`verify_password`；`frontend/src/schemas/auth.ts` 的 `passwordSchema`
+
 **前置**：後端跑起來。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `curl.exe -s -i localhost:8000/api/auth/register -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"abc1234\"}'` | `422`，內容有「至少 8 個字元」 | 422 是「格式不對」。擋在 `backend/schemas.py` 的驗證器，還沒碰到資料庫 |
-| 2 | 同上，密碼換 `中文密碼中文密碼` | `422`，「只能包含英文字母」 | bcrypt 只看前 72 個 **byte**，一個中文字 3 個 byte。與其默默截掉不如老實擋 |
+| 1 | `curl.exe -s -i localhost:8000/api/auth/register -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"abc1234\"}'` | `422`，`detail` 是陣列，`type` 是 `string_too_short`、`msg` 是英文 `at least 8 characters` | 422 是「格式不對」。擋在 `backend/schemas.py` 的 `min_length`（Pydantic 內建，所以是英文），還沒碰到資料庫；`detail` 的四個欄位 `loc`、`type`、`msg`、`input` |
+| 2 | 同上，密碼換 `中文密碼中文密碼` | `422`，`type` 是 `value_error`、`msg` 是中文「只能包含英文字母」 | 自己寫的驗證器 `check_password_chars`（`schemas.py:16`），所以是中文。bcrypt 只看前 72 個 **byte**，一個中文字 3 個 byte。與其默默截掉不如老實擋。PowerShell 畫面上指令會顯示 `????`，看回應的 `input` 確認送的是中文 |
 | 3 | 同上，密碼換 `('a'*73)`：`-d ('{\"email\":\"t@test.com\",\"password\":\"' + ('a'*73) + '\"}')` | `422`，「最多 72」 | 72 這個數字就是 bcrypt 的上限 |
-| 4 | 同上，密碼 `Passw0rd!x` | `201`，內容有 `id`、`email` | 201 是「成功而且建立了東西」，和 200 的差別 |
-| 5 | 再跑一次步驟 4 | `400`，`Email already registered` | 400 是「你送的東西有問題」，不是格式錯。400 和 422 的分工 |
+| 4 | 同上，密碼 `Passw0rd!x` | `201`，內容有 `id`、`email`，沒有密碼；多了 `x-ratelimit-*` | 201 是「成功而且建立了東西」。422 沒有 `x-ratelimit-*` 是因為擋在進函式之前，頻率限制掛在函式上 |
+| 5 | 再跑一次步驟 4 | `400`，`detail` 是一句字串 | 400 是「你送的東西有問題」。`detail` 字串 = `routes/auth.py` 自己 raise 的 `HTTPException`，陣列 = Pydantic。順便講 `register` 四塊：函式頭（裝飾器、`data: UserCreate`、`Depends`）、查重、建立（明碼只活到 `hash_password`）、commit 的 `try/except IntegrityError`（資料庫例外不翻譯成 HTTPException 就是 500） |
 | 6 | 用 7 個字元的密碼**登入**：`-d '{\"email\":\"t@test.com\",\"password\":\"abc1234\"}'` 打 `/api/auth/login` | `401`，不是 422 | 登入不檢查密碼規則，只回「帳號或密碼錯」，不給攻擊者線索 |
 | 7 | 瀏覽器 `localhost:5173/register`，密碼打 `short` | 按鈕不能按、出現提示文字 | 前端驗證是體驗，後端驗證是安全，規則兩邊各一份 |
 
@@ -79,6 +81,8 @@
 **動手玩**：`LEARNING.md` 關卡 0 的 1、3。
 
 ### 關卡 1：Refresh token 輪替與重複使用偵測
+
+**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（28）、`revoke_all_refresh_tokens`（54）、`login`（119）、`refresh`（159）；`backend/security.py` 的 `hash_token`、`create_refresh_token`；`backend/models.py` 的 `RefreshToken`；`frontend/src/api/client.ts` 的 response 攔截器與 `refreshPromise`
 
 **前置**：後端跑起來、帳號存在。這關和關卡 19 共用同一套 curl，先帶哪一關都可以。
 
@@ -97,6 +101,8 @@
 
 ### 關卡 2：設定管理
 
+**搭配看的程式**：`backend/config.py` 的 `Settings`；`backend/database.py`；`backend/.env.example`；`backend/main.py` 的 `CORSMiddleware`；`frontend/vite.config.ts` 的 `proxy`
+
 **前置**：後端能跑。這關每一步都要重啟後端。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
@@ -111,6 +117,8 @@
 **動手玩**：`LEARNING.md` 關卡 2 的 1、3。
 
 ### 關卡 3：登出所有裝置、改密碼
+
+**搭配看的程式**：`backend/routes/auth.py` 的 `delete_expired_refresh_tokens`（64）、`logout`（224）、`logout_all`（249）、`change_password`（269）；`backend/schemas.py` 的 `ChangePasswordRequest`；`frontend/src/pages/SettingsPage.tsx`
 
 **前置**：後端跑起來、帳號存在。用兩個 cookie 罐模擬兩台裝置。
 
@@ -128,6 +136,8 @@
 
 ### 關卡 4：自動化測試（pytest）
 
+**搭配看的程式**：`backend/tests/conftest.py`（測試資料庫、`client`、`make_client`）、`helpers.py`、`test_auth.py`、`test_rules.py`；`backend/pyproject.toml` 的 pytest 設定
+
 **前置**：`backend\.env` 有 `TEST_DATABASE_URL`。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
@@ -142,6 +152,8 @@
 **動手玩**：`LEARNING.md` 關卡 4 的「自己寫一個」。
 
 ### 關卡 5：資料庫遷移（Alembic）
+
+**搭配看的程式**：`backend/models.py`；`backend/migrations/env.py`、`migrations/versions/0001～0004`；`backend/alembic.ini`；`backend/Dockerfile` 第 67 行的 CMD（啟動時先 `alembic upgrade head`）
 
 **前置**：後端能連到 Neon。
 
@@ -159,6 +171,8 @@
 
 ### 關卡 6：前端整理（api / auth / components）
 
+**搭配看的程式**：`frontend/src/api/auth.ts`、`api/client.ts`、`auth/useAuth.ts`、`components/UserPanel.tsx`、`main.tsx`
+
 **前置**：前後端跑起來。這關是讀結構，不是跑指令。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
@@ -173,6 +187,8 @@
 **動手玩**：`LEARNING.md` 關卡 6 的 3（和關卡 1 步驟 7 一樣）。
 
 ### 關卡 7：多頁面與守門員（React Router）
+
+**搭配看的程式**：`frontend/src/app/router.tsx`、`app/AppLayout.tsx`、`auth/RequireAuth.tsx`、`auth/GuestOnly.tsx`、`pages/NotFoundPage.tsx`
 
 **前置**：前後端跑起來。全部在瀏覽器網址列做，預期值是「網址變成什麼」。
 
@@ -189,6 +205,8 @@
 
 ### 關卡 8：Zustand + axios
 
+**搭配看的程式**：`frontend/src/auth/authStore.ts`、`auth/authService.ts`、`api/client.ts`（request / response 兩個攔截器、`_retry`）
+
 **前置**：前後端跑起來。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
@@ -202,6 +220,8 @@
 **動手玩**：`LEARNING.md` 關卡 16 的 1、2 用測試看同一件事。
 
 ### 關卡 9：Docker 與 CI
+
+**搭配看的程式**：`backend/Dockerfile`、`.github/workflows/ci.yml`、`backend/pyproject.toml`、`backend/uv.lock`
 
 **前置**：學習者本機沒有 Docker，這關全部看 GitHub Actions 的 log。
 
@@ -217,6 +237,8 @@
 **動手玩**：`LEARNING.md` 關卡 9 的 1、4（要 push 一次，開練習分支做）。
 
 ### 關卡 10：部署（Render + Vercel + Neon，同站）
+
+**搭配看的程式**：`frontend/vercel.json`、`render.yaml`、`backend/config.py` 的 `cookie_secure`、`cors_origins`、`frontend/vite.config.ts` 的 `proxy`
 
 **前置**：線上網址在 `HANDOFF.md` 第 7 節。**這關可能碰到平台設定頁，改任何設定前先說**。
 
@@ -234,6 +256,8 @@
 
 ### 關卡 11：維護
 
+**搭配看的程式**：`backend/main.py`（lifespan、request log middleware、`/api/health`、Sentry）、`backend/logging_config.py`、`docs/RUNBOOK.md`、`docs/DEBUGGING.md`
+
 **前置**：線上網址、Render 後台能開。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
@@ -248,6 +272,8 @@
 **動手玩**：`LEARNING.md` 關卡 11 的 1（`/api/_boom` 看 Sentry，要改 Render 環境變數，先說）、4（退版）。
 
 ### 關卡 12：TanStack Query
+
+**搭配看的程式**：`frontend/src/api/queryClient.ts`、`auth/useMe.ts`、`components/UserPanel.tsx`、`main.tsx` 的 `QueryClientProvider`
 
 **前置**：前後端跑起來。
 
@@ -264,6 +290,8 @@
 
 ### 關卡 13：工程品質基線
 
+**搭配看的程式**：`backend/pyproject.toml`（ruff、pyright 設定）、`backend/security.py`（`DUMMY_PASSWORD_HASH`、`to_thread`）、`routes/auth.py` 的 `IntegrityError`、`.github/dependabot.yml`、`frontend/tsconfig.app.json`
+
 **前置**：前後端套件裝好。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
@@ -278,6 +306,8 @@
 **動手玩**：`LEARNING.md` 關卡 13 的 2、5。
 
 ### 關卡 14：Zod + React Hook Form
+
+**搭配看的程式**：`frontend/src/schemas/auth.ts`、`components/RegisterForm.tsx`、`LoginForm.tsx`、`ChangePasswordForm.tsx`、`api/client.ts` 的 `getErrorMessage`
 
 **前置**：前端跑起來。
 
@@ -294,6 +324,8 @@
 
 ### 關卡 15：Tailwind CSS
 
+**搭配看的程式**：`frontend/src/components/ui.tsx`、`src/index.css`、`vite.config.ts`、`app/AppLayout.tsx`
+
 **前置**：前端跑起來。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
@@ -307,6 +339,8 @@
 **動手玩**：`LEARNING.md` 關卡 15 的 2、5。
 
 ### 關卡 16：Vitest + MSW（前端測試）
+
+**搭配看的程式**：`frontend/vitest.config.ts`、`src/test/setup.ts`、`src/test/server.ts`、`src/api/client.test.ts`、`src/auth/RequireAuth.test.tsx`、`src/components/LoginForm.test.tsx`
 
 **前置**：`frontend` 套件裝好。
 
@@ -323,6 +357,8 @@
 
 ### 關卡 17：登入頻率限制（slowapi）
 
+**搭配看的程式**：`backend/rate_limit.py`、`main.py` 的 `rate_limit_exceeded` 與 `/api/_ip`、`routes/auth.py` 的 `@limiter.limit`、`tests/conftest.py` 的 `limiter.enabled`、`render.yaml`
+
 **前置**：後端跑起來。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
@@ -337,6 +373,8 @@
 **動手玩**：`LEARNING.md` 關卡 17 的 4。
 
 ### 關卡 18：SQL 與資料庫
+
+**搭配看的程式**：`backend/models.py`（`index=True`、`unique=True`）、`routes/auth.py` 的 `with_for_update()`（172）與 `delete_expired_refresh_tokens`、`docs/labs/18-sql.sql`
 
 **前置**：Neon SQL Editor 能開；`docs/labs/18-sql.sql` 開著。帳號：這關用 `TEST_DATABASE_URL` 那個資料庫（會灌 5 萬筆假資料，Neon 免費方案夠用，實驗最後會清掉）。**先講名詞**（`LEARNING.md` 關卡 18「先認識幾個名詞」）再開始。
 
@@ -353,6 +391,8 @@
 **動手玩**：`LEARNING.md` 關卡 18 的 3（`DB_ECHO=true` 對照 SQL 和程式）。
 
 ### 關卡 19：HTTP 與瀏覽器規則
+
+**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（28～38）、`main.py` 的 request log middleware（`Cache-Control`）與 `CORSMiddleware`、`frontend/vercel.json`、`vite.config.ts` 的 `proxy`
 
 **前置**：後端跑起來、帳號存在。2026-10-20 實際帶過的順序，照做。
 
@@ -371,6 +411,8 @@
 **動手玩**：`LEARNING.md` 關卡 19 的 1（400 改 401 看攔截器做錯事）。
 
 ### 關卡 20：讀 log 與除錯（故障演練）
+
+**搭配看的程式**：`backend/main.py` 的 request log middleware 與 `/api/_boom`、`backend/logging_config.py`、`docs/DEBUGGING.md`、`docs/drills/README.md`、`LEARNING.md` 關卡 20 觀念 3 的表
 
 **前置**：前後端跑起來；`uv run pytest -q`、`npm test` 綠（基準線）；`git status` 乾淨。**不要先看 patch 內容。** 每題的流程一樣，下面寫一次，第 1 題照做，之後每題只給症狀。
 
