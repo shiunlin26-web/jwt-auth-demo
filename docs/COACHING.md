@@ -76,8 +76,10 @@
 | 5 | 再跑一次步驟 4 | `400`，`detail` 是一句字串 | 400 是「你送的東西有問題」。`detail` 字串 = `routes/auth.py` 自己 raise 的 `HTTPException`，陣列 = Pydantic。順便講 `register` 四塊：函式頭（裝飾器、`data: UserCreate`、`Depends`）、查重、建立（明碼只活到 `hash_password`）、commit 的 `try/except IntegrityError`（資料庫例外不翻譯成 HTTPException 就是 500） |
 | 6 | 用 7 個字元的密碼**登入**：`-d '{\"email\":\"t@test.com\",\"password\":\"abc1234\"}'` 打 `/api/auth/login` | `401`，不是 422 | 登入不檢查密碼規則，只回「帳號或密碼錯」，不給攻擊者線索 |
 | 7 | 瀏覽器 `localhost:5173/register`，密碼打 `short` | 按鈕不能按、出現提示文字 | 前端驗證是體驗，後端驗證是安全，規則兩邊各一份 |
+| 8 | 在 `backend`：`uv run python -c "from schemas import UserCreate; UserCreate(email='a@b.com', password='abc')"` | traceback，最後一行 `ValidationError: 1 validation error for UserCreate`，上面兩行是 `pydantic/main.py` 的 `__init__` | Pydantic 在「建物件」那一刻丟錯，FastAPI 接住轉成 422，`register` 沒被呼叫。traceback 從最後一行往上讀（關卡 20 第 2 條）。`uv` 找不到：`$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"` |
+| 9 | 3 個中文字註冊：`-d '{\"email\":\"t@test.com\",\"password\":\"中文字\"}'`（先讓他猜一個錯還是兩個） | `422`，**只有一個** `string_too_short`，`input` 是中文 | `Field(min_length)` 先跑、`@field_validator` 後跑，前面沒過就停，所以一個欄位一次只報一個錯。**不要用 `python -c` 測中文**：PowerShell 會把中文變成 `???`，只有 curl 這條路中文活得下來 |
 
-**收尾**：422 格式錯 / 400 內容錯 / 401 身分錯 / 201 建立了。
+**收尾**：422 格式錯 / 400 內容錯 / 401 身分錯 / 201 建立了 / 驗證器有順序 / 例外不翻譯就是 500。
 **動手玩**：`LEARNING.md` 關卡 0 的 1、3。
 
 ### 關卡 1：Refresh token 輪替與重複使用偵測
