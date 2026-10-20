@@ -1,0 +1,371 @@
+# COACHING.md：帶著做（給帶學習者的 AI）
+
+> 2026-10-20 學習者的回饋：「你直接帶著我做，感覺快很多，理解比較快。」從此之後，**所有關卡預設用這個方式帶**。
+> 第 1 節是方法（怎麼帶），第 2 節是每一關的帶做腳本（帶什麼）。接手帶人先讀 `HANDOFF.md`，開一關之前讀這份對應的那一關。
+> `LEARNING.md` 仍然是每一關的完整內容與歷史紀錄，這份不取代它，是它的「操作版」。
+
+## 1. 方法：一次一步，他貼輸出，你從輸出講
+
+### 一步的固定格式
+
+1. **給一個可以直接貼的指令**（最多兩個，第二個不能依賴第一個的結果）。學習者是 Windows PowerShell：`curl.exe` 不是 `curl`、JSON 的引號寫 `\"`、路徑用反斜線、迴圈用 `1..11 | ForEach-Object { ... }`。
+2. **說「預期看到什麼」，用數字或字串**：`401`、`"Refresh token reused"`、`52 passed`、`Max-Age=604800`。**不要描述畫面長相**（「會轉圈圈」「右下角有個按鈕」），畫面會記錯；2026-10-20 帶關卡 18 時猜錯 Neon 的畫面，學習者跑了好幾次才發現是帶的人記錯。
+3. **說「看哪裡」**：輸出的哪一行、哪個欄位、`>` 還是 `<` 開頭。
+4. **等他貼輸出**。不要先講下一步。
+5. **從他貼的輸出講**：引用他貼的實際值（「你這串 `zfGh9...` 和登入那次的 `i5cvGY...` 不一樣」），一行一行說這行是什麼、對應程式哪一個檔案第幾行。沒出現在他輸出裡的東西不要講。
+6. 下一步。
+
+### 規則
+
+- **開始前先確認環境**：跑過 `scripts\setup.ps1`、前後端起來、`uv run pytest -q` 綠。沒跑過就先帶他跑（`README.md`「每次開機怎麼把專案跑起來」）。
+- **先名詞、再在哪看、最後邏輯**。程式邏輯不用逐行講（`HANDOFF.md` 第 1 節的程度校準）。新名詞第一次出現就解釋（Bearer、Origin、Path、系統表），不要先用後解釋。
+- **一次只有一個主題**。步驟之間不要塞額外知識，想補充的留到那關收尾。
+- **他貼的輸出亂掉**（兩個指令疊在一起、終端機把上一個的尾巴接上來）：先說「結果是對的，前面是終端機疊在一起」，直接講，不要叫他重跑。
+- **他說「看不懂」**：不要整段換個說法重講。問「哪一行」，或從他最後貼的輸出重新開始，一次講一行。
+- **他說「我沒看到你說的東西」**：相信他，是你記錯了。改成用指令、數字或檔案內容驗證，不要再描述畫面。
+- **每個實驗結束一句話「這證明了什麼」**。一關結束用「你看到的 → 對應的觀念」表格收尾，**收尾之後要問「哪一步要我再講一次？」**，他說沒有再進下一關（2026-10-20 的回饋：關卡 19 收尾講太快）。
+- **需要他改程式的步驟**（動手玩）：給檔案路徑、改前一行、改後一行，最後一定寫「改回來：`git checkout -- <檔案>`」。
+- **會碰到付費門檻的步驟先說**（`AGENTS.md`）。
+- **一關帶完更新 `HANDOFF.md` 第 2 節的「觀念關的帶做進度」**，寫到哪一關、哪一步。
+- 驗收還是他的事：你給預期值，他回報，對不上就一起找原因，不要替他說「過了」。
+
+### 腳本的格式
+
+每一關：**前置**（要開什麼、要有什麼帳號）→ **步驟表**（步 / 指令或操作 / 預期 / 看到之後講什麼）→ **收尾表** → **可選的動手玩**（指到 `LEARNING.md` 那關的編號，不重抄）。指令以現在的程式為準（`/api/...`、`uv run`），`LEARNING.md` 關卡 0～8 寫的是當時的舊路徑。
+
+下面用到的帳號：`t@test.com` / `Passw0rd!x`（不存在就先在步驟裡註冊）。要查資料庫時用 Neon 的 SQL Editor。
+
+---
+
+## 2. 每一關的帶做腳本
+
+### 關卡 0：密碼規則
+
+**前置**：後端跑起來。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `curl.exe -s -i localhost:8000/api/auth/register -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"abc1234\"}'` | `422`，內容有「至少 8 個字元」 | 422 是「格式不對」。擋在 `backend/schemas.py` 的驗證器，還沒碰到資料庫 |
+| 2 | 同上，密碼換 `中文密碼中文密碼` | `422`，「只能包含英文字母」 | bcrypt 只看前 72 個 **byte**，一個中文字 3 個 byte。與其默默截掉不如老實擋 |
+| 3 | 同上，密碼換 `('a'*73)`：`-d ('{\"email\":\"t@test.com\",\"password\":\"' + ('a'*73) + '\"}')` | `422`，「最多 72」 | 72 這個數字就是 bcrypt 的上限 |
+| 4 | 同上，密碼 `Passw0rd!x` | `201`，內容有 `id`、`email` | 201 是「成功而且建立了東西」，和 200 的差別 |
+| 5 | 再跑一次步驟 4 | `400`，`Email already registered` | 400 是「你送的東西有問題」，不是格式錯。400 和 422 的分工 |
+| 6 | 用 7 個字元的密碼**登入**：`-d '{\"email\":\"t@test.com\",\"password\":\"abc1234\"}'` 打 `/api/auth/login` | `401`，不是 422 | 登入不檢查密碼規則，只回「帳號或密碼錯」，不給攻擊者線索 |
+| 7 | 瀏覽器 `localhost:5173/register`，密碼打 `short` | 按鈕不能按、出現提示文字 | 前端驗證是體驗，後端驗證是安全，規則兩邊各一份 |
+
+**收尾**：422 格式錯 / 400 內容錯 / 401 身分錯 / 201 建立了。
+**動手玩**：`LEARNING.md` 關卡 0 的 1、3。
+
+### 關卡 1：Refresh token 輪替與重複使用偵測
+
+**前置**：後端跑起來、帳號存在。這關和關卡 19 共用同一套 curl，先帶哪一關都可以。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `curl.exe -s -c jar.txt localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` 然後 `type jar.txt` | 罐子裡一行 `refresh_token` 加一串值 | 這就是瀏覽器偷偷幫你存的 cookie，`-c` 是叫 curl 當瀏覽器 |
+| 2 | `curl.exe -v -b jar.txt -c jar.txt -X POST localhost:8000/api/auth/refresh` | `>` 有 `Cookie: refresh_token=舊值`；`<` 有 `set-cookie: refresh_token=新值`；`* Replaced cookie` | 舊票送出去、新票收回來，兩張不一樣，這叫輪替。`routes/auth.py` 的 `refresh` |
+| 3 | 把步驟 1 的舊值存回另一個罐子：`(Get-Content jar.txt) -replace '新值', '舊值' \| Set-Content old.txt`，再 `curl.exe -s -i -b old.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Refresh token reused` | 舊票在資料庫裡是 `revoked = true`，又被拿來用，後端當成被偷 |
+| 4 | `curl.exe -s -i -b jar.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Invalid refresh token` | 剛才還有效的新票也沒了：`revoke_all_refresh_tokens` 把這個使用者全部的票刪光（`routes/auth.py` 第 54 行附近）。「寧可多登入一次，不讓小偷繼續用」 |
+| 5 | Neon：`SELECT count(*) FROM refreshtoken WHERE user_id = (SELECT id FROM "user" WHERE email = 't@test.com');` | `0` | 和步驟 4 對上 |
+| 6 | 重新登入後再查：`SELECT token_hash, revoked FROM refreshtoken WHERE user_id = ... ;` | 一筆，`token_hash` 是 64 字元、和 cookie 的值不一樣 | 資料庫存的是雜湊，被倒出來也不能直接用 |
+| 7 | **前端 single-flight**：`backend\.env` 加 `JWT_EXPIRE_MINUTES=1`，重啟後端，登入後等 1 分鐘，DevTools → Console 貼 `const m = await import("/src/api/auth.ts"); await Promise.all([m.getMe(), m.getMe(), m.getMe()]);` | Network：3 個 `me` 401 → **1 個** `refresh` 200 → 3 個 `me` 200 | 三個請求同時過期，只換一次票。`api/client.ts` 的 `refreshPromise`。玩完刪掉 `.env` 那行 |
+
+**收尾**：換票會輪替 / 舊票重用是警報 / 警報響了全部作廢 / 前端同時只換一次。
+**動手玩**：`LEARNING.md` 關卡 1 的 1、3（用關卡 16 的 `npm test` 也看得到）。
+
+### 關卡 2：設定管理
+
+**前置**：後端能跑。這關每一步都要重啟後端。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `backend\.env` 把 `JWT_SECRET=` 那行前面加 `#`，啟動後端 | 起不來，terminal 最後幾行有 `jwt_secret` 和 `Field required` | fail fast：設定缺了就不要跑。`config.py` 的 `Settings`。改回來 |
+| 2 | `.env` 加 `DB_ECHO=true`，重啟，用 curl 登入一次 | terminal 多出 `SELECT ...`、`INSERT ...`、`UPDATE ...` 好幾行 | 這是 ORM 真的送去資料庫的 SQL，對照 `login` 的每一步。看完刪掉 |
+| 3 | `.env` 加 `REFRESH_TOKEN_EXPIRE_DAYS=1`，重啟，`curl.exe -s -i` 登入 | `set-cookie` 裡 `Max-Age=86400` | 86400 = 1 天的秒數。設定值一路傳到 cookie。刪掉 |
+| 4 | `curl.exe -s -i localhost:8000/api/health -H "Origin: http://evil.com"` | `200`，但**沒有** `access-control-allow-origin` | `CORS_ORIGINS` 預設只有 `localhost:5173`。CORS 的細節留到關卡 19 |
+| 5 | `uv run python -c "from config import settings; print(settings.jwt_expire_minutes, settings.cors_origin_list)"`（在 `backend`） | `30 ['http://localhost:5173']` | 設定是一個物件，程式各處都從它讀，不散落 |
+
+**收尾**：設定缺了立刻死 / 設定值改了行為就改 / 密鑰只在 `.env` 和平台的環境變數。
+**動手玩**：`LEARNING.md` 關卡 2 的 1、3。
+
+### 關卡 3：登出所有裝置、改密碼
+
+**前置**：後端跑起來、帳號存在。用兩個 cookie 罐模擬兩台裝置。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | 登入兩次，分別存 `a.txt`、`b.txt`（`-c a.txt`、`-c b.txt`），把第一次回的 `access_token` 複製起來 | 兩個罐子裡的值不一樣 | 同一個帳號兩台裝置，各有自己的會員卡 |
+| 2 | 用 A 的 token 改密碼：`curl.exe -s -i localhost:8000/api/auth/change-password -b a.txt -c a.txt -H "Authorization: Bearer <A的token>" -H "Content-Type: application/json" -d '{\"current_password\":\"Passw0rd!x\",\"new_password\":\"Passw0rd!y\"}'` | `200`，有新的 `access_token` 和新的 `set-cookie` | 改密碼的人自己不被登出 |
+| 3 | `curl.exe -s -i -b b.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Invalid refresh token` | B 的會員卡被作廢了，重新整理就會掉登入。但 B 手上還沒過期的 access token 仍然能用 30 分鐘，這是設計上的取捨 |
+| 4 | 用舊密碼登入 → `401`；用新密碼登入 `-c b.txt` → `200` | | 改完要把密碼改回 `Passw0rd!x`，再跑一次步驟 2 |
+| 5 | 目前密碼故意打錯跑步驟 2 | `400`，不是 401 | 400 和 401 的分工：401 會讓前端攔截器以為 token 過期去 refresh |
+| 6 | `curl.exe -s -i -X POST localhost:8000/api/auth/logout-all -H "Authorization: Bearer <token>"` 後，兩個罐子都去 refresh | `204`，然後兩個都 `401` | 204 是「成功、沒內容」 |
+
+**收尾**：改密碼 = 自己換新票、別人全作廢 / 登出所有裝置 = 全作廢 / access token 的 30 分鐘是接受的風險。
+**動手玩**：`LEARNING.md` 關卡 3。
+
+### 關卡 4：自動化測試（pytest）
+
+**前置**：`backend\.env` 有 `TEST_DATABASE_URL`。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `uv run pytest -q`（在 `backend`） | 最後一行 `52 passed`（數字以輸出為準） | 這 52 個就是關卡 0～3 你用 curl 做過的事，機器代勞 |
+| 2 | `uv run pytest -q --collect-only -q \| Select-Object -First 25` | 一行一個測試名稱，中文的 | 名稱就是規格：`test_舊的refresh_token再被使用會撤銷全部` 對應關卡 1 步驟 3、4 |
+| 3 | `uv run pytest -q -k 撤銷全部 -v` | `1 passed`，名稱印出來 | `-k` 挑名字裡有這個字的測試 |
+| 4 | `backend\routes\auth.py` 找到 `rt.revoked = True`（refresh 裡那行），前面加 `#`，`uv run pytest -q -x` | 第一個紅的就停（`-x`），名稱和「撤銷」「換發」有關；最後幾行有 `assert` 和實際值 | 從最後一行往上讀：期望什麼、實際拿到什麼。改回來：`git checkout -- backend/routes/auth.py` |
+| 5 | 打開 `backend/tests/test_auth.py`，找步驟 3 那個測試 | 看得到：登入、refresh、拿舊 cookie 再 refresh、assert 401 | 測試的三段：準備、動作、斷言。和你 curl 做的一模一樣 |
+
+**收尾**：測試是把 curl 的步驟寫成程式 / 紅了先讀最後幾行 / `-k`、`-x`、`-v` 三個參數夠用。
+**動手玩**：`LEARNING.md` 關卡 4 的「自己寫一個」。
+
+### 關卡 5：資料庫遷移（Alembic）
+
+**前置**：後端能連到 Neon。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `uv run alembic current` | `0004 (head)` | 資料庫現在的「施工進度」。Neon 的 `alembic_version` 表只有這一筆 |
+| 2 | `uv run alembic history` | 0001 → 0002 → 0003 → 0004 四行 | 每一行是一張施工單，`backend/migrations/versions/` 一檔一張 |
+| 3 | `uv run alembic check` | `No new upgrade operations detected.` | 程式的 `models.py` 和資料庫一致 |
+| 4 | `backend\models.py` 的 `User` 加一行 `nickname: str \| None = None`，再 `uv run alembic check` | `New upgrade operations detected`，提到 `add_column` 和 `nickname` | 改了 models 沒開施工單，CI 就是用這個抓。改回來：`git checkout -- backend/models.py` |
+| 5 | Neon：`SELECT version_num FROM alembic_version;` | `0004` | 和步驟 1 對上 |
+| 6 | 打開 `backend/migrations/versions/0002_*.py` | 看到 `upgrade()` 加欄位、`downgrade()` 刪欄位 | 每張施工單都有「做」和「拆」 |
+
+**收尾**：資料庫結構用施工單管 / 改 models 一定開單 / `alembic check` 是守門員。
+**動手玩**：`LEARNING.md` 關卡 5 的 1（downgrade 再 upgrade，會動到 Neon，做之前說一聲）。
+
+### 關卡 6：前端整理（api / auth / components）
+
+**前置**：前後端跑起來。這關是讀結構，不是跑指令。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `Get-ChildItem frontend\src -Recurse -Name \| Select-String -NotMatch "test"` | 看到 `api/`、`auth/`、`app/`、`components/`、`pages/`、`schemas/` | 一個資料夾一種責任：`api` 跟後端講話、`auth` 登入狀態、`pages` 畫面 |
+| 2 | 登入後 DevTools → Network，列出有哪些 `/api/...` | `login`、`me` | 每一個都對應 `frontend/src/api/auth.ts` 的一個函式 |
+| 3 | 打開 `api/auth.ts`，找 `login`、`getMe` | 各幾行，呼叫 `api.post`、`api.get` | 它們不管 token，token 的事在 `api/client.ts` |
+| 4 | 打開 `api/client.ts`，找 `interceptors.request` 和 `interceptors.response` | request：加 `Authorization`；response：401 就 refresh 再重送 | 全專案只有這裡處理 token，頁面完全不知道 |
+| 5 | Console：`const { useAuthStore } = await import("/src/auth/authStore.ts"); useAuthStore.getState();` | 物件裡有 `accessToken`、`notice`、`initialized` | 登入狀態放在 `auth/`，畫面只是讀它 |
+
+**收尾**：api / auth / pages 三層各做一件事，搬到新專案時整個 `api/` 和 `auth/` 複製就能用（`CHAIN.md` 搬家清單）。
+**動手玩**：`LEARNING.md` 關卡 6 的 3（和關卡 1 步驟 7 一樣）。
+
+### 關卡 7：多頁面與守門員（React Router）
+
+**前置**：前後端跑起來。全部在瀏覽器網址列做，預期值是「網址變成什麼」。
+
+| 步 | 操作 | 預期（看網址列） | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | 登出狀態，網址列輸入 `localhost:5173/settings` | 變成 `/login` | `auth/RequireAuth.tsx`：沒登入就送去登入頁，並記住你本來要去哪 |
+| 2 | 登入 | 回到 `/settings`，不是首頁 | 記住的那個「本來要去哪」 |
+| 3 | 已登入，輸入 `/login` | 變成 `/` | `auth/GuestOnly.tsx`，反過來的守門員 |
+| 4 | 輸入 `/abc` | 404 頁 | `app/router.tsx` 最後一條路由 |
+| 5 | 點導覽列「帳號設定」，DevTools → Network | **沒有**新的 HTML 下載，只有可能的 `/api/me` | 單頁應用換頁不重新下載頁面，`<Link>` 和 `<a>` 的差別 |
+
+**收尾**：路由表在一個檔案 / 守門員包在外面，新頁面自動被保護 / 換頁不重載。
+**動手玩**：`LEARNING.md` 關卡 7 的 1（加一頁，十行內）。
+
+### 關卡 8：Zustand + axios
+
+**前置**：前後端跑起來。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | Console：`const { useAuthStore } = await import("/src/auth/authStore.ts"); useAuthStore.getState();` | 有 `accessToken`（一串 `eyJ...`） | access token 只在記憶體，重新整理就沒了，所以才需要 refresh |
+| 2 | Console：`useAuthStore.getState().setNotice("我從 Console 改的");` | 畫面上方的提示文字立刻變 | 沒碰任何元件，改 store 畫面就跟著變 |
+| 3 | `backend\.env` 加 `JWT_EXPIRE_MINUTES=1`，重啟，登入等 1 分鐘，按「重新取得我的資料」 | Network：`me` 401 → `refresh` 200 → `me` 200，畫面沒出錯 | `api/client.ts` 的 response 攔截器。刪掉 `.env` 那行 |
+| 4 | 打開 `api/client.ts` 找 `_retry` | 一行 `original._retry = true` | 重送一次還是 401 就放棄，不然會無限迴圈 |
+
+**收尾**：狀態在 store / token 在攔截器 / 攔截器只重試一次。
+**動手玩**：`LEARNING.md` 關卡 16 的 1、2 用測試看同一件事。
+
+### 關卡 9：Docker 與 CI
+
+**前置**：學習者本機沒有 Docker，這關全部看 GitHub Actions 的 log。
+
+| 步 | 操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `uv run ruff check .` 和 `uv run ruff format --check .`（在 `backend`） | `All checks passed!`、`N files already formatted` | CI 第一步就是這兩個，本機先跑就不會紅 |
+| 2 | 打開 `.github/workflows/ci.yml`，數 `backend` job 有幾個 `- name:` | 和 Actions 頁面左邊的步驟一一對應 | CI 就是把你本機跑的指令排成一列 |
+| 3 | GitHub → Actions → 最新一列 → 點 `backend` → 展開 `Docker build` | 找到 `CACHED` 字樣 | 層快取：沒變的層不重做。`backend/Dockerfile` 先 COPY 套件清單再 COPY 程式，就是為了這個 |
+| 4 | 同一頁展開 `Smoke test` 和 `Docker logs` | `{"status":"ok"...}`、`Running upgrade ... -> 0004`、`Uvicorn running on http://0.0.0.0:8000` | 容器啟動時先跑遷移再起伺服器，和 Render 上一模一樣 |
+| 5 | 打開 `backend/Dockerfile`，找 `--host 0.0.0.0` | 一行 | 容器裡要聽 `0.0.0.0` 外面才連得到，`127.0.0.1` 會「顯示成功但 502」 |
+
+**收尾**：CI = 本機指令排成一列 / Docker = 把啟動步驟寫死 / 紅了點進去看是哪一步。
+**動手玩**：`LEARNING.md` 關卡 9 的 1、4（要 push 一次，開練習分支做）。
+
+### 關卡 10：部署（Render + Vercel + Neon，同站）
+
+**前置**：線上網址在 `HANDOFF.md` 第 7 節。**這關可能碰到平台設定頁，改任何設定前先說**。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `curl.exe -s https://<前端網址>/api/health` | `{"status":"ok","db":"ok","migration":"0004","version":"<commit 前幾碼>"}` | 打的是 Vercel 的網址，回的是 Render 的內容：Vercel 代打了（`frontend/vercel.json` 的 rewrite） |
+| 2 | `curl.exe -s -i https://<前端網址>/api/health \| Select-String "server\|x-request-id"` | `server:` 那行不是 `uvicorn`；`x-request-id` 有值 | 本機直打後端 `server` 是 `uvicorn`，這裡被代理層換掉了：瀏覽器從頭到尾只看到 Vercel，這就是「同站」 |
+| 3 | 瀏覽器開前端登入，DevTools → Network 點 `login` → Response Headers 的 `set-cookie` | `Path=/api/auth; Secure; HttpOnly; SameSite=lax` | 正式環境多了 `Secure`（關卡 2 的 `COOKIE_SECURE`） |
+| 4 | Network 過濾 `api` | 所有網址都是 `<前端網址>/api/...`，沒有 `onrender.com` | 代理在工作 |
+| 5 | 重新整理 | 還在登入狀態 | 這一步才證明 cookie 真的帶得上，關卡 10 當初踩的坑全在這裡 |
+| 6 | Render → Logs，搜步驟 2 的 `x-request-id` | 找到同一筆 `"request"` log | 前端看到的編號和後端記的是同一個 |
+
+**收尾**：同站 = 瀏覽器只看到一個網域 / rewrite 不是轉址 / cookie 的 `Secure` 正式才開。
+**動手玩**：`LEARNING.md` 關卡 10 的 2（故意跨站，要改 Vercel 設定，先說）。
+
+### 關卡 11：維護
+
+**前置**：線上網址、Render 後台能開。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `curl.exe -s https://<前端網址>/api/health` | `db: ok`、`migration: 0004`、`version` 和 GitHub main 最新 commit 前幾碼一樣 | 一個網址回答三個問題：活著嗎、資料庫通嗎、跑的是哪一版 |
+| 2 | `backend\.env` 加 `LOG_JSON=true`，重啟，`curl.exe -s localhost:8000/api/ping` | terminal 一行 JSON：`"message": "request"`、`"path": "/api/ping"`、`"status": 200`、`"duration_ms"`、`"request_id"` | 正式環境就是這個格式，欄位可以搜。刪掉那行 |
+| 3 | Render → Logs，搜 `"status": 401` | 找到幾筆登入失敗或 refresh 失敗 | 看 `path` 分布就知道是誰在敲門 |
+| 4 | `uv run alembic check` | `No new upgrade operations detected.` | CI 的「遷移檢查」就是它 |
+| 5 | 打開 `docs/RUNBOOK.md` 第 0 節 | 一張上線後的檢查清單 | 貴的檢查寫成清單，便宜的寫成測試 |
+
+**收尾**：health 三件事 / log 是 JSON 可以搜 / request_id 串前後端。
+**動手玩**：`LEARNING.md` 關卡 11 的 1（`/api/_boom` 看 Sentry，要改 Render 環境變數，先說）、4（退版）。
+
+### 關卡 12：TanStack Query
+
+**前置**：前後端跑起來。
+
+| 步 | 操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | 登入，DevTools → Network 過濾 `me` | **一個** `/api/me` | 三個元件都要使用者資料，但只打一次：`auth/useMe.ts` 的 `queryKey: ["me"]` 共用快取 |
+| 2 | 點頁面角落 TanStack Query Devtools 的圖示（`main.tsx` 的 `ReactQueryDevtools`），找 `["me"]` | 狀態 `fresh`，30 秒後變 `stale` | `api/queryClient.ts` 的 `staleTime: 30_000`：30 秒內不重抓 |
+| 3 | 按「重新取得我的資料」 | 按鈕文字變「更新中...」、「上次更新」時間變、Network 多一個 `/api/me` | `refetch` 和 `isFetching` |
+| 4 | 等超過 30 秒，切到別的分頁再切回來 | Network 自動多一個 `/api/me`，你沒按任何東西 | `refetchOnWindowFocus`：過期了就趁你回來時更新 |
+| 5 | 登出 | Network **沒有** 401 的 `/api/me` | `useMe.ts` 的 `enabled`：沒登入就不抓 |
+
+**收尾**：後端資料交給 Query 管 / key 一樣就共用 / staleTime 決定多久算舊。
+**動手玩**：`LEARNING.md` 關卡 12 的 2、4。
+
+### 關卡 13：工程品質基線
+
+**前置**：前後端套件裝好。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | 在 `backend`：`uv run ruff format --check .`、`uv run ruff check .`、`uv run pyright`、`uv run pytest -q` | 四個都綠；pyright `0 errors` | 推之前本機跑的四樣，CI 跑一樣的 |
+| 2 | 在 `frontend`：`npm run format:check`、`npm run lint`、`npm run typecheck`、`npm test` | 四個都綠 | |
+| 3 | `backend\routes\auth.py` 的 `login` 裡刪掉 `assert user.id is not None`，`uv run pyright` | 幾個 `error`，提到 `int \| None` | 型別檢查把「跑到才炸」提前到「存檔就知道」。改回來 |
+| 4 | 用不存在的 email 登入一次、用存在的 email 打錯密碼一次，看 terminal 的 request log `duration_ms` | 兩個都接近 100 毫秒 | `security.py` 的 `DUMMY_PASSWORD_HASH`：帳號不存在也假裝比對一次，不然用時間就能猜出哪些 email 有註冊 |
+| 5 | GitHub → Insights → Dependency graph → Dependabot | 三個 ecosystem | 套件更新由機器開 PR，CI 綠才合 |
+
+**收尾**：四個檢查 + CI / 型別檢查提前抓錯 / 安全細節（timing）照正式專案做。
+**動手玩**：`LEARNING.md` 關卡 13 的 2、5。
+
+### 關卡 14：Zod + React Hook Form
+
+**前置**：前端跑起來。
+
+| 步 | 操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | 開 `/register`，email 打 `abc` | 出現「Email 格式不正確」、按鈕不能按 | `schemas/auth.ts` 的 Zod 規則，`mode: "onChange"` 邊打邊驗 |
+| 2 | 密碼打 `short`，再打中文 | 「至少 8 個字元」、「只能包含英文字母」 | 和後端 `schemas.py` 同一套規則，兩邊各一份 |
+| 3 | `frontend\src\schemas\auth.ts` 的 `.min(8)` 改 `.min(12)` | 提示立刻變成 12 | 規則在一個檔案，表單自動跟著變。改回來 |
+| 4 | `components/RegisterForm.tsx` 把 `resolver:` 那行註解掉，空白表單送出 | 後端 `422`，訊息出現在按鈕下方 | 前端驗證拿掉，後端還是擋得住：「前端驗證是體驗，後端驗證是安全」。改回來 |
+| 5 | 登入頁密碼打錯 | 「登入失敗：Incorrect email or password」 | 後端的 `detail` 原樣顯示，`api/client.ts` 的 `getErrorMessage` |
+
+**收尾**：規則一份、型別自動推 / 即時提示 / 後端永遠再驗一次。
+**動手玩**：`LEARNING.md` 關卡 14 的 4。
+
+### 關卡 15：Tailwind CSS
+
+**前置**：前端跑起來。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `frontend\src\pages\HomePage.tsx` 的 `<h2` 加 `text-red-600`，存檔 | 標題立刻變紅，沒重新整理 | class 就是樣式，Vite 熱更新。改回來 |
+| 2 | DevTools → Rendering → `prefers-color-scheme: dark` | 底變深、字變淺 | `dark:` 開頭的 class。`components/ui.tsx` 每個顏色都有深色版 |
+| 3 | `npm run build`，`Get-ChildItem frontend\dist\assets\*.css \| Select-Object Name, Length` | 一個檔案，約 14 kB | 只打包用到的 class |
+| 4 | 打開 `components/ui.tsx` 找 `buttonVariants` | `primary`、`secondary`、`danger` 各一串 class | 共用元件，型別從物件的 key 推出來 |
+
+**收尾**：class 即樣式 / 深色每個顏色都要想 / 共用元件在 `ui.tsx`。
+**動手玩**：`LEARNING.md` 關卡 15 的 2、5。
+
+### 關卡 16：Vitest + MSW（前端測試）
+
+**前置**：`frontend` 套件裝好。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `npm test` | `11 passed`（數字以輸出為準），3 個檔案 | 測的是攔截器、守門員、登入表單 |
+| 2 | 打開 `src/api/client.test.ts`，讀每個 `it(` 的名稱 | 五個，其中有「single-flight」和「_retry」 | 關卡 1、8 用眼睛在 Network 看的事，現在機器看 |
+| 3 | `src/api/client.ts` 的 `if (!refreshPromise) {` 改成 `if (true) {`，`npm test` | `1 failed`，「single-flight」那個，訊息有 `refresh` 被呼叫 3 次 | 回歸測試：以後誰改壞這行，CI 立刻紅。改回來 |
+| 4 | 打開 `src/test/server.ts` | MSW 的假後端，一個路徑一個 handler | 測試不打真後端，所以 2 秒跑完 |
+| 5 | `npm run test:coverage` | 表格，`client.ts`、`RequireAuth.tsx`、`LoginForm.tsx` 接近 100% | 覆蓋率看哪裡沒測到，不是追 100% |
+
+**收尾**：假後端 + 真前端程式 / 關鍵行為各一個測試 / 改壞立刻知道。
+**動手玩**：`LEARNING.md` 關卡 16 的 2、5。
+
+### 關卡 17：登入頻率限制（slowapi）
+
+**前置**：後端跑起來。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `1..11 \| ForEach-Object { curl.exe -s -o NUL -w "%{http_code}\n" localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"a@b.com\",\"password\":\"x\"}' }` | 10 個 `401`，第 11 個 `429` | 一分鐘 10 次，`config.py` 的 `AUTH_RATE_LIMIT` |
+| 2 | 第 12 次用 `-i` 看標頭 | `retry-after: <秒>`、`x-ratelimit-remaining: 0` | 429 要告訴對方多久後再來 |
+| 3 | `.env` 加 `AUTH_RATE_LIMIT=3/minute`，重啟，再跑步驟 1 | 第 4 個就 `429` | 格式是 `次數/時間`。刪掉 |
+| 4 | `.env` 加 `TRUSTED_PROXY_HOPS=1`，重啟，步驟 1 的指令加 `-H "X-Forwarded-For: 1.2.3.4"` 跑到 429，再換 `5.6.7.8` | 換 IP 又能打 10 次 | hops 設得比實際代理層數多，攻擊者自己填 IP 就能繞過。`rate_limit.py`。刪掉 |
+| 5 | `render.yaml` 找 `TRUSTED_PROXY_HOPS` | `2` | Render 前面有兩層（Vercel、Render 的負載平衡）。正式環境用 `/api/_ip` 驗過 |
+
+**收尾**：限的是 IP / 代理後面要算對層數 / 429 帶 Retry-After。
+**動手玩**：`LEARNING.md` 關卡 17 的 4。
+
+### 關卡 18：SQL 與資料庫
+
+**前置**：Neon SQL Editor 能開；`docs/labs/18-sql.sql` 開著。帳號：這關用 `TEST_DATABASE_URL` 那個資料庫（會灌 5 萬筆假資料，Neon 免費方案夠用，實驗最後會清掉）。**先講名詞**（`LEARNING.md` 關卡 18「先認識幾個名詞」）再開始。
+
+| 步 | 操作（lab 的段落） | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | 第 1 段 `pg_indexes` 查詢 | 看到 `ix_user_email`、`ix_refreshtoken_token_hash`、`*_pkey` | 系統表是「資料庫自己的目錄」；索引名字 `ix_<表>_<欄位>` 來自 `models.py` 的 `index=True` |
+| 2 | 第 2 段灌資料，再 `SELECT count(*) FROM "user";` | 約 `50001` | 假資料進去了 |
+| 3 | 第 3 段兩句 `EXPLAIN ANALYZE`，各看 `Execution Time` | 有索引：`Index Scan`、零點幾毫秒；拔掉索引：`Seq Scan`、幾十毫秒 | 看 `Execution Time` 那行，不是編輯器的秒數。索引是另外維護的目錄 |
+| 4 | 第 4 段 JOIN 一句 vs 21 句 | 一句就拿到 20 個使用者各幾張票 | N+1：每一趟都是一次來回 |
+| 5 | 第 5 段：分頁 A 跑 `DO $$ ... $$`（會等 40 秒），馬上在分頁 B 跑那句 `SELECT` | B 的 `finished - started` 約 30～40 秒、`revoked` 是 `t` | `FOR UPDATE` 是鎖：同一張票兩個人同時換，第二個要等第一個做完才看得到結果。`routes/auth.py` 的 `with_for_update()` |
+| 6 | 第 6、7 段清理，再 `count(*)` | `user`、`refreshtoken` 都回到實驗前 | 實驗資料不留 |
+
+**收尾**：索引是目錄、不是每欄都該有 / 一趟 SQL 一次來回 / 鎖讓同時改同一筆的人排隊。
+**動手玩**：`LEARNING.md` 關卡 18 的 3（`DB_ECHO=true` 對照 SQL 和程式）。
+
+### 關卡 19：HTTP 與瀏覽器規則
+
+**前置**：後端跑起來、帳號存在。2026-10-20 實際帶過的順序，照做。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `curl.exe -v localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` | `>` 四行請求、`<` 一串回應、最後一行 JSON | `>` 是你送的、`<` 是回來的、`*` 是 curl 碎念。請求行、標頭、空行、內容 |
+| 2 | 找 `< set-cookie:` 那行 | `HttpOnly; Max-Age=604800; Path=/api/auth; SameSite=lax`，本機沒有 `Secure` | 一個分號一個規則：JS 讀不到 / 7 天 / 只在 `/api/auth` 帶 / 跨站不帶 / 正式才限 https。`routes/auth.py` 第 33 行附近 |
+| 3 | 找 `x-ratelimit-remaining`、`cache-control: no-store`、`x-request-id` | 三行都在 | 關卡 17、19、11 各加的 |
+| 4 | 關卡 1 的步驟 1～4（cookie 罐、換票、舊票重用、新票也失效） | 同關卡 1 | 用 curl 看最清楚 |
+| 5 | 重新登入 `-c jar.txt`，`curl.exe -v -b jar.txt localhost:8000/api/me` | `>` **沒有** `Cookie:` 行；`401`、`www-authenticate: Bearer` | Path 不是 `/api/auth` 就不帶；`/api/me` 要的是另一張票 |
+| 6 | `curl.exe -s -i localhost:8000/api/me -H "Authorization: Bearer <登入回的 access_token>"` | `200`，`id`、`email`、`last_login_at` | 兩張票分工：refresh 走 cookie 只到 `/api/auth`，access 走標頭打其他 API |
+| 7 | 把 access token 中間一段貼進 `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("<中間那段>"))` | `{"sub":"7","iat":...,"exp":...}` | 票誰都能看，所以不放祕密；第三段簽章防改。改一個字再打 `/api/me` 會 401 |
+| 8 | `curl.exe -s -i localhost:8000/api/health -H "Origin: http://localhost:5173"` 和 `-H "Origin: http://evil.com"` | 都 `200`、內容一樣；只有第一個有 `access-control-allow-origin` | CORS：伺服器照常處理，只是沒給許可，瀏覽器不讓 JS 讀。curl 不是瀏覽器所以不理。它保護使用者不保護 API |
+
+**收尾**：請求回應三層 / cookie 五個屬性 / 兩張票分工 / CORS 只管瀏覽器 / `no-store` 不存。收尾後問「哪一步要再講一次」。
+**動手玩**：`LEARNING.md` 關卡 19 的 1（400 改 401 看攔截器做錯事）。
+
+### 關卡 20：讀 log 與除錯（故障演練）
+
+**前置**：前後端跑起來；`uv run pytest -q`、`npm test` 綠（基準線）；`git status` 乾淨。**不要先看 patch 內容。** 每題的流程一樣，下面寫一次，第 1 題照做，之後每題只給症狀。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `git apply docs/drills/01.patch` 然後 `git status` | 一個檔案 `modified` | 允許的提示：壞在哪個檔案 |
+| 2 | 重啟後端，瀏覽器登入、重新整理 | 掉登入 | 先問他：「你覺得是哪一段壞：refresh 沒送、送了被拒、還是回了前端沒收？」不要先講答案 |
+| 3 | DevTools → Network 點 `refresh` → Request Headers | 有沒有 `Cookie:` | 沒有 = 瀏覽器沒帶 = cookie 的屬性出問題（關卡 19 步驟 5） |
+| 4 | `uv run pytest -q` | 有紅的，名稱和 refresh 有關 | 哪個工具抓到了。對照 `LEARNING.md` 關卡 20 觀念 3 的表 |
+| 5 | 他說出原因後，`git diff` 對答案 | `path="/api/auth"` 變 `"/auth"` | 修完要能說根本原因 |
+| 6 | `git checkout -- backend frontend`，`git status` 乾淨 | | 下一題 |
+
+五題的症狀與答案在 `LEARNING.md` 關卡 20 的「演練」表和折疊區。每題記三件事：先看了哪裡、第幾步定位、哪個工具抓到。**第 2 題全綠但壞了**是重點，帶到那題時用 `[Text.Encoding]` 解 token 看 `exp - iat`。
+
+**另外兩個小實驗**：
+- `backend\.env` 加 `LOG_JSON=true` 和 `ENABLE_DEBUG_ENDPOINTS=true`，重啟，`curl.exe -s -i localhost:8000/api/_boom` → `500`；terminal 找 `"level": "ERROR"` 那筆，從**最後一行**往上讀到 `main.py` 的哪一行。看完刪掉兩行。
+- 用步驟裡任何一個回應的 `x-request-id`，在 terminal 的 log 搜同一個 id。
+
+**收尾**：先問哪段壞再問為什麼 / 看錯誤最後幾行 / 哪個工具抓哪種錯 / 全綠不等於沒壞。
+**動手玩**：`LEARNING.md` 關卡 20 的 4（讓測試抓第 2 題）。
