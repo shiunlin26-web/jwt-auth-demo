@@ -36,7 +36,7 @@ jwt-auth-demo/
 ├── .editorconfig              # 編輯器共用的縮排、換行規則
 ├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pyright、alembic check、pytest、Docker build；前端 prettier / lint / vitest / build
 ├── .github/dependabot.yml     # 每週自動開 PR 更新套件
-├── docs/                      # PLAIN（每關白話版）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環任務書）、QA、DEBUGGING、RUNBOOK、PLAN
+├── docs/                      # PLAIN（每關白話版）、COACHING（帶做腳本）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環任務書）、QA、DEBUGGING、RUNBOOK、PLAN
 ├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
 ├── scripts/setup.ps1          # 乾淨的 Windows 機器一鍵建置（裝工具、拉 main、.env、sync、測試）
 └── frontend/src/
@@ -308,7 +308,7 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 ## 學習路線
 
 一步步把這個專案練到接近生產級的過程，記錄在 [`docs/LEARNING.md`](docs/LEARNING.md)。
-要接手帶人（或換一個 AI 工具繼續）：先讀 [`docs/HANDOFF.md`](docs/HANDOFF.md)；要把這套搬到新專案：[`docs/CHAIN.md`](docs/CHAIN.md)。
+要接手帶人（或換一個 AI 工具繼續）：先讀 [`docs/HANDOFF.md`](docs/HANDOFF.md)，帶做的方法與每關腳本在 [`docs/COACHING.md`](docs/COACHING.md)；要把這套搬到新專案：[`docs/CHAIN.md`](docs/CHAIN.md)。
 
 ## 常見問題
 
