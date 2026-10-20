@@ -80,7 +80,11 @@
 | 8 | 在 `backend`：`uv run python -c "from schemas import UserCreate; UserCreate(email='a@b.com', password='abc')"` | traceback，最後一行 `ValidationError: 1 validation error for UserCreate`，上面兩行是 `pydantic/main.py` 的 `__init__` | Pydantic 在「建物件」那一刻丟錯，FastAPI 接住轉成 422，`register` 沒被呼叫。traceback 從最後一行往上讀（關卡 20 第 2 條）。`uv` 找不到：`$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"` |
 | 9 | 3 個中文字註冊：`-d '{\"email\":\"t@test.com\",\"password\":\"中文字\"}'`（先讓他猜一個錯還是兩個） | `422`，**只有一個** `string_too_short`，`input` 是中文 | `Field(min_length)` 先跑、`@field_validator` 後跑，前面沒過就停，所以一個欄位一次只報一個錯。**不要用 `python -c` 測中文**：PowerShell 會把中文變成 `???`，只有 curl 這條路中文活得下來 |
 
-**收尾**：422 格式錯 / 400 內容錯 / 401 身分錯 / 201 建立了 / 驗證器有順序 / 例外不翻譯就是 500。
+| 10 | email 和密碼同時填壞：`-d '{\"email\":\"abc\",\"password\":\"abc\"}'` | `422`，`detail` 有**兩個**物件，`loc` 分別是 `email`、`password` | 陣列是為了裝多個欄位的錯；每個欄位仍然只報第一條沒過的規則。這是 Pydantic 的行為，不是 HTTP 的規定 |
+
+**收尾一句話**：422 格式錯、400 內容不能收、401 你是誰我不認得、500 我壞了。前三個是「你的問題」，最後一個是「我的問題」。
+**收尾要講到**：驗證器有順序（一個欄位一次一個錯、多個欄位各報一個）/ 例外只認 `HTTPException` 和驗證失敗，其他不翻譯就是 500，但只翻譯預料得到的 / 400 的 `detail` 形狀是前後端約定，本專案自己 raise 的一律字串（`getErrorMessage` 只認字串和 Pydantic 陣列）/ 401 只能用在身分問題，因為攔截器會去 refresh / 登入不查規則 / 明碼只活到 bcrypt 那行，前端先 hash 沒用（hash 會變成密碼本身）/ 輸出形狀由 `response_model=UserRead` 決定。
+**他誤解過的地方（2026-10-20，出題時針對這些）**：「422 一次一個錯是為了保密」（是順序）；「500 是認得的那兩種」（反了）；「其他例外都要 try/except」（只接預料得到的）；「回應沒密碼是存進去那行決定的」（是 `response_model`）；「前端 hash 是重複 hash 的問題」（是 hash 變成密碼本身）；「400 是包裝認不得的例外」（是「內容不能收」，自己檢查到的也回 400）。
 **動手玩**：`LEARNING.md` 關卡 0 的 1、3。
 
 ### 關卡 1：Refresh token 輪替與重複使用偵測
