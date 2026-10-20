@@ -3315,6 +3315,13 @@ slowapi 內建的 429 回 `{"error": ...}`，前端的 `getErrorMessage` 讀的�
 2. 工具二選一：Neon 後台的 SQL Editor（左上角選資料庫，貼一段按 Run），或 `psql`（有裝的話：`psql "<TEST_DATABASE_URL 原始格式>"`）。第 5 步的鎖需要兩個視窗，Neon SQL Editor 開兩個瀏覽器分頁就行。
 3. 想看程式平常送出什麼 SQL：`backend/.env` 暫時加 `DB_ECHO=true`，重啟後端，terminal 會印出每一句。看完改回來。
 
+### 先認識幾個名詞（不然 Neon 的畫面會看不懂）
+
+- **系統表**：`pg_indexes`、`information_schema.columns` 不是我們建的表，是 Postgres 自己維護的「管理員帳本」，記的是「這個資料庫有哪些表、欄位、索引」。Neon 左邊的 Tables 清單不會列它們，直接 `SELECT` 就有。
+- **Neon 的 Tables 頁面**（點某張表會看到 Columns / Constraints / Indexes）：就是這些系統表畫成表單。Columns 對應 `models.py` 的屬性；Constraints 的 `*_fkey` 對應 `foreign_key="user.id"`、`*_pkey` 是主鍵；Indexes 對應 `index=True` / `unique=True`。**不要按 Add column / Add index**：結構由 Alembic 管，手動改會讓 `alembic check` 紅。
+- **名字從哪來**：表名 `user` 是 class `User` 轉小寫（SQLModel）；索引名 `ix_user_email` 是 SQLAlchemy 看到 `index=True` 自動取的 `ix_<表>_<欄位>`；`refreshtoken_pkey`、`refreshtoken_user_id_fkey` 是 Postgres 自己的預設（`<表>_pkey`、`<表>_<欄位>_fkey`）。程式碼裡沒有任何一行寫過這些名字，但每一個都能往回找到 `models.py` 的一行和 `migrations/versions/0001` 的一句。
+- **`EXPLAIN ANALYZE` 要看哪個時間**：結果最後一行的 `Execution Time` 才是資料庫執行的時間；SQL Editor 自己顯示的「Query executed in xxx ms」包含到新加坡的網路來回，不要看。第一行的 `Index Scan` / `Seq Scan` 是「翻目錄」還是「一頁一頁翻」。
+
 ### 觀念 1：ORM 底下就是 SQL
 
 `DB_ECHO=true` 之後登入一次，你會看到大概四句（每句下面跟著一行 `[generated in ...] (參數...)`，那是真正送進去的值）：
@@ -3364,7 +3371,7 @@ COMMIT
 
 1. `EXPLAIN ANALYZE` 的第一行，`Index Scan` 和 `Seq Scan` 分別長什麼樣，`Execution Time` 差多少
 2. 拔掉 `ix_refreshtoken_token_hash` 之後，同一句查詢慢了幾倍
-3. 兩個視窗的 `FOR UPDATE`，第二個視窗是在哪一刻解開的
+3. 兩個分頁的 `FOR UPDATE`，第二個分頁是在哪一刻解開的（B 的 `finished - started` 是幾秒）
 4. 第 4 步的 JOIN 一句和「21 句」在來回次數上的差別
 5. 最後 `user` 和 `refreshtoken` 的筆數回到實驗前
 

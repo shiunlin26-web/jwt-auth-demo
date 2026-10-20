@@ -80,20 +80,34 @@ LIMIT 20;
 -- ============================================================
 -- 5. 交易與鎖：refresh 的 with_for_update() 在擋什麼
 -- ============================================================
--- 這一段要「兩個視窗」同時做（兩個 psql，或 Neon SQL Editor 開兩個分頁）。
--- 視窗 A：
---   BEGIN;
---   SELECT * FROM refreshtoken WHERE token_hash = md5('lab-777') FOR UPDATE;
---   （先不要 COMMIT）
--- 視窗 B：
---   SELECT * FROM refreshtoken WHERE token_hash = md5('lab-777') FOR UPDATE;
---   → 會卡住不動，直到 A 做 COMMIT 或 ROLLBACK。
--- 視窗 A：
---   UPDATE refreshtoken SET revoked = true WHERE token_hash = md5('lab-777');
---   COMMIT;
--- 視窗 B 這時才拿到資料，而且看到的是 revoked = true。
--- 要看什麼：這就是關卡 1 的「同一個 token 同時來兩個請求，第二個會等第一個做完才讀」。
--- 沒有 FOR UPDATE，兩個請求會同時讀到 revoked = false，兩個都換發成功，重複使用偵測失效。
+-- 情境：兩個店員同時拿到同一張會員卡（同一個 refresh 請求同時來兩次），都想「作廢舊卡、發新卡」。
+-- 沒有鎖，兩個人都看到「還沒作廢」，各發一張新卡，第 1 關的防盜就破功。FOR UPDATE = 「我在處理這一列，別人等我做完」。
+--
+-- 這一段要「兩個分頁」同時做：Neon SQL Editor 開兩個瀏覽器分頁（都切到 jwtdemo_test），叫 A 和 B。
+-- ⚠️ Neon 的編輯器每按一次 Run 就自動結束交易，所以不能用 BEGIN ... COMMIT 分成好幾次 Run。
+--    下面把「鎖住、睡 40 秒、作廢、提交」包在一個 DO 區塊裡，一次 Run 就是一筆交易。
+--
+-- 先確認那一列存在（回 0 代表假資料被清掉了，重跑第 2 段）：
+SELECT count(*) FROM refreshtoken WHERE token_hash = md5('lab-777');
+
+-- 分頁 A：貼這段按 Run，它會跑 40 秒（鎖住那一列 → 睡 40 秒 → 作廢 → 提交）
+DO $$
+BEGIN
+  PERFORM 1 FROM refreshtoken WHERE token_hash = md5('lab-777') FOR UPDATE;
+  PERFORM pg_sleep(40);
+  UPDATE refreshtoken SET revoked = true WHERE token_hash = md5('lab-777');
+END $$;
+
+-- 分頁 B：A 按下 Run 之後馬上切過來按 Run（這句可以先貼好）
+-- 要看什麼：B 會卡住，直到 A 的 40 秒結束才回來。結果三欄：
+--   started  = B 送出的時間；finished = B 拿到結果的時間；兩者相減就是 B 等鎖的秒數（應該是二三十秒）
+--   revoked  = true：B 等到的是 A「改完之後」的值，不是它送出時的 false
+SELECT now() AS started,
+       (SELECT revoked FROM refreshtoken WHERE token_hash = md5('lab-777') FOR UPDATE) AS revoked,
+       clock_timestamp() AS finished;
+
+-- 這就是 routes/auth.py 裡 refresh 的 .with_for_update()：第二個請求會等第一個做完，而且看到「已作廢」而被擋。
+-- 沒有它，兩個請求同時讀到 revoked = false，兩個都換發成功，重複使用偵測失效。
 -- 玩完把它改回來：
 UPDATE refreshtoken SET revoked = false WHERE token_hash = md5('lab-777');
 
