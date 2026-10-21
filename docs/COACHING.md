@@ -20,6 +20,8 @@
 - **開始前先確認環境**：跑過 `scripts\setup.ps1`、前後端起來、`uv run pytest -q` 綠。沒跑過就先帶他跑（`README.md`「每次開機怎麼把專案跑起來」）。
 - **先名詞、再在哪看、最後邏輯**。程式邏輯不用逐行講（`HANDOFF.md` 第 1 節的程度校準）。新名詞第一次出現就解釋（Bearer、Origin、Path、系統表），不要先用後解釋。
 - **一次只有一個主題**。步驟之間不要塞額外知識，想補充的留到那關收尾。
+- **問之前先確認每個問的東西都有答案值得講**（2026-10-21：問了罐子的「兩個 FALSE」，答完才說第一個不重要，學習者很火）。一次只問有意義的那一兩格。
+- **名詞先定義再用，而且每個關鍵名詞都要有一個比喻**（2026-10-21：雜湊、SHA-256、bcrypt、鹽、簽章沒先講就拿來用，學習者整關跟著亂，要求「三歲小孩都要能聽懂」）。同一類東西有好幾個時（兩張票、三種工具），每次提到都要指名是哪一個，不要只說「票」。
 - **他貼的輸出亂掉**（兩個指令疊在一起、終端機把上一個的尾巴接上來）：先說「結果是對的，前面是終端機疊在一起」，直接講，不要叫他重跑。
 - **他說「看不懂」**：不要整段換個說法重講。問「哪一行」，或從他最後貼的輸出重新開始，一次講一行。
 - **他說「我沒看到你說的東西」**：相信他，是你記錯了。改成用指令、數字或檔案內容驗證，不要再描述畫面。
@@ -89,21 +91,33 @@
 
 ### 關卡 1：Refresh token 輪替與重複使用偵測
 
-**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（28）、`revoke_all_refresh_tokens`（54）、`login`（119）、`refresh`（159）；`backend/security.py` 的 `hash_token`、`create_refresh_token`；`backend/models.py` 的 `RefreshToken`；`frontend/src/api/client.ts` 的 response 攔截器與 `refreshPromise`
+**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（28）、`issue_refresh_token`（41）、`revoke_all_refresh_tokens`（54）、`login`（119）、`refresh`（159）；`backend/security.py` 的 `_hash_password_sync`（19）、`create_access_token`（44）、`decode_access_token`（55）、`create_refresh_token`（66）、`hash_token`（75）；`backend/models.py` 的 `RefreshToken`；`frontend/src/api/client.ts` 的 `refreshPromise`（42～55）與 response 攔截器（74～97）
 
 **前置**：後端跑起來、帳號存在。這關和關卡 19 共用同一套 curl，先帶哪一關都可以。
 
+**先講名詞，再開始**（2026-10-21 帶做時沒先講，後面全部跟著亂）：
+- **雜湊**：碎紙機加印表機。丟一張紙進去，出來一條固定長度的亂碼；同一張紙永遠同一條；從亂碼拼不回紙。
+- **SHA-256**：快的雜湊機，同樣輸入永遠同樣輸出，64 字。給 refresh token 用，因為票是隨機的猜不到、而且要拿雜湊當 key 查表。
+- **bcrypt**：給密碼用的雜湊機，慢（成本 12 = 揉 4096 遍 = 約 0.1 秒一次）而且每次撒一把隨機的「鹽」，同一個密碼每次結果不同。輸出固定格式 `$2b$12$` + 22 字鹽 + 31 字結果，鹽不是祕密，直接寫在裡面；驗證時先用 email 找到人，從他那串讀出鹽、重算、比對。慢是為了讓小偷猜很多次划不來（你付一次 0.1 秒，他付幾百萬次）；鹽是為了讓同一個密碼在不同人那裡結果不同、事先算好的表沒用。
+- **簽章**（access token 用的）：不是加密。內容誰都看得懂，但改一個字就對不上；只有拿 `JWT_SECRET` 的後端算得出正確簽章。
+- **三樣東西三種工具**：密碼 → bcrypt（存起來比對）；refresh token → SHA-256（存起來查表）；access token → 簽章（不存，驗簽）。
+- **每次說「票」都要指名是哪張**。整關的罐子、cookie、名冊、作廢、刪除、reused、Invalid 全部是 **refresh token** 的事；access token 沒有「舊的」這回事，過期就丟。
+
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `curl.exe -s -c jar.txt localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` 然後 `type jar.txt` | 罐子裡一行 `refresh_token` 加一串值 | 這就是瀏覽器偷偷幫你存的 cookie，`-c` 是叫 curl 當瀏覽器 |
-| 2 | `curl.exe -v -b jar.txt -c jar.txt -X POST localhost:8000/api/auth/refresh` | `>` 有 `Cookie: refresh_token=舊值`；`<` 有 `set-cookie: refresh_token=新值`；`* Replaced cookie` | 舊票送出去、新票收回來，兩張不一樣，這叫輪替。`routes/auth.py` 的 `refresh` |
-| 3 | 把步驟 1 的舊值存回另一個罐子：`(Get-Content jar.txt) -replace '新值', '舊值' \| Set-Content old.txt`，再 `curl.exe -s -i -b old.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Refresh token reused` | 舊票在資料庫裡是 `revoked = true`，又被拿來用，後端當成被偷 |
-| 4 | `curl.exe -s -i -b jar.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Invalid refresh token` | 剛才還有效的新票也沒了：`revoke_all_refresh_tokens` 把這個使用者全部的票刪光（`routes/auth.py` 第 54 行附近）。「寧可多登入一次，不讓小偷繼續用」 |
-| 5 | Neon：`SELECT count(*) FROM refreshtoken WHERE user_id = (SELECT id FROM "user" WHERE email = 't@test.com');` | `0` | 和步驟 4 對上 |
-| 6 | 重新登入後再查：`SELECT token_hash, revoked FROM refreshtoken WHERE user_id = ... ;` | 一筆，`token_hash` 是 64 字元、和 cookie 的值不一樣 | 資料庫存的是雜湊，被倒出來也不能直接用 |
-| 7 | **前端 single-flight**：`backend\.env` 加 `JWT_EXPIRE_MINUTES=1`，重啟後端，登入後等 1 分鐘，DevTools → Console 貼 `const m = await import("/src/api/auth.ts"); await Promise.all([m.getMe(), m.getMe(), m.getMe()]);` | Network：3 個 `me` 401 → **1 個** `refresh` 200 → 3 個 `me` 200 | 三個請求同時過期，只換一次票。`api/client.ts` 的 `refreshPromise`。玩完刪掉 `.env` 那行 |
+| 1 | `curl.exe -s -c jar.txt localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` 然後 `type jar.txt` | JSON 有 `access_token`；罐子最後一行 `#HttpOnly_localhost FALSE /api/auth FALSE <秒數> refresh_token <43 字>` | 罐子 = curl 存 cookie 的檔案，模擬瀏覽器。只問 `/api/auth`（Path：只有打這路徑才帶）和**第二個** `FALSE`（Secure 沒開，http 也送；正式是 TRUE）。第一個 FALSE 是 curl 內部欄位，**不要問**。43 字 = `secrets.token_urlsafe(32)`：32 個隨機 byte 用 base64 印成可讀的字（3 byte → 4 字，所以 43）。`set-cookie` = 後端請瀏覽器把這張存起來 |
+| 2 | `curl.exe -v -b jar.txt -c jar.txt -X POST localhost:8000/api/auth/refresh` | `>` 有 `Cookie: refresh_token=舊值`；`<` 有 `set-cookie: refresh_token=新值`；`* Replaced cookie` | `-b`/`--cookie` 從罐子帶出去、`-c`/`--cookie-jar` 存回來，是 curl 自己的參數（`curl.exe --help all \| Select-String cookie`）。後端五段：`Cookie(...)` 取票（162）→ `hash_token` 查表、`with_for_update` 鎖（174～178）→ 舊的 `revoked = True`（211）→ `issue_refresh_token` 發新的（212）→ `set_refresh_cookie` + 新 access token（215～219）。瀏覽器平常同時做 `-b` 和 `-c`，自動的 |
+| 3 | 舊值已不在罐子裡，用字串帶：`curl.exe -s -i -b "refresh_token=<步驟 1 的 43 字>" -X POST localhost:8000/api/auth/refresh` | `401`，`Refresh token reused` | 票**還在**表裡，`revoked = true` 又被送來 → 當成被偷 → `revoke_all_refresh_tokens` 把這個人全部的 refresh token **刪掉**（61 行是 `delete`，不是標記）。先讓他猜：罐子裡的新票還能用嗎 |
+| 4 | `curl.exe -s -i -b jar.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Invalid refresh token` | 票**不在**表裡（182 行）。兩句 401：`reused` = 還在但蓋章，`Invalid` = 查不到。輪替是標記（留證據），重用偵測是刪除（全清） |
+| 5 | Neon SQL Editor **先確認選的是 `DATABASE_URL` 那個資料庫**（關卡 18 用的是 `TEST_DATABASE_URL`，Editor 會停在那裡；`Get-Content backend\.env \| Select-String DATABASE_URL` 看資料庫名）。跑 `SELECT count(*) FROM refreshtoken WHERE user_id = <他的 id>;` | `0` | 和步驟 4 對上。資料庫不對會查到「都沒有」 |
+| 6 | 重新登入（步驟 1），再查 `SELECT token_hash, revoked, created_at FROM refreshtoken WHERE user_id = <id>;`，然後在 `backend` 跑 `uv run python -c "from security import hash_token; print(hash_token('<罐子裡的 43 字>'))"` | 一筆 `revoked = f`，`token_hash` 64 字；自己算出來的跟資料庫**一模一樣** | 資料庫只有 SHA-256 亂碼，沒有原值。後端收到 cookie 就是這樣找到那筆：原值 → SHA-256 → `WHERE token_hash =`。`hashlib.sha256(token.encode()).hexdigest()`：文字變 byte → 雜湊 32 byte → 印成 64 個 16 進位字 |
+| 7 | **前端 single-flight**。不要等 token 過期（TanStack 的自動重抓會搶先換票）：瀏覽器登入，DevTools Network 清空，Console 第一次貼要先打 `allow pasting` Enter，再貼 `const s = await import("/src/auth/authStore.ts"); const m = await import("/src/api/auth.ts"); s.useAuthStore.getState().setAccessToken("bad"); await Promise.all([m.getMe(), m.getMe(), m.getMe()]);` | Network 照順序：`me 401, me 401, me 401, refresh 200, me 200, me 200, me 200` | `client.ts:42` 的 `refreshPromise`：第一個 401 發 refresh 並把「進行中的 Promise」存進變數；第二、三個看到不空就不發，一起等；`finally` 清空。改成 `if (true)` 會變 3 個 refresh、後兩個 `reused`、整排刪掉、`clearSession` 登出。用時間軸表（t0～t5）講 A/B/C 三個請求 |
+| 8 | **access token 怎麼生、怎麼驗**（在 `backend`）：`uv run python -c "from security import create_access_token, decode_access_token; t = create_access_token(9); print(t); print(decode_access_token(t))"`，再跑 `... decode_access_token(t[:-1] + 'x')"` | 第一個印 `eyJ...` 和 `{'sub': '9', 'iat': ..., 'exp': ...}`；第二個最後一行 `InvalidSignatureError` | `jwt.encode`：標頭、payload 各 base64，兩段 + `JWT_SECRET` 算 HMAC-SHA256 當第三段。`jwt.decode`：用同一個祕密重算簽章比對、看 `exp`、`require` exp/sub。不查資料庫，所以快，也所以偷了只能等過期。呼叫它的是 `dependencies.py` 的 `get_current_user` |
+| 9 | **bcrypt 鹽每次不同**：`uv run python -c "from security import _hash_password_sync as h; print(h('Passw0rd!x')); print(h('Passw0rd!x'))"` | 兩行都 `$2b$12$` 開頭 60 字，後面完全不同 | 同一個密碼兩次結果不同 = 鹽每次重擲 = 不能拿來查表 = 所以密碼是「email 找人再比對」，票是「雜湊當 key 查表」。`$2b$12$` 的 12 是成本 |
 
-**收尾**：換票會輪替 / 舊票重用是警報 / 警報響了全部作廢 / 前端同時只換一次。
+**收尾一句話**：兩張票分工，短的常換、長的能作廢；換票舊票蓋章，舊票再現整排刪掉，前端保證同時只換一次。密碼猜得到所以要慢要鹽；票猜不到所以要快要固定；access token 不存所以用簽章。
+**收尾要講到**：refresh token 的一生（登入發、換票蓋章發新、舊的再現整排刪、本人查不到重登）/ 兩句 401 的差別 / 兩張票對照表（活多久、放哪、怎麼送、資料庫有沒有、怎麼驗、被偷怎樣）/ 三樣東西三種工具 / 偷到 bcrypt 雜湊不能直接登入，只能離線猜，外洩時全部重設是慣例。
+**他誤解過的地方（2026-10-21）**：「做 SHA-256 查表的是 access token」（是 refresh token；access token 不存資料庫）；「`Path=/` 會每個請求都換票」（只是每個請求都帶，`/api/me` 不讀它，行為不變、曝光變多）；「舊票被標記所以查不到」（重用偵測是刪除不是標記）；「鹽是扣掉密碼算出來的」（鹽直接寫在那串前面）；「加密」vs「簽章」；三個 refresh 裡「都拿舊票」（第一個成功，後兩個才是舊票）。
 **動手玩**：`LEARNING.md` 關卡 1 的 1、3（用關卡 16 的 `npm test` 也看得到）。
 
 ### 關卡 2：設定管理

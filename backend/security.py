@@ -8,6 +8,17 @@ import jwt
 
 from config import settings
 
+# 【關卡 1】這個檔案保護三樣東西，各用一種工具，不要混：
+# - 密碼        → bcrypt：慢（成本 12 = 揉 4096 遍 ≈ 0.1 秒）+ 每次隨機撒鹽。存起來比對用。
+#                 密碼是人想的、字典猜得到，所以要慢（小偷猜一次也要 0.1 秒）、要鹽（同一個密碼
+#                 在不同人那裡結果不同，事先算好的表沒用）。登入是「先用 email 找到人，再比對」，
+#                 所以不需要拿雜湊當 key，每次結果不同沒關係。
+# - refresh token → SHA-256：快、同樣輸入永遠同樣輸出。存起來當查表的 key。
+#                 票是 32 個隨機 byte，猜不到，不需要慢；而且收到 cookie 要靠雜湊 WHERE 出那一列，
+#                 必須固定，bcrypt 每次不同查不到。
+# - access token  → HMAC 簽章（JWT）：不存資料庫。內容誰都看得懂（不是加密），但改一個字簽章就
+#                 對不上；只有拿 JWT_SECRET 的後端算得出正確簽章。驗的時候重算簽章比對 + 看 exp。
+
 # 【關卡 13】bcrypt 刻意很慢（一次約 50～300 毫秒），而且是純 CPU 運算。
 # 直接在 async 函式裡呼叫，整個 event loop 會被卡住：那幾百毫秒內後端不能處理任何其他請求，
 # 包含 /api/ping。十個人同時登入，第十個人要等前面九個算完。
@@ -16,6 +27,9 @@ from config import settings
 
 
 def _hash_password_sync(password: str) -> str:
+    # gensalt() 預設成本 12，每次呼叫重擲一把鹽。輸出固定格式 60 字：
+    #   $2b$12$ + 22 字的鹽 + 31 字的結果
+    # 鹽不是祕密，就寫在前面；checkpw 會自己從這串讀出鹽、重算、比對後 31 字。
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
