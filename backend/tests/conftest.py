@@ -53,7 +53,9 @@ async def clean_database():
             _tables_ready = True
         # TRUNCATE：清空資料；RESTART IDENTITY：id 從 1 重新算；CASCADE：連帶清掉有關聯的資料
         await conn.execute(
-            text('TRUNCATE TABLE outboxevent, refreshtoken, "user" RESTART IDENTITY CASCADE')
+            text(
+                'TRUNCATE TABLE processedevent, outboxevent, refreshtoken, "user" RESTART IDENTITY CASCADE'
+            )
         )
     yield  # yield 之前是「測試前」要做的事，之後是「測試後」（這裡不用做什麼）
 

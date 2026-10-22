@@ -42,3 +42,15 @@ class OutboxEvent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # worker 的查詢條件是 published_at IS NULL，要有索引，不然表大了每次輪詢都全表掃描（關卡 18）
     published_at: datetime | None = Field(default=None, index=True)
+
+
+class ProcessedEvent(SQLModel, table=True):
+    """【關卡 24】消費端處理過的事件 id（冪等用，說明見 outbox.py 的 handle_event）
+
+    主鍵就是事件 id：同一筆事件第二次 INSERT 會撞主鍵，這就是「處理過了」的判斷。
+    真實世界這張表在消費端自己的資料庫裡；這裡共用同一個資料庫是為了簡單。
+    """
+
+    id: uuid.UUID = Field(primary_key=True)
+    topic: str
+    processed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -21,6 +21,10 @@
 #   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose -f infra/compose.yaml --profile observability up -d --build --wait
 #   docker compose -f infra/compose.yaml --profile observability logs otel-collector   # 看每個請求的 span 與底下的 SQL
 #
+# 【關卡 24】訊息（profile messaging）：多起 Redpanda（Kafka 相容）、outbox worker、consumer：
+#   docker compose -f infra/compose.yaml --profile messaging up -d --build --wait
+#   註冊一個帳號之後：docker compose -f infra/compose.yaml --profile messaging logs worker consumer   # published → consumed
+#
 # 這裡的 postgres 只給本機和 CI 用。線上的資料庫是 Neon，不在 compose 裡。
 
 name: jwt-auth-demo
@@ -47,7 +51,9 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   backend:
-    # 同一個 Dockerfile，和 CI、Render 用的一模一樣；context 相對於這個檔案所在的資料夾
+    # 同一個 Dockerfile，和 CI、Render 用的一模一樣；context 相對於這個檔案所在的資料夾。
+    # image 取名是為了 worker、consumer 共用同一個 image，不用各 build 一次
+    image: jwt-auth-demo-backend:local
     build:
       context: ../backend
     environment:
@@ -128,6 +134,76 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  # ---------- 【關卡 24】訊息：只在 --profile messaging 時啟動 ----------
+  # Redpanda：Kafka 相容的 broker，一個 binary、不用 ZooKeeper，本機學習最省事；程式碼和真的 Kafka 一樣用 aiokafka
+  redpanda:
+    image: redpandadata/redpanda:v26.2.5
+    profiles: ["messaging"]
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container # 開發模式：單機、資源少、不做正式環境的調校
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --kafka-addr
+      - internal://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092 # 告訴客戶端「用這個名字連我」，compose 內部網路用服務名
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # topic 當成設定建好（正式環境也是這樣：topic 的 partition 數、保留時間是基礎設施的一部分，不靠程式偷偷自動建）
+  redpanda-init:
+    image: redpandadata/redpanda:v26.2.5
+    profiles: ["messaging"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command:
+      - rpk topic create user.registered --brokers redpanda:9092 || rpk topic describe user.registered --brokers redpanda:9092
+
+  # worker：同一個 image，跑 python worker.py。等後端 healthy 是因為遷移在後端啟動時跑，表要先有
+  worker:
+    image: jwt-auth-demo-backend:local
+    build:
+      context: ../backend
+    profiles: ["messaging"]
+    command: ["python", "worker.py"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo
+      JWT_SECRET: ${JWT_SECRET:-compose-only-secret-not-for-production-0123456789abcdef}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      backend:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+
+  # consumer：收事件、做事（這裡只記 log）、同一筆只做一次
+  consumer:
+    image: jwt-auth-demo-backend:local
+    build:
+      context: ../backend
+    profiles: ["messaging"]
+    command: ["python", "consumer.py"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo
+      JWT_SECRET: ${JWT_SECRET:-compose-only-secret-not-for-production-0123456789abcdef}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      backend:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
 
 volumes:
   pgdata:
