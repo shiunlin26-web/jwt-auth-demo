@@ -110,3 +110,41 @@ Zustand 管「前端自己的狀態」：token、初始化了沒、提示文字�
 
 **Q31：為什麼有了 bcrypt 還要登入頻率限制？客戶端 IP 怎麼拿？**
 bcrypt 讓每次猜密碼要 100 毫秒，但攻擊者可以開很多連線同時猜，而且每次都在燒你的 CPU。頻率限制在 bcrypt 之前就擋掉。IP 不能用 `request.client.host`（那是最後一層代理），也不能用 `X-Forwarded-For` 最左邊（使用者自己能填），要從右邊跳過已知的代理層數取下一段。詳見 `LEARNING.md` 關卡 17 觀念 2。
+
+## 基礎設施（關卡 21～25）
+
+**Q32：compose 和 Kubernetes 都是「描述整套」，差在哪？**
+compose 管一台機器，Kubernetes 管一群機器。兩邊描述的是同一件事（誰先誰後、連哪個資料庫、環境變數給什麼），image 也是同一個；k8s 多了副本數、探針、滾動更新、資源上限這些「一群機器才需要」的字。先會 compose，k8s 的清單就只是多幾個欄位。詳見 `TOUR.md` 第 18 站的對照表。
+
+**Q33：healthcheck 為什麼不能只看「容器起來了」？**
+容器起來了不代表能服務：後端還在跑遷移、還沒開始聽 port。healthcheck 定義「能服務」是什麼（打 `/api/ping` 回 200），`depends_on: service_healthy`、`up --wait`、k8s 的 readiness 都靠這個定義。沒有它，`up` 回來的那一秒 curl 是 connection refused。詳見 `LEARNING.md` 關卡 21 觀念 2。
+
+**Q34：有了 E2E，為什麼還留 Vitest 的元件測試？**
+兩種驗的東西不同。元件測試快（毫秒）、多、驗「畫面在某個回應下對不對」；E2E 慢（秒）、少、驗「使用者這條路走得通」，而且只有真瀏覽器能驗 cookie 真的帶上。便宜的檢查寫成測試、貴的檢查路徑要少，兩種都要。詳見 `LEARNING.md` 關卡 21 觀念 3。
+
+**Q35：指標的 label 為什麼不能放 user id 或實際路徑？**
+每一組不同的 label 值就是一條時間序列。`/todos/123` 每個 id 一條、user id 每個人一條，Prometheus 會被撐爆（cardinality 爆炸）。所以 route 用路由樣板，亂打的路徑一律記 `unmatched`。詳見 `LEARNING.md` 關卡 22 觀念 2。
+
+**Q36：為什麼看 p95 不看平均？**
+平均 50 毫秒可能是「大家都 50」，也可能是「95% 的人 10 毫秒、5% 的人 800 毫秒」，後者才是要修的，平均看不出來。耗時用直方圖存，Grafana 用 `histogram_quantile` 算 p95。詳見 `LEARNING.md` 關卡 22 觀念 3。
+
+**Q37：為什麼用 OpenTelemetry，不直接用某家的 SDK？**
+程式只產生 span、用 OTLP 送出去，收的那頭是本機的 collector、Grafana Cloud 還是 Datadog，只改環境變數。用某家 SDK 換廠商就要改程式。詳見 `LEARNING.md` 關卡 22 觀念 5。
+
+**Q38：零停機靠什麼？少一個會怎樣？**
+三件事：`maxUnavailable: 0`（舊的等新的 Ready 才關）、readiness 探針（Ready 有定義）、`preStop` 睡幾秒（等 Service 的名單更新完才關）。少第一個換版時容量會掉；少第二個容器起來就收流量、使用者看到 500；少第三個關 pod 的那一兩秒請求被拒。CI 的 `k8s` job 把它數出來：換版期間 80 次全部 200。詳見 `LEARNING.md` 關卡 23 觀念 4。
+
+**Q39：Kubernetes 的遷移為什麼要用 Job，Render 卻放在啟動指令？**
+Render 一個實例，遷移只跑一次。k8s 兩個副本同時啟動、同時跑遷移會打架。Job 讓遷移只有一個執行者、跑完就結束，Deployment 只跑伺服器。詳見 `LEARNING.md` 關卡 23 觀念 3。
+
+**Q40：註冊成功為什麼不直接送 Kafka，要先寫 outbox 表？**
+Kafka 不參與資料庫的交易。先 commit 再送，送之前當掉事件就丟了；先送再 commit，commit 失敗信已經寄了。outbox 把「要送」變成資料庫裡的一列，和使用者同一個交易、同生共死，真的送出去是 worker 的事。詳見 `LEARNING.md` 關卡 24 觀念 1。
+
+**Q41：at-least-once 會重複，怎麼辦？**
+收的那邊冪等：`processedevent` 的主鍵就是事件 id，第二次 INSERT 撞主鍵就是處理過了，跳過。重複送很便宜，用一個主鍵擋掉就好；跨系統的 exactly-once 很貴而且邊界很多。詳見 `LEARNING.md` 關卡 24 觀念 2。
+
+**Q42：線上沒有 Kafka、沒有 Prometheus、沒有 Kubernetes，這幾關線上到底做了什麼？**
+程式和資料庫已經是「可以接」的狀態：outbox 表在 Neon 裡、worker 在 web 程序裡當背景 task 把事件印到 log；`/metrics` 和追蹤是開關，設環境變數就開。免費方案的限制在管道和平台，不在設計。證明它會動的是 CI 的五個 job，不是線上。詳見 `ARCHITECTURE.md` 第 2 節。
+
+**Q43：所以要把線上從 Render 搬到 Kubernetes 嗎？**
+不用。一個服務、一個人、免費額度夠用，Render 幫你做的事就是關卡 23 寫出來的那些。k8s 的價值在很多服務、很多人、要自己控制網路與排程的時候，代價是清單和叢集要有人養。這幾關的目的是知道平台背後是什麼、換平台時知道看哪些字。詳見 `LEARNING.md` 關卡 23 Q5。

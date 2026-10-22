@@ -16,6 +16,11 @@ on:
       - "infra/**"
       - "backend/**"
       - "frontend/e2e/**"
+      # E2E 也會被這幾個檔影響：套件版本（Dependabot 升 Playwright）、Playwright 設定、Vite 的代理
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "frontend/playwright.config.ts"
+      - "frontend/vite.config.ts"
       - ".github/workflows/infra.yml"
   workflow_dispatch:
 
