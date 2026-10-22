@@ -40,6 +40,7 @@ git push 分支 ──▶ GitHub Actions
                    main ──▶ Render Auto-Deploy（CI 綠才部署；容器啟動先 alembic upgrade head 再 uvicorn）
                         ──▶ Vercel（前端 build + 部署）
                    /api/health 的 version = 剛推的 commit、migration = 最新遷移編號 ← 部署後第一件事就是看這個
+                   （選配 25-D）deploy.yml：CI 綠 → POST Render Deploy Hook → 等 version 對上才綠，Environments 分頁留紀錄
 ```
 
 同一個 image 的三種跑法：Render（一個實例，遷移在啟動指令）、compose（本機整套）、Kubernetes（遷移是 Job，Deployment 2 副本零停機滾動更新、`rollout undo` 退版、壞 image 被 readiness 擋住）。

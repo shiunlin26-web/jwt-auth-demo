@@ -625,3 +625,23 @@
 
 **收尾**（你看到的 → 對應的觀念）：註冊回應沒變慢 → 慢的事不在請求裡 / outbox 表一列、`published` 從 f 變 t → 事件和使用者同一個交易，送出是另一件事 / 三個一樣的 uuid → 事件 id 貫穿整條路 / `duplicate` 且筆數還是 1 → at-least-once + 冪等 / consumer 停了再回來補上 → 訊息在 broker 裡等，讀寫解耦 / `transport=log` → 沒有 Kafka 也走得通，差一個環境變數。收尾後問「哪一步要再講一次」。
 **動手玩**：`LEARNING.md` 關卡 24 的 1（把 enqueue 搬到 commit 之後）、3（worker 開兩個）。
+
+### 關卡 25：地圖與交接（ARCHITECTURE、CHAIN v2、部署追蹤）
+
+**搭配看的程式**：`docs/ARCHITECTURE.md`（整份）；`docs/CHAIN.md` 環 8～11；`README.md` 開頭；`.github/workflows/deploy.yml`（只在做選配的 25-D 時）
+
+**前置**：關卡 21～24 都帶過。這關不用 Docker，瀏覽器和一個全新的 AI 對話就夠。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | 開 `docs/ARCHITECTURE.md` 第 1 節，四張圖各看兩分鐘，合上檔案 | 能用自己的話說四條路徑各經過哪些東西 | 請求：瀏覽器 → Vercel → Render → Neon；部署：push → CI → main → Render/Vercel；事件：register → outbox → worker → Kafka/log → consumer；觀測：log、指標、追蹤互相找。說不出哪條就回去看那張圖 |
+| 2 | 第 2 節的表，挑三塊問「怎麼證明它會動」 | 每塊都答得出「哪個 CI job 的哪一行」或「線上哪個網址」 | 這張表的用途：面試官問「你怎麼知道它真的能跑」，答案永遠是一個 job 或一個網址，不是「我測過」 |
+| 3 | 第 6 節的表，先填「outbox 與 Kafka（24）」那格，三句：解決什麼、怎麼證明、下一步 | 三句話，不看筆記講得順 | 範例在表下面，不要照抄。講完請他隔天再講一次 |
+| 4 | 填完其餘七格（可以分幾天） | 每格三句 | 這就是面試的腳本。commit 進 repo（`docs：ARCHITECTURE 第 6 節 60 秒說法`） |
+| 5 | **交接演練**：開一個全新的 AI 對話，只貼 `ARCHITECTURE.md` 全文，問它「這個專案的四條路徑各經過哪些東西？每一塊怎麼證明會動？」 | 它答得出來，而且和你第 1 步說的一樣 | 答不出來的那塊，就是地圖寫得不夠清楚的地方，改地圖不是改記憶 |
+| 6 | 開 `docs/CHAIN.md` 環 8，把「給 AI 的任務」整段讀一遍 | 能指出這一段對應範例專案的哪些檔案 | 練習專案做到環 8 時就是把這段貼給 AI；跟技術棧無關，所以換語言也能用 |
+| 7 | （選配，25-D）照 `LEARNING.md` 關卡 25「⚠️ 開始前」做：Render 關 Auto-Deploy、複製 Deploy Hook、GitHub 加 secret `RENDER_DEPLOY_HOOK` | 下一次合併到 main 後，Actions 多一個 **Deploy** workflow 綠的；repo 的 **Environments** 分頁出現 `production`，列出這次部署和 commit | 部署從「Render 自己做」變成「GitHub 上看得到的一步」：CI 綠 → 叫 Render → 等 `/api/health` 的 `version` 對上。沒做這步也完全不影響 |
+| 8 | （選配）展開 Deploy 的「等線上 /api/health 的 version 變成這次的 commit」 | 幾行 `第 N 次：線上 version=舊的，等 <7 碼>…`，最後 `✅ 線上版本已經是 <7 碼>` | RUNBOOK 第 0 節的三件事（db、migration、version）這裡自動檢查了 |
+
+**收尾**（你看到的 → 對應的觀念）：四張圖 → 整條鏈用「路徑」不用「關卡」講 / 每塊一個 job 或網址 → 證明不是形容詞 / 60 秒說法 → 面試就是交接 / 新 AI 只讀地圖就能說 → 文件寫給沒有記憶的人 / Deploy workflow 綠 → 部署也是可以驗證的一步。收尾後問「哪一步要再講一次」。
+**動手玩**：`LEARNING.md` 關卡 25 的 1（60 秒說法）、2（交接演練）。

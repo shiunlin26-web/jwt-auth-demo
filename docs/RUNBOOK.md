@@ -12,6 +12,8 @@
 
 `version` 對不上 = Render 還沒部署完，或 Auto-Deploy 沒觸發（見 DEBUGGING.md）。
 
+有啟用關卡 25-D 的部署追蹤時（`.github/workflows/deploy.yml`），Actions 的 **Deploy** workflow 綠 = 這三件事已經自動檢查過（它等到 `version` 對上、`db` 是 ok 才綠）；紅就看它最後幾行和 Render 的 Events。
+
 ## 1. 網站掛了，先做什麼
 
 1. **分段確認**：後端直接打 `/api/ping` → 後端 `/api/health` → 前端網址的 `/api/ping` → 登入。哪一段先壞就查哪一段。
