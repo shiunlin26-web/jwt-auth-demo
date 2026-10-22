@@ -65,6 +65,7 @@
 | 21 | docker compose 與 Playwright E2E | 一個檔案起整套、healthcheck 與 depends_on、真瀏覽器走主路徑 | ✅ 完成 |
 | 22 | 指標與追蹤 | Prometheus 拉 /metrics、label 與 cardinality、p95、儀表板進 git、OpenTelemetry 與 collector、log ↔ trace | ✅ 完成 |
 | 23 | Kubernetes | Deployment 與探針、Service、遷移 Job、ConfigMap 與 Secret、零停機滾動更新、rollout undo、kustomize | ✅ 完成 |
+| 24 | 非同步訊息 | transactional outbox、at-least-once 與冪等、Kafka（Redpanda）、SKIP LOCKED、線上 inline worker | ✅ 完成 |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -4184,6 +4185,182 @@ port-forward 黏在一個 pod 上，那個 pod 換版被關它就斷了，量到
 <summary>Q5：所以要把線上從 Render 搬到 k8s 嗎？</summary>
 
 不用。一個服務、一個開發者、免費額度夠用，Render 幫你做的事就是這關寫出來的這些，它做得很好。k8s 的價值在很多服務、很多人、要自己控制網路與排程的時候；代價是這份清單和背後的叢集要有人養。這關的目的是「知道 Render 背後是什麼、換平台時知道要看哪些字」，不是搬家。面試被問「你用過 k8s 嗎」，答案是這個 job 和這份清單。
+
+</details>
+
+---
+
+## 關卡 24：非同步訊息（transactional outbox → Kafka、冪等）✅
+
+**改動的檔案**：`backend/models.py` 加 `OutboxEvent`、`ProcessedEvent`（遷移 `0005`、`0006`）；新增 `backend/outbox.py`、`worker.py`、`consumer.py`、`tests/test_outbox.py`、`tests/test_register_cap.py`；改 `routes/auth.py`（`register`：上限檢查、`flush` → `enqueue` → `commit` → `wake_worker`）、`main.py`（`lifespan` 的 inline 模式）、`config.py`（`KAFKA_BOOTSTRAP_SERVERS`、`OUTBOX_POLL_SECONDS`、`OUTBOX_WORKER`、`MAX_USERS`）、`pyproject.toml`（`aiokafka`）、`.env.example`、`render.yaml`（三個變數）；`infra/compose.yaml` 加 profile `messaging`（redpanda、redpanda-init、worker、consumer）；`infra.yml` 加 `messaging` job；`tests/conftest.py` 多清兩張表。
+
+**一句話**：註冊成功要通知別的系統時，不在請求裡做；先把「待送事件」和使用者寫進同一個交易，再由 worker 送出。Kafka 是送出的管道之一，重點是 outbox 和冪等。
+
+### 觀念 1：為什麼不在請求裡直接做
+
+| 做法 | 哪裡會壞 |
+| --- | --- |
+| 請求裡直接寄信 | 寄信服務掛了，使用者註冊失敗；寄信慢，註冊就慢 |
+| 先 commit 使用者，再送事件 | 送之前程式當掉，事件丟了：有使用者、沒通知 |
+| 先送事件，再 commit 使用者 | commit 失敗（email 重複），信已經寄了：有通知、沒使用者 |
+| **outbox**：事件和使用者同一個交易，worker 之後送 | 交易成功兩個都在，失敗兩個都不在；worker 掛了事件還在表裡等 |
+
+「資料庫和訊息系統要一致」沒有兩階段提交可用（Kafka 不參與資料庫的交易），outbox 是業界的標準解法。
+
+### 觀念 2：at-least-once，所以收的那邊要冪等
+
+worker 的順序是「送出去 → 標 `published_at` → commit」。送出去之後、標記之前當掉，重啟會再送一次：這叫 at-least-once（至少一次），比「最多一次」（可能丟）好，但代價是可能重複。所以 consumer 要**冪等**：同一筆事件來幾次，效果都和來一次一樣。
+
+做法：`ProcessedEvent` 的主鍵就是事件 id，先 INSERT，撞主鍵就是處理過了，整個交易回滾、記 `duplicate`。「用資料庫的唯一性做判斷」和註冊的 email unique 索引（關卡 13）是同一招。要做的事（寄信、統計）和這個 INSERT 要在同一個交易裡，或本身冪等，才不會「標記了卻沒做」。
+
+事件 id 用 uuid 不用流水號：它會被送到別的系統，那邊要用它判斷重複；它貫穿整條路：outbox 的 id = Kafka 訊息的 key = processedevent 的主鍵。
+
+### 觀念 3：Kafka 是什麼，和 HTTP 呼叫差在哪
+
+Kafka（本機用 Redpanda，Kafka 相容、一個 binary）是一條一條「主題」（topic）的日誌：生產者往後面寫，消費者各自記錄讀到哪（offset）。和直接 HTTP 呼叫對方的差別：
+
+- 寫的人不用等讀的人（註冊不等寄信）
+- 讀的人掛了訊息還在（consumer 停掉再回來，從上次 commit 的 offset 繼續）
+- 一筆訊息可以給好幾個系統各讀一次（寄信、統計各一個 consumer group）
+
+`key` 用事件 id：同一個 key 一定進同一個 partition，順序才有保證。`acks="all"`：所有副本都寫到才算成功，寧可慢也不丟。consumer `enable_auto_commit=False`：處理完才 commit offset，處理到一半當掉會再收到同一筆，靠冪等擋。topic 由 `redpanda-init` 用指令建，不靠程式自動建：partition 數、保留時間是基礎設施的一部分。
+
+### 觀念 4：worker 怎麼撿才不會撞
+
+`publish_pending` 用 `SELECT … FOR UPDATE SKIP LOCKED`（關卡 18 的鎖）：好幾個 worker 同時跑時各拿各的、不等對方，同一筆不會被送兩次。`published_at` 有索引：撿的條件是 `IS NULL`，表大了才不會每次輪詢全表掃描。
+
+沒事做時 worker 等「鈴」或等 `OUTBOX_POLL_SECONDS`：同一個程序裡（inline 模式）註冊 commit 後會按鈴（`wake_worker`），事件幾秒內送出；分開跑的 worker 聽不到鈴，靠輪詢。
+
+### 觀念 5：線上免費方案怎麼跑（24-C）
+
+Render 免費方案開不了第二個服務，所以 `OUTBOX_WORKER=inline`：web 程序啟動時在 `lifespan` 開一個背景 task 跑 `run_worker`，沒有 Kafka 就用 `LogPublisher` 印到 log。`OUTBOX_POLL_SECONDS=600`：worker 不會每 5 秒碰資料庫，Neon 閒置 5 分鐘才能休眠，免費方案的計算時數才省得下來；有人註冊會按鈴，不用等 10 分鐘。`MAX_USERS=1000`：公開的示範站怕人灌帳號把免費額度用光，到了註冊回 503。三個都是環境變數，同一個 image。
+
+### 觀念 6：這個範本刻意沒做的
+
+- consumer 只記一行 log，真實世界是寄信、更新統計，而且通常是**另一個服務、另一個資料庫**（這裡共用是為了看得到整條路）
+- 沒做死信（dead letter）：consumer 處理失敗會一直重試同一筆；正式環境會把失敗幾次的事件丟到另一個 topic 人工看
+- 沒做 schema registry、沒做事件版本；只有一種事件
+- 線上沒有 Kafka，事件只印到 log；要接真的（Upstash、Confluent 有免費方案但會碰到註冊與額度）設 `KAFKA_BOOTSTRAP_SERVERS` 就行
+
+### 程式怎麼寫
+
+`routes/auth.py` 的 `register`，三個重點在同一個交易裡：
+
+```python
+session.add(user)
+await session.flush()                                        # 先拿到 user.id，還沒 commit
+enqueue(session, "user.registered", {"user_id": user.id, "email": user.email})   # 只 add，不 commit
+await session.commit()                                       # 使用者和事件一起成功或一起失敗
+...
+wake_worker()                                                # commit 之後才按鈴
+```
+
+`outbox.py` 的 worker 核心：
+
+```python
+result = await session.exec(
+    select(OutboxEvent)
+    .where(col(OutboxEvent.published_at).is_(None))
+    .order_by(col(OutboxEvent.created_at))
+    .limit(limit)
+    .with_for_update(skip_locked=True)     # 多個 worker 各撿各的
+)
+for event in result.all():
+    await publisher.send(event.topic, str(event.id), serialize(event))
+    event.published_at = datetime.now(timezone.utc)
+await session.commit()
+```
+
+`outbox.py` 的冪等：
+
+```python
+session.add(ProcessedEvent(id=event_id, topic=topic))
+try:
+    await session.flush()                 # 撞主鍵 = 處理過了
+except IntegrityError:
+    await session.rollback()
+    logger.info("duplicate", ...)
+    return False
+# 真正要做的事放這裡，和上面的 INSERT 同一個交易
+await session.commit()
+```
+
+`main.py` 的 inline 模式：
+
+```python
+async def lifespan(_: FastAPI):
+    worker_task = None
+    if settings.outbox_worker == "inline":
+        worker_task = asyncio.create_task(run_worker(), name="outbox-worker")
+    yield
+    if worker_task is not None:
+        worker_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker_task
+```
+
+`infra/compose.yaml`：`worker` 和 `consumer` 都是 `image: jwt-auth-demo-backend:local`，只換 `command`，多一個 `KAFKA_BOOTSTRAP_SERVERS: redpanda:9092`。CI 的 `messaging` job：up → 註冊 → 等 consumer 的 log 出現那個 email → 查兩張表 → `rpk` 把 topic 裡那筆原封不動再送一次 → 等 `duplicate` → `processedevent` 還是 1 筆。
+
+### ⚠️ 開始前
+
+- Mac 路線同關卡 21（Docker）；Redpanda 的 image 約 200 MB。
+- 本機路線不用裝任何東西：`backend/.env` 暫時加 `OUTBOX_WORKER=inline`。
+- 線上已經是 inline 模式（`render.yaml`），**不用**在 Render 做任何事；Render Logs 搜 `published` 就看得到。
+- 不碰付費：Kafka 的雲端服務這關不接。
+
+### 驗證方式
+
+1. `uv run pytest -q`（在 `backend/`）：`test_outbox.py` 8 個、`test_register_cap.py` 2 個都綠。
+2. Mac：`--profile messaging up` 後註冊一筆，`logs worker` 有 `published … transport=kafka`、`logs consumer` 有 `consumed … email=<那個 email>`，`outboxevent.published` 是 `t`，`processedevent` 一列。
+3. Mac：`rpk` 重送同一筆後 `logs consumer` 有 `duplicate`，`processedevent` 仍 1 筆。
+4. 本機：`OUTBOX_WORKER=inline` 時註冊後 1 秒內 log 有 `published … transport=log`。
+5. 線上：Render Logs 搜 `published` 有紀錄；Neon 的 `outboxevent` 最新一列 `published_at` 不是空。
+6. GitHub Actions 的 Infra workflow：`messaging` job 有 `✅ 事件走完：outbox → Kafka → consumer`、`✅ 冪等：同一筆事件只處理一次`。
+
+### 動手玩
+
+（Mac 路線叢集開著時做；每題做完改回來、`down -v` 再 `up`）
+
+1. **把 enqueue 搬到 commit 之後**：`routes/auth.py` 把 `enqueue(...)` 那行移到 `await session.commit()` 之後，`up -d --build backend`，註冊：`outboxevent` 多了一筆但 `user` 也多了，看起來沒差？再用已存在的 email 註冊一次（會 400）：事件還是被 add 了但沒 commit 所以沒進表……看起來也沒差。重點是跑測試：`uv run pytest -q tests/test_outbox.py` 第二個測試 `註冊失敗就沒有事件_同一個交易` 會抓到嗎？想想哪種失敗它抓得到（commit 本身失敗）、哪種抓不到。這題的答案是「這就是為什麼要寫在同一個交易，而不是靠測試」。改回來。
+2. **worker 當掉事件不丟**：`stop worker`，註冊兩筆，`outboxevent` 兩列 `published` 都是 `f`；`start worker`，5 秒內變 `t`，consumer 收到兩筆。
+3. **worker 開兩個不會送兩次**：`docker compose -f infra/compose.yaml --profile messaging up -d --scale worker=2`，註冊五筆，`logs worker | grep -c published` 是 `5` 不是 `10`，`processedevent` 五列。`SKIP LOCKED` 在擋。
+4. **冪等拿掉會怎樣**：`outbox.py` 的 `handle_event` 把 `session.add(ProcessedEvent(...))` 到 `return False` 那段拿掉（直接 log `consumed`），`up -d --build consumer`，重做 COACHING 步驟 8：`consumed` 出現兩次、同一個 uuid。如果「做的事」是寄信，使用者就收到兩封。改回來。
+5. **鈴的差別**：本機路線 `OUTBOX_WORKER=inline`、`.env` 再加 `OUTBOX_POLL_SECONDS=600`，註冊：`published` 還是 1 秒內出現（鈴）。再把 `routes/auth.py` 的 `wake_worker()` 註解掉重啟，註冊：要等到 600 秒（或重啟）才會 `published`。這就是 Render 設 600 秒還能即時送的原因。改回來。
+
+### 想一想
+
+<details>
+<summary>Q1：既然有 Kafka，為什麼不讓 register 直接送 Kafka，還要先寫 outbox 表？</summary>
+
+因為 Kafka 不參與資料庫的交易。直接送有兩種壞法：送了但 commit 失敗（通知了不存在的使用者），或 commit 了但送之前當掉（使用者沒被通知）。outbox 把「要送」這件事變成資料庫裡的一列，跟使用者同生共死；真的送出去是 worker 的事，失敗了下次再撿。多一張表，換來一致性。
+
+</details>
+
+<details>
+<summary>Q2：at-least-once 會重複，為什麼不做 exactly-once？</summary>
+
+跨系統的 exactly-once 非常貴、而且邊界很多（Kafka 自己的 exactly-once 只管 Kafka 內部）。業界做法是 at-least-once 送 + 冪等收：重複送很便宜，收的那邊用一個主鍵擋掉就好。這個組合的效果就是「看起來像 exactly-once」。
+
+</details>
+
+<details>
+<summary>Q3：線上沒有 Kafka、事件只印到 log，那這關線上到底做了什麼？</summary>
+
+做了前半段：註冊時 outbox 多一筆（同一個交易）、worker 撿出來、標 `published_at`。只有「送到哪」不同（log 而不是 Kafka）。所以線上的資料庫和程式已經是「可以接 Kafka」的狀態，接的時候只設一個環境變數。免費方案的限制在管道，不在設計。
+
+</details>
+
+<details>
+<summary>Q4：為什麼 worker 要有 `OUTBOX_POLL_SECONDS=600` 這麼長的輪詢，又要有鈴？</summary>
+
+兩個需求衝突：想即時送（短輪詢）又想讓 Neon 休眠省免費額度（長輪詢）。鈴解決即時：同一個程序裡註冊 commit 後叫醒 worker；長輪詢當保底：萬一鈴沒響（例如多副本時事件是別的副本寫的），最多 10 分鐘也會送。compose 和 k8s 裡 worker 是分開的程序聽不到鈴，所以那邊用 5 秒。
+
+</details>
+
+<details>
+<summary>Q5：這個專案的 consumer 和後端共用資料庫，真實世界呢？</summary>
+
+真實世界 consumer 是另一個服務（寄信服務、統計服務），有自己的資料庫，`processedevent` 在它那邊。事件裡只放 id 和必要欄位（不放密碼雜湊），因為它會離開這個系統。共用資料庫在這裡是為了一個 repo 看得到整條路；搬去練習專案時，consumer 可以直接是另一個 repo。
 
 </details>
 

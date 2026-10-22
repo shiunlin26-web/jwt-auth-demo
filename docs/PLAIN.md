@@ -166,6 +166,13 @@
 **為什麼重要**：這些就是 Render 的「自動」背後的事。清單進 git，別的專案直接複製；面試時「零停機怎麼做到」可以指著 `maxUnavailable: 0` 和 `preStop` 說。
 **動手**：Mac 上 `brew install kind kubectl` 照 COACHING 的指令一步步做；沒 Docker 看 CI 的 `k8s` job。線上仍是 Render，這關不換平台。
 
+## 關卡 24：非同步訊息（outbox → Kafka）
+
+**情境**：有人註冊成功，要寄歡迎信、更新統計、通知別的系統。在註冊的請求裡直接做？寄信的服務掛了，使用者就註冊失敗，不合理。先存使用者再寄？程式在中間當掉，信就丟了。
+**做了什麼**：**outbox**：「有人註冊了」這件事和使用者**寫進同一個交易**，交易成功兩個都在、失敗兩個都不在。之後由 worker 把還沒送的事件撿出來送到 Kafka（本機用 Redpanda），consumer 收到才去做事。送的保證是「至少一次」，所以收的那邊用資料庫的主鍵擋重複：同一筆收到兩次只處理一次。
+**為什麼重要**：這是「資料庫和訊息系統要一致」的標準解法，Kafka 只是管道，重點是 outbox 和冪等。線上 Render 免費方案開不了第二個服務，所以 worker 在 web 程序裡當背景工作跑、事件印到 log，免費也看得到整條路。
+**動手**：Mac 上 `--profile messaging` 起來，註冊一筆，看 worker 的 `published`、consumer 的 `consumed`，再把同一筆重送看 `duplicate`；沒 Docker 的機器本機開 `OUTBOX_WORKER=inline` 也看得到 `published`，再看 CI 的 `messaging` job。
+
 ---
 
 ## 整個專案一句話
