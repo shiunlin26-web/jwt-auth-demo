@@ -1,0 +1,69 @@
+# 【關卡 21】docker compose：一個檔案把「資料庫 + 後端」整套在本機起來
+#
+# 關卡 9 的 Dockerfile 只描述「後端這一個 image 怎麼做」。真的要跑，還得有 Postgres、要把連線字串塞給後端、
+# 要等資料庫起來後端才能起。這些「誰先誰後、誰連誰、環境變數給什麼」原本散在 CI 的 docker run 指令裡（ci.yml），
+# compose 把它們寫成一個檔案：docker compose up 就是整套。
+#
+# 它和 Kubernetes（關卡 23）描述的是同一件事，只是 compose 管一台機器、k8s 管一群機器。
+# 兩邊的 image 都是 backend/Dockerfile，不另寫第二份（docs/PLAN-INFRA.md 第 2 節第 2 條）。
+#
+# 用法（在 repo 根目錄；要有 Docker，沒有 Docker 的機器就看 CI 的 compose job）：
+#   docker compose -f infra/compose.yaml up -d --build --wait   # 建 image、起 postgres 和 backend、等兩個都 healthy
+#   curl http://localhost:8000/api/health                        # "db": "ok"、"migration": 最新的遷移編號
+#   docker compose -f infra/compose.yaml logs backend            # 看 alembic 遷移和 uvicorn 啟動的 log
+#   docker compose -f infra/compose.yaml down -v                 # 全部關掉並刪掉資料（不加 -v 就保留資料庫）
+#
+# 這裡的 postgres 只給本機和 CI 用。線上的資料庫是 Neon，不在 compose 裡。
+
+name: jwt-auth-demo
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: jwtdemo
+    # 只綁 127.0.0.1：本機的 psql 連得到，同一個網路的其他機器連不到。本機已經有 Postgres 占著 5432 的話改左邊的數字
+    ports:
+      - "127.0.0.1:5432:5432"
+    # healthcheck 讓下面 depends_on 的 condition: service_healthy 有意義：
+    # 「資料庫真的能接受連線」才算好，不是「container 起來了」就算（對照 ci.yml 的 services.postgres.options）
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jwtdemo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # 資料放在具名 volume：down 之後資料還在，下次 up 不用重新註冊；down -v 才會清掉
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    # 同一個 Dockerfile，和 CI、Render 用的一模一樣；context 相對於這個檔案所在的資料夾
+    build:
+      context: ../backend
+    environment:
+      # 主機名稱 postgres 就是上面那個服務的名字：compose 會建一個內部網路，服務之間用服務名互相找，
+      # 不是 localhost（localhost 在 container 裡是它自己）
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo
+      # 只給本機用的假密鑰；要換就在 shell 先 export JWT_SECRET 再 up。config.py 要求至少 32 字元
+      JWT_SECRET: ${JWT_SECRET:-compose-only-secret-not-for-production-0123456789abcdef}
+      # Dockerfile 的 CMD 會讀 PORT，和 Render 注入 PORT 是同一個機制
+      PORT: "8000"
+    ports:
+      - "8000:8000"
+    # 等 postgres 的 healthcheck 過了才起 backend，不然啟動時的 alembic upgrade 會因為連不到資料庫而退出
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # backend 自己的 healthcheck：打 /api/ping。image 是 slim，沒有 curl，用 Python 內建的 urllib（失敗會丟例外 → 非 0 退出）
+    # start_period：啟動要先跑 alembic upgrade，這段時間內的失敗不算數
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ping', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  pgdata:
