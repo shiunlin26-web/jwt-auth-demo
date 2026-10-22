@@ -1,6 +1,6 @@
 # ARCHITECTURE.md：整條鏈的地圖
 
-> 狀態：v1（2026-10-22，關卡 21～24 做完時寫）。這一頁的目的：**十分鐘讓一個沒看過 repo 的人看懂整條鏈**，每一塊都有「怎麼證明它會動」。
+> 狀態：v2（2026-10-22；v1 在關卡 21～24 的程式做完時寫，v2 在教學文件與 CHAIN 環 8～11 寫完時收尾）。這一頁的目的：**十分鐘讓一個沒看過 repo 的人看懂整條鏈**，每一塊都有「怎麼證明它會動」。
 > 每一塊的教學細節在 `LEARNING.md` 對應的關卡；怎麼親手跑在 `infra/README.md`；為什麼這樣排在 `PLAN-INFRA.md`。
 > 第 6 節「60 秒說法」是給面試用的，每一格留給學習者用自己的話填。
 
@@ -110,6 +110,8 @@ consumer：INSERT processedevent（主鍵 = 事件 id）→ 撞到就是重複�
 3. Actions 分頁挑一個綠的 run，點 `infra.yml` 的 `k8s` 與 `messaging` job，看 log 裡的 ✅ 行：那就是第 2 節「怎麼證明」。
 4. `infra/README.md` 照著在有 Docker 的機器跑一遍 compose。
 5. 想知道為什麼這樣設計：`docs/LEARNING.md` 對應關卡、`docs/QA.md`。
+6. 要有人帶著一步一步跑（一次一個指令、預期值、講什麼）：`docs/COACHING.md` 關卡 21～24，每關都有 Mac 路線與看 CI log 的 VM 路線。
+7. 要在自己的專案重做一遍：`docs/CHAIN.md` 環 8～11，跟技術棧無關。
 
 ## 5. 一個請求經過哪些檔案（接 `TOUR.md`）
 
