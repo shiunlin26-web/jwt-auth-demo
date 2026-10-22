@@ -4476,7 +4476,7 @@ Deploy Hook 的網址帶著密鑰，誰拿到都能叫 Render 重新部署（公
 
 | 主題 | 一句話 | 開場提示的關鍵字 |
 | --- | --- | --- |
-| docker compose | 一個檔案同時起後端 + Postgres，本機不用裝 Postgres（要先有本機 Docker） | 「寫 `docker-compose.yml`，服務有 backend 和 postgres，用 `.env` 注入設定，說明 volume 是什麼」 |
+| docker compose | ✅ 已做成關卡 21：`infra/compose.yaml` 一個檔案起整套，profile 再多起 Prometheus、Grafana、Redpanda | 不用再開，看 `LEARNING.md` 關卡 21 |
 | 自訂網域與 DNS | 把 `*.vercel.app` 換成自己的網域，HTTPS 自動 | 「說明 A / CNAME 記錄差別、Vercel 怎麼接自訂網域、HTTPS 憑證誰發」 |
 | GitHub Codespaces | 瀏覽器裡的開發環境，有 Docker | 「幫這個 repo 寫 `.devcontainer`，讓 Codespaces 打開就能跑後端和前端」 |
 | 分頁之間同步登入狀態 | 關卡 6 Q4 提到的 `BroadcastChannel` | 「一個分頁登出，其他分頁立刻跟著登出」 |
