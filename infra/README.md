@@ -1,7 +1,7 @@
 # infra/：基礎設施（關卡 21 起）
 
 這裡放的是「同一個後端 image 在不同地方怎麼跑」的描述檔，線上（Render）用不到，**搬登入模板時可以不搬**。
-計畫、小塊清單與進度在 [`../docs/PLAN-INFRA.md`](../docs/PLAN-INFRA.md)；每個檔案開頭有中文註解說為什麼。
+計畫、小塊清單與進度在 [`../docs/PLAN-INFRA.md`](../docs/PLAN-INFRA.md)；整條鏈的地圖在 [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md)；每個檔案開頭有中文註解說為什麼。
 
 | 檔案 | 關卡 | 做什麼 | CI 的證明 |
 | --- | --- | --- | --- |
