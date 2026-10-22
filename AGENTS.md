@@ -15,6 +15,7 @@ JWT 登入的教學範本：FastAPI 後端 + React 前端 + Neon Postgres，已�
 - 開練習專案、搬登入模板：`docs/CHAIN.md`（七環任務書 + 搬家清單）
 - 壞掉時查：`docs/DEBUGGING.md`；維運流程：`docs/RUNBOOK.md`；觀念問答：`docs/QA.md`
 - 20 天計畫（設計理由，時程已過期）：`docs/PLAN.md`
+- 基礎設施路線（關卡 21～25：compose、E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖）：`docs/PLAN-INFRA.md`。做任何一小塊前讀它的第 2 節與那一小塊的段落，**不要讀 `LEARNING.md` 全文**
 
 ## 結構
 
@@ -35,6 +36,8 @@ render.yaml         Render 後端設定；frontend/vercel.json：Vercel 轉發 /
 ```bash
 # 乾淨機器一鍵建置（Windows PowerShell，在 repo 根目錄；學習者的電腦每次開機都是乾淨的）
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -SkipTests   # 裝工具、git pull、uv sync、.env、alembic、npm ci；拿掉 -SkipTests 會跑測試
+bash scripts/setup.sh --skip-tests      # Mac 版（晚上與週末那台，有 Docker），做的事一樣
+bash scripts/doctor.sh                  # 或 scripts\doctor.ps1：這台能做哪幾關（有沒有 Docker、kind）
 
 # 後端（在 backend/，不用啟用 venv）
 uv sync                        # 安裝套件

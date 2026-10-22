@@ -7,7 +7,7 @@
 每次開機（連 repo 都會消失的乾淨機器）在 PowerShell 貼兩行：
     git clone https://github.com/shiunlin26-web/jwt-auth-demo.git $HOME\jwt-auth-demo
     powershell -ExecutionPolicy Bypass -File $HOME\jwt-auth-demo\scripts\setup.ps1 -SkipTests
-（連 git 都沒有時先到 git-scm.com 裝；git clone 會跳瀏覽器登入 GitHub，因為 repo 是私有的）
+（連 git 都沒有時先到 git-scm.com 裝；repo 是公開的，clone 不用登入，push 才要）
 repo 還在的話只要第二行，腳本自己會 git pull。
 
 做的事：
