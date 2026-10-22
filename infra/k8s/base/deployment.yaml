@@ -30,6 +30,11 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+      # 【關卡 23-B】pod 被關掉的順序是「先從 Service 的名單移除、同時送 SIGTERM」，但名單更新要一兩秒才傳遍整個叢集，
+      # 這一兩秒還會有流量進來；程式收到 SIGTERM 立刻關 socket 就會出現 connection refused。
+      # preStop 先睡 5 秒再送 SIGTERM，名單更新完才真的關，這就是「零停機」最常被漏掉的一步。
+      # terminationGracePeriodSeconds 要大於 preStop + 程式收尾的時間，不然會被 SIGKILL
+      terminationGracePeriodSeconds: 30
       containers:
         - name: backend
           image: jwt-backend:latest # tag 由 overlay 的 images 決定。正式環境用 registry 的網址 + 版本號或 digest
@@ -81,6 +86,10 @@ spec:
             readOnlyRootFilesystem: true # 程式被攻破也寫不了 image 裡的檔案；要寫的地方只有 /tmp
             capabilities:
               drop: ["ALL"]
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp
