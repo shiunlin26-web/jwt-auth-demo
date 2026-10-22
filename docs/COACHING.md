@@ -524,3 +524,47 @@
 
 **收尾**（你看到的 → 對應的觀念）：`/metrics` 的文字 → 指標是程式自己累計、Prometheus 來拉 / `unmatched` → label 的值要有限（cardinality） / `rate` → 計數器要除以時間才有意義 / 儀表板從 json 來 → 設定進 git，和 render.yaml、k8s 清單同一個概念 / 一棵樹 → 追蹤回答「時間花在哪」 / 同一個 trace_id 在 log 和 span → 三種訊號互相找。收尾後問「哪一步要再講一次」。
 **動手玩**：`LEARNING.md` 關卡 22 的 1（label 爆炸）、4（collector 掛了請求還好嗎）。選配的 Grafana Cloud（關卡 22「⚠️ 開始前」第二段）學習者自己做，AI 不替他開帳號。
+
+### 關卡 23：Kubernetes（kind、Deployment、滾動更新、退版）
+
+**搭配看的程式**：`infra/k8s/base/` 六個檔案（每個檔案開頭的註解就是講義，順序：namespace → configmap → secret.example → migrate-job → deployment → service → kustomization）；`infra/k8s/overlays/ci/kustomization.yaml`；`infra/k8s/ci/postgres.yaml`（只給學習與 CI）；`.github/workflows/infra.yml` 的 `k8s` job
+
+**前置**：Mac 路線要 Docker 在跑，加 `brew install kind kubectl`（都免費）；`bash scripts/doctor.sh` 要說「關卡 23（Kubernetes）：可以」。第一次 `kind create cluster` 會拉約 1 GB 的 node image。指令都在 repo 根目錄下；`-n jwt-auth-demo` 是命名空間，每個 kubectl 都要帶。VM 路線只要能開 Actions。
+
+**Mac 路線**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `docker build -t jwt-backend:ci ./backend` | 最後 `naming to docker.io/library/jwt-backend:ci` | 同一個 Dockerfile，和 Render、compose、ci.yml 用的一樣，一個字沒改 |
+| 2 | `kind create cluster --name jwt` | 一串 `✓`，最後 `Set kubectl context to "kind-jwt"`（第一次 1～2 分鐘） | kind = Kubernetes in Docker：整個叢集是一個 container（`docker ps` 看得到 `jwt-control-plane`）。kubectl 是遙控器，context 指到這個叢集 |
+| 3 | `kind load docker-image jwt-backend:ci --name jwt` | `... not yet present on node "jwt-control-plane", loading...` | 節點看不到你 Mac 的 docker image，要搬進去。正式環境是 push 到 registry（GHCR、ECR），節點自己拉；這就是 `imagePullPolicy: IfNotPresent` 的原因 |
+| 4 | `kubectl apply -f infra/k8s/base/namespace.yaml && kubectl -n jwt-auth-demo apply -f infra/k8s/ci/postgres.yaml && kubectl -n jwt-auth-demo rollout status deployment/postgres` | `namespace/jwt-auth-demo created`、`deployment.apps/postgres created`、`service/postgres created`、`deployment "postgres" successfully rolled out` | 命名空間是叢集裡的資料夾。這個 Postgres 只給學習和 CI（`emptyDir`，pod 一死資料就沒）；正式環境資料庫在叢集外（Neon、RDS），這就是為什麼它不在 `base/` 裡 |
+| 5 | `kubectl -n jwt-auth-demo create secret generic backend-secret --from-literal=DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo --from-literal=JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')` | `secret/backend-secret created` | `base/secret.example.yaml` 只是範本、沒列進 kustomization，真值永遠不進 git。主機名稱 `postgres` 是上一步的 Service 名字，和 compose 的服務名同一個道理 |
+| 6 | `kubectl apply -k infra/k8s/overlays/ci && kubectl -n jwt-auth-demo wait --for=condition=complete job/backend-migrate --timeout=120s && kubectl -n jwt-auth-demo logs job/backend-migrate` | `configmap/backend-config created`、`service/backend created`、`deployment.apps/backend created`、`job.batch/backend-migrate created`、`job.batch/backend-migrate condition met`、六行 `Running upgrade … -> 0006` | `-k` = kustomize：base 加上 overlay（image tag 換成 ci）。遷移是一個 Job：跑一次、跑完就結束。問他：為什麼不像 Render 一樣放在啟動指令裡？（2 個副本同時跑遷移會打架） |
+| 7 | `kubectl -n jwt-auth-demo rollout status deployment/backend && kubectl -n jwt-auth-demo get pods` | `deployment "backend" successfully rolled out`；表格：`backend-<hash>-<id> 1/1 Running` 兩列、`backend-migrate-<id> 0/1 Completed`、`postgres-… 1/1 Running` | pod 名字 = Deployment 名 + ReplicaSet 的 hash + 亂碼。`1/1` 是「1 個容器裡 1 個 Ready」，Ready 的定義是 readinessProbe（`/api/health`）。`Completed` 是 Job 跑完 |
+| 8 | 另開一個視窗：`kubectl -n jwt-auth-demo port-forward service/backend 8080:80`；回原視窗 `curl -s localhost:8080/api/health` | `{"status":"ok","db":"ok","migration":"0006","version":"k8s"}` | Service 的 80 轉到 pod 的 8000；`version` 是 Deployment 給的環境變數 `APP_VERSION=k8s`（Render 那邊是 git commit）。這條 port-forward 黏在一個 pod 上，等一下換版它會斷，這就是為什麼 CI 量零停機不用它 |
+| 9 | `docker tag jwt-backend:ci jwt-backend:v2 && kind load docker-image jwt-backend:v2 --name jwt && kubectl -n jwt-auth-demo run probe --image=curlimages/curl:8.12.1 --restart=Never -- sh -c 'for i in $(seq 1 80); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 2 http://backend/api/ping; sleep 0.5; done'` | `pod/probe created` | 同一個 image 打上 v2 當「新版」。probe 是叢集裡的一個 curl，每 0.5 秒打一次 Service，打 80 次，把狀態碼印出來 |
+| 10 | `kubectl -n jwt-auth-demo set image deployment/backend backend=jwt-backend:v2 && kubectl -n jwt-auth-demo rollout status deployment/backend` | `Waiting for deployment "backend" rollout to finish: 1 out of 2 new replicas have been updated...`、`1 old replicas are pending termination...`、`successfully rolled out`（約 15 秒） | 順序：多起 1 個新的（maxSurge 1）→ 等它 Ready → 關 1 個舊的 → 再來一輪。`pending termination` 那幾秒是 preStop 在睡 5 秒，等 Service 的名單更新完才真的關。全程至少 2 個在服務（maxUnavailable 0） |
+| 11 | `kubectl -n jwt-auth-demo wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe --timeout=120s && kubectl -n jwt-auth-demo logs probe \| sort \| uniq -c && kubectl -n jwt-auth-demo delete pod probe` | `80 200`（80 次全部 200） | 零停機不是口號，是數出來的。拿掉 preStop 或把 maxUnavailable 改 1，這個數字可能就不是 80 了（動手玩 6） |
+| 12 | `kubectl -n jwt-auth-demo rollout history deployment/backend` | `REVISION` 兩列：`1`、`2` | 每次換版一個 revision，k8s 幫你留著舊的 ReplicaSet（`get rs` 看得到 0/0 的那個） |
+| 13 | `kubectl -n jwt-auth-demo rollout undo deployment/backend && kubectl -n jwt-auth-demo rollout status deployment/backend && kubectl -n jwt-auth-demo get deployment/backend -o jsonpath='{.spec.template.spec.containers[0].image}'` | `deployment.apps/backend rolled back`、`successfully rolled out`、`jwt-backend:ci` | 退版一個指令，對照 `RUNBOOK.md` 第 2 節 Render 的 Rollback 按鈕。undo 本身也是一次滾動更新，一樣零停機；再看 history 會是 `2`、`3` |
+| 14 | `kubectl -n jwt-auth-demo set image deployment/backend backend=jwt-backend:does-not-exist; sleep 20; kubectl -n jwt-auth-demo get pods` | 一個 `0/1 ErrImagePull`（或 `ImagePullBackOff`）、兩個 `1/1 Running` | 壞版本：新 pod 起不來，就永遠不會 Ready；maxUnavailable 0 代表舊的不能關。所以兩個舊的還在。問他：現在打 Service 會怎樣？ |
+| 15 | `kubectl -n jwt-auth-demo run probe2 --image=curlimages/curl:8.12.1 --restart=Never --rm -i -- curl -s -o /dev/null -w "%{http_code}\n" http://backend/api/ping` | `200` | 流量只會到 Ready 的 pod，壞的那個根本不在名單裡。使用者什麼都沒感覺到 |
+| 16 | `kubectl -n jwt-auth-demo rollout undo deployment/backend && kubectl -n jwt-auth-demo rollout status deployment/backend && kubectl -n jwt-auth-demo describe deployment/backend \| tail -n 8` | `rolled back`、`successfully rolled out`；Events 幾行 `Scaled up replica set backend-… from 0 to 1`、`Scaled down …` | 壞掉先看 `describe` 的 Events 和 pod 的 `logs`，這是 k8s 的「讀 log」（關卡 20） |
+| 17 | 關掉步驟 8 那個視窗的 port-forward（Ctrl-C），`kind delete cluster --name jwt` | `Deleted nodes: ["jwt-control-plane"]` | 整個叢集刪掉，一個 container 而已；image 還在 docker 裡，下次 create + load 幾十秒 |
+
+**VM 路線**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | GitHub → Actions → **Infra** → 最新的 run → `k8s` job | 十一步全綠，約 3 分鐘 | 這個 job 從開叢集到刪叢集，就是 Mac 路線的 17 步 |
+| 2 | 展開「開一個 kind 叢集」 | `✓ Starting control-plane`、`Set kubectl context to "kind-jwt"` | 同 Mac 步驟 2 |
+| 3 | 展開「kubectl apply -k，等遷移 Job 與 Deployment」 | `job.batch/backend-migrate condition met`、六行 `Running upgrade`、`deployment "backend" successfully rolled out`、pods 表格兩個 `Running` 一個 `Completed` | 同 Mac 步驟 6～7 |
+| 4 | 展開「Smoke test（port-forward → Service → pod）」 | `{"status":"ok","db":"ok","migration":"0006","version":"k8s"}`、`✅ 兩個 pod 在服務，遷移是 0006` | 同 Mac 步驟 8 |
+| 5 | 展開「滾動更新到 v2」 | `Waiting … 1 out of 2 new replicas have been updated...`、`1 old replicas are pending termination...`、`REVISION 1 2`、`換版期間打了 80 次，不是 200 的有 0 次`、`✅ 零停機` | 同 Mac 步驟 9～12 |
+| 6 | 展開「退版（rollout undo）」 | `deployment.apps/backend rolled back`、`退版後的 image：jwt-backend:ci`、`REVISION 2 3` | 同 Mac 步驟 13 |
+| 7 | 展開「壞版本被擋住」 | `error: timed out waiting for the condition`、`rollout 逾時，這是預期的`、pods 表格一個 `ErrImagePull` 兩個 `Running`、`✅ 兩個舊 pod 仍 Ready（2）`、`200`、`✅ 壞版本期間 Service 照常回 200`、`✅ undo 之後恢復，image：jwt-backend:ci` | 同 Mac 步驟 14～16。`timed out` 是故意的：壞版本永遠不會 rollout 完成 |
+| 8 | 展開「kubectl get / describe / logs」 | `get all` 的清單（pod、service、deployment、replicaset 三個其中兩個 0/0、job）、Events 的 `Scaled up / Scaled down` | 同 Mac 步驟 16。三個 ReplicaSet 就是三個 revision |
+
+**收尾**（你看到的 → 對應的觀念）：`1/1 Running` 兩個 → Deployment 保證 N 個副本 / Job `Completed` → 遷移跑一次不放啟動指令 / `80 200` → maxUnavailable 0 + readiness + preStop = 零停機 / `rolled back` → 退版是換回上一個 ReplicaSet / `ErrImagePull` 但 Service 回 200 → 流量只到 Ready 的 pod / Secret 用指令建 → 密鑰不進 git / `kind delete` → 叢集是可拋棄的，清單在 git。收尾後問「哪一步要再講一次」。
+**動手玩**：`LEARNING.md` 關卡 23 的 1（刪一個 pod）、3（殺掉程式）、5（唯讀檔案系統）。
