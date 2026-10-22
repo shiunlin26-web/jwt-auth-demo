@@ -1,0 +1,20 @@
+# 【關卡 22】OpenTelemetry Collector 的設定：收後端送來的 span，印到自己的 log
+#
+# collector 是「收 → 處理 → 轉送」的中繼站：程式只送到它，要轉去 Grafana Cloud、Jaeger、Datadog 都在這裡改，
+# 程式不用動。本機學習只要看得到 span 長什麼樣，所以 exporter 用 debug（印到 stdout），
+# docker compose logs otel-collector 就能看。要接真的後端就把 debug 換成 otlphttp 並填目的地。
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318 # 後端的 OTEL_EXPORTER_OTLP_ENDPOINT 指到這裡（compose 內部是 http://otel-collector:4318）
+
+exporters:
+  debug:
+    verbosity: detailed # 每個 span 的名稱、trace id、屬性全部印出來；正式環境不會這樣開
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]

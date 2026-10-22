@@ -1,0 +1,50 @@
+# 【關卡 23】只給 CI 和本機 kind 用的 Postgres：一個副本、資料放 emptyDir（pod 一死資料就沒了）
+# 正式環境不會把資料庫放在叢集裡用 Deployment 跑：用託管服務（Neon、RDS、Cloud SQL），或至少 StatefulSet + PersistentVolume
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              value: postgres
+            - name: POSTGRES_DB
+              value: jwtdemo
+          ports:
+            - name: pg
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "jwtdemo"]
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres # 後端的 DATABASE_URL 用的主機名稱，和 compose 裡的服務名一樣
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: pg

@@ -1,0 +1,5 @@
+# 【關卡 23】命名空間：一個叢集裡的「資料夾」，這個專案的東西全放在 jwt-auth-demo 底下，和別的專案隔開
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jwt-auth-demo

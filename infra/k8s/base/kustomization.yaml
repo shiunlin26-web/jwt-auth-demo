@@ -1,0 +1,12 @@
+# 【關卡 23】kustomize：把一堆 YAML 當一組管理，overlay 可以疊上環境差異（image tag、副本數），不用複製貼上
+# kubectl 內建：kubectl apply -k infra/k8s/overlays/ci
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: jwt-auth-demo
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - migrate-job.yaml
+  - deployment.yaml
+  - service.yaml
+# secret.example.yaml 刻意不在這裡：Secret 由 CI 的 kubectl create secret 或正式環境的 secret manager 提供

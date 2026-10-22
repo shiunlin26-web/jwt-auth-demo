@@ -1,0 +1,14 @@
+# 【關卡 22】Prometheus 的設定：定期去哪裡抓指標
+#
+# Prometheus 是「拉」的模式：它主動每隔幾秒打一次目標的 /metrics，把數字存成時間序列。
+# 程式不用知道 Prometheus 在哪，只要把 /metrics 開著（backend/metrics.py）。
+global:
+  scrape_interval: 5s # 正式環境常用 15～60 秒；這裡 5 秒是為了本機和 CI 幾秒內就看得到數字
+
+scrape_configs:
+  - job_name: backend
+    metrics_path: /metrics
+    static_configs:
+      # compose 內部網路的服務名，和 DATABASE_URL 裡的 postgres 同一個道理。
+      # Kubernetes（關卡 23）或雲端上通常不手寫目標，用服務探索（service discovery）自動找
+      - targets: ["backend:8000"]

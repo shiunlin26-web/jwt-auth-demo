@@ -1,6 +1,6 @@
 # CHAIN.md：從零把「前端 → 後端 → 登入 → 部署 → 維護」串起來的任務書
 
-> 這份文件**跟技術棧無關**，可以直接餵給任何 AI。每一環四段：給 AI 的任務（可直接貼）、驗收標準（你自己檢查）、常見錯誤、換技術棧會長怎樣。
+> 這份文件**跟技術棧無關**，可以直接餵給任何 AI。每一環四段：給 AI 的任務（可直接貼）、驗收標準（你自己檢查）、常見錯誤、換技術棧會長怎樣。環 1～7 是必走的主線；環 8～11 是基礎設施，選做。
 > 附錄才是本 repo 這套技術棧（FastAPI + React）的搬家清單。
 > 練習專案照這個順序走，**部署在功能之前**：環 1～6 做完時專案還沒有任何業務功能，這是刻意的。
 
@@ -12,7 +12,7 @@
 4. 卡住先查 `DEBUGGING.md`，再看這裡的「常見錯誤」。
 5. 疑問記在練習專案 repo 根目錄的 `QUESTIONS.md`，每三天集中問一次。
 
-版本：v1（2026-10-15，練習專案開始前）。練習專案走完後用踩到的坑修訂成 v2。
+版本：v1（2026-10-15，練習專案開始前）。v2（2026-10-22）：加環 8～11（基礎設施：本機整套與 E2E、可觀測性、Kubernetes、非同步訊息），選做，對應範例專案的關卡 21～24；環 1～7 沒改。練習專案走完後用踩到的坑再修。
 
 ---
 
@@ -234,6 +234,142 @@
 
 ---
 
+## 環 8～11：基礎設施（選做）
+
+> 環 1～7 做完、環 7 做過幾個功能之後再來。這四環對應範例專案的關卡 21～24，每一環**一個 CI job 證明它會動**，而且用的是環 3 的同一個 image。全部免費；沒有 Docker 的機器用 CI 的 job log 驗收。
+
+## 環 8：本機整套與 E2E
+
+**目的**：一個指令在本機起整套；用真的瀏覽器走一遍登入主路徑；從這環起每一塊基礎設施都有 CI job 證明。
+
+**給 AI 的任務**
+
+> 寫一個 compose 檔（放 `infra/`）用環 3 的同一個 image 把「資料庫 + 後端」整套起來：資料庫和後端都有 healthcheck，後端等資料庫 healthy 才起，連線字串的主機名用服務名，資料放具名 volume。加 E2E 測試（Playwright 或同類，只跑一種瀏覽器）走登入主路徑三條：註冊後登入看到自己的 email、重新整理仍登入、登出後開首頁被擋回登入頁；測試自己起前端開發伺服器（代理 `/api` 到後端）、用 API 直接註冊省掉重複畫面、每條測試用不同帳號、用使用者看得到的東西找元素、不重試。新增一個只在 PR 跑、依路徑過濾、同分支新 run 取消舊 run 的 workflow，job `compose`（up --wait → 打 health 確認遷移版本是最新 → 印後端 log → down -v）和 job `e2e`（compose 起後端 → 裝瀏覽器 → 跑 E2E → HTML 報告上傳成 artifact）。只做這些，做完列出你注意到但沒做的事。
+
+**驗收標準**
+
+- [ ] 一個指令起整套，最後每個服務一行 `Healthy`；`/api/health` 的遷移版本是最新
+- [ ] 把「等資料庫 healthy」改成「等資料庫起來」，後端比資料庫先起而退出（log 有 connection refused）；改回來
+- [ ] E2E 三條綠；故意改錯一條的預期值會紅，報告看得到那一步的截圖
+- [ ] CI 兩個 job 綠；run 頁面底部有報告 artifact；只改 README 的 PR 不會跑這個 workflow
+
+**常見錯誤**
+
+- 後端用 `localhost` 找資料庫：容器裡 localhost 是它自己，要用服務名。
+- healthcheck 只看容器起來，不看能不能服務；或 image 裡沒有 curl 卻用 curl。
+- E2E 用 CSS class 找元素（改樣式就壞）、共用一個帳號（不能平行、重跑撞「已存在」）、加 retries 把偶發問題藏起來。
+- E2E 用假後端：驗不到 cookie 在真瀏覽器裡有沒有帶上，那正是要驗的。
+
+**換技術棧會長怎樣**
+
+- compose 跟語言無關；healthcheck 指令換成該 image 有的工具（`wget`、`pg_isready`、Python 的 `urllib`）。
+- E2E：Playwright 有 Node、Python、Java、.NET 版；Cypress 同類。
+- 前端開發伺服器代理 `/api` 這件事不變：Vite、Next、Angular CLI 都有 proxy 設定。
+
+---
+
+## 環 9：可觀測性
+
+**目的**：除了錯誤和 log，要有「數字」和「一個請求走了哪幾站」；儀表板進 git；兩個都是開關、預設關。
+
+**給 AI 的任務**
+
+> 加指標：一個 middleware 記每個請求的計數（method、**路由樣板**、狀態碼）與耗時直方圖，`GET /metrics` 只在環境變數打開時才有、而且不放在 `/api` 底下；路由用樣板不用實際路徑，沒對上的一律記 `unmatched`；抓 `/metrics` 本身不算。compose 加一個 profile 起 Prometheus（抓後端的 `/metrics`）和 Grafana（資料來源和一張儀表板都用 provisioning 從檔案載入：每秒請求數依路由、p95 耗時、5xx 比例、請求總數依狀態碼、版本），儀表板 JSON 進 git、畫面上不可存。加追蹤：OpenTelemetry，只有設了 OTLP 端點才啟用，每個 HTTP 請求一個 span、每句 SQL 一個子 span，span 帶回應的 request id，log 帶 trace_id；健康檢查和 `/metrics` 不追蹤；compose 加一個 collector 只印到 log。CI 加 job：起 profile → 打流量 → 查 Prometheus API 有值 → 查 Grafana API 儀表板存在且透過它查得到數字 → 打一次會查資料庫的端點 → collector 的 log 有 HTTP 的 span 和 SQL 的子 span、span 上有 request id → 後端 log 有 trace_id。測試：預設 `/metrics` 404、打開後有計數、抓 `/metrics` 本身不算、沒設端點不啟用追蹤、一個請求一個 span 底下有 SQL 的子 span。只做這些。
+
+**驗收標準**
+
+- [ ] `/metrics` 預設 404；打開後是文字格式一行一個數字、route 是樣板；亂打路徑不會多出新的 label 值
+- [ ] Prometheus 的 targets 頁後端 UP；Grafana 開起來儀表板已經在、每張圖有線
+- [ ] 打一次查資料庫的端點：collector 的 log 有一棵樹（HTTP span → SQL 子 span）、span 上有 request id、後端 log 同一筆有 trace_id，兩邊的 id 對得上
+- [ ] 不給端點重新啟動：log 沒有 trace_id、collector 沒有 span；程式一行沒改
+- [ ] 把 collector 停掉再打請求：請求照常 200，只有 export 失敗的 log
+- [ ] CI 的 job 綠
+
+**常見錯誤**
+
+- label 用實際路徑、user id、email：每個值一條時間序列，撐爆 Prometheus（cardinality 爆炸）。
+- `/metrics` 放在 `/api` 底下：上線被代理轉出去，誰都能看。
+- 直接用某家廠商的 SDK：換廠商要改程式。用 OTel，換廠商只改環境變數。
+- 儀表板在畫面上點出來：重開就不見、沒有 diff、別的專案不能複製。
+- 看平均不看 p95：5% 的人很慢，平均看不出來。
+
+**換技術棧會長怎樣**
+
+- Prometheus client 每個語言都有：Node `prom-client`、Go `client_golang`、Java Micrometer。
+- OTel 每個語言都有自動 instrumentation（Express、Spring、Go `net/http`），都是「設端點才送」。
+- Grafana provisioning、collector 設定跟語言無關。
+
+---
+
+## 環 10：Kubernetes
+
+**目的**：同一個 image 不靠平台，交給叢集：幾個副本、怎麼探活、怎麼滾動更新與退版。平台幫你做的事，這環讓你親眼看見是誰在做；零停機是數出來的。線上不換平台。
+
+**給 AI 的任務**
+
+> 寫 Kubernetes 清單（kustomize：`base/` + 一個 CI 用的 overlay）：Namespace；ConfigMap 放一般設定；Secret 只放範本、不列進 kustomization（真值用指令建）；遷移用獨立的 Job；Deployment 2 副本：liveness 用 ping、readiness 用 health、resources、非 root、唯讀檔案系統（只掛 `/tmp`）、drop 所有 capability、RollingUpdate `maxSurge: 1`、`maxUnavailable: 0`、preStop 睡幾秒、terminationGracePeriod 夠長、command 蓋掉 image 的啟動指令只跑伺服器；ClusterIP Service。CI 用的單副本資料庫另放。CI 加 job：kind 開叢集 → build → load image → 起資料庫 → 建 Secret → apply -k → 等 Job 完成、等 Deployment rollout → port-forward 打 health 確認遷移最新 → 換版到同內容的 v2 tag，同時在叢集裡開一個 curl pod 每 0.5 秒打 Service 80 次，數不是 200 的次數必須是 0 → rollout history、undo 回到原 tag → set image 成不存在的 tag，確認 rollout 逾時、舊 pod 仍 Ready、Service 仍 200 → undo → 最後印 get / describe / logs。RUNBOOK 加「k8s 的退版」。不換線上平台。只做這些。
+
+**驗收標準**
+
+- [ ] `get pods`：N 個 `Running`、遷移 Job `Completed`；health 的遷移版本最新
+- [ ] 換版期間 80 次全部 200；`rollout status` 看得到「先起新的、舊的 pending termination」
+- [ ] `rollout undo` 後 image 回到原 tag、history 多一個 revision
+- [ ] 壞 tag：一個 pod `ImagePullBackOff`、舊的仍 Ready、Service 仍 200；undo 恢復
+- [ ] 刪一個 pod 會自動補一個；在容器裡 `kill 1` 會原地重啟（RESTARTS +1）；改 ConfigMap 不會自動生效（要 `rollout restart`）；在容器裡 `touch` image 的目錄會 Read-only
+- [ ] CI 的 job 綠；Secret 的真值不在 git 任何地方（`git log -p -S` 搜不到）
+
+**常見錯誤**
+
+- 遷移放在每個 pod 的啟動指令：多副本同時跑遷移會打架。用 Job。
+- liveness 用會查資料庫的端點：資料庫抖動時程式被不斷重啟（環 6 的教訓又來一次）。
+- 沒有 readiness、或 `maxUnavailable` 不是 0：換版時掉請求。
+- 沒有 preStop：Service 名單還沒更新就關掉 pod，那一兩秒的請求被拒。
+- Secret 進 git：base64 不是加密。
+- 用 port-forward 量零停機：它黏在一個 pod 上，那個 pod 被換它就斷，量到的不是 Service。
+
+**換技術棧會長怎樣**
+
+- 清單跟語言無關；探針路徑、port、環境變數名換成你的。
+- 遷移 Job 的 command 換成你的工具：`prisma migrate deploy`、Flyway、golang-migrate。
+- Helm 是另一種疊法（範本 + values）；kustomize 是 kubectl 內建，先學這個。
+
+---
+
+## 環 11：非同步訊息
+
+**目的**：註冊成功要通知別的系統時，不在請求裡做；「待送事件」和使用者寫進同一個交易，worker 再送。Kafka 只是管道，重點是 outbox 和冪等。免費線上也走得通。
+
+**給 AI 的任務**
+
+> 加 transactional outbox：一張待送事件表（uuid 主鍵、topic、JSON payload、created_at、published_at 可空且有索引），註冊成功時**在同一個交易裡**寫一筆「使用者註冊了」（payload 只放 id 和必要欄位，不放密碼雜湊），commit 之後叫醒 worker。worker：撿 published_at 為空的、`FOR UPDATE SKIP LOCKED`，有設 broker 位址就送 Kafka（key 用事件 id、acks=all），沒設就印到 log，送完標 published_at；沒事做時等鈴或等輪詢間隔。consumer：訂閱 topic，處理前先把事件 id INSERT 進一張 processed 表（主鍵 = 事件 id），撞主鍵就記 duplicate 跳過；要做的事和這個 INSERT 同一個交易；commit 之後才 commit offset（關掉 auto commit，從最早的開始讀）。worker 和 consumer 是同一個 image、不同 command。compose 加 profile：Kafka 相容的單機 broker（Redpanda）、一個建 topic 的 init 容器、worker、consumer。線上免費方案開不了第二個服務：加一個模式讓 web 程序啟動時在背景跑 worker，輪詢間隔用環境變數設長（讓免費資料庫能休眠）、靠鈴即時；加一個帳號數上限環境變數，到了註冊回 503。CI 加 job：up → 註冊 → worker 的 log 有 published（transport=kafka）→ consumer 的 log 有 consumed 帶那個 email → 兩張表各一列 → 把 topic 裡那筆原封不動再送一次 → consumer 記 duplicate、processed 表仍一列。測試：註冊成功有一筆待送、註冊失敗沒有（同一個交易）、worker 送出並標記、同一筆只處理一次、背景模式會開 task、註冊後會叫醒。只做這些。
+
+**驗收標準**
+
+- [ ] 註冊的回應沒變慢；outbox 一列、published_at 幾秒內從空變有
+- [ ] worker 的 published、consumer 的 consumed、processed 表：三個地方同一個 uuid
+- [ ] 重送同一筆：consumer 記 duplicate，processed 表仍一列
+- [ ] 停掉 consumer 再註冊：worker 照送、訊息留在 broker；consumer 回來補上
+- [ ] worker 開兩個、註冊五筆：published 是 5 不是 10
+- [ ] 線上：log 搜 published 看得到、transport 是 log；沒開第二個服務、沒接付費 broker；資料庫閒置時仍能休眠
+- [ ] CI 的 job 綠
+
+**常見錯誤**
+
+- register 直接送 broker：commit 失敗仍送出、送出前當掉丟事件。broker 不參與資料庫交易。
+- enqueue 寫在 commit 之後：不在同一個交易，那就不是 outbox。
+- consumer 用記憶體判斷重複：重啟就忘。要用資料庫的主鍵。
+- 「要做的事」和處理標記不在同一個交易：標記了卻沒做。
+- auto commit offset：處理到一半當掉，那筆就丟了。
+- worker 輪詢太頻繁：免費資料庫永遠休眠不了，額度被吃光。
+
+**換技術棧會長怎樣**
+
+- outbox、at-least-once + 冪等：跟語言無關，是分散式系統的通則。
+- Kafka 客戶端每個語言都有（kafkajs、franz-go、confluent-kafka）；RabbitMQ、SQS、NATS 概念相同，保證不同（先確認是不是 at-least-once）。
+- `SKIP LOCKED` 是 Postgres / MySQL 8 的功能；沒有的資料庫用狀態欄位 + 樂觀鎖。
+
+---
+
 ## 附錄 A：本技術棧（FastAPI + React）的搬家清單
 
 從本 repo 複製到練習專案。**先搬、跑起來、再改**。每個檔案開頭有中文註解說為什麼這樣寫，搬過去請保留。
@@ -256,7 +392,7 @@
 | `tests/conftest.py`、`tests/helpers.py`、`tests/test_auth.py`、`tests/test_rules.py`、`tests/test_health.py`、`tests/test_rate_limit.py`、`pytest.ini` | 不用改。`conftest.py` 的 `TRUNCATE` 那行要把新專案的表名加進去 |
 | `Dockerfile`、`.dockerignore`、`.env.example` | 不用改 |
 
-搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"` → `uv run alembic upgrade head` → `uv run pytest -q`（52 個測試應該全綠）→ `uv run uvicorn main:app --reload --port 8000`。
+搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"` → `uv run alembic upgrade head` → `uv run pytest -q`（67 個測試應該全綠，數字以輸出為準）→ `uv run uvicorn main:app --reload --port 8000`。
 
 ### 前端（`frontend/`）
 
@@ -283,6 +419,10 @@
 | `scripts/setup.ps1` | 第 8 行和 README 裡的 clone 網址改成新 repo；其餘不用改 |
 | `AGENTS.md` | 用附錄 B 的範本，不要直接複製本 repo 的（它有學習專案專屬的規矩） |
 | `docs/DEBUGGING.md`、`docs/RUNBOOK.md` | 複製過去當起點，練習專案踩到的坑加上去 |
+| `scripts/setup.sh`、`scripts/doctor.sh`、`scripts/doctor.ps1` | clone 網址改成新 repo；其餘不用改 |
+| `infra/`、`.github/workflows/infra.yml` | 環 8～11 才要，可以先不搬。搬的話：compose 的 `name`、k8s 的 namespace、image 名、Grafana 儀表板 JSON 的 `uid` 與 `title` 改成新專案的 |
+| `frontend/e2e/`、`frontend/playwright.config.ts` | 環 8 才要；測試裡的文案（按鈕、標題、placeholder）換成新專案的 |
+| `backend/metrics.py`、`tracing.py`、`outbox.py`、`worker.py`、`consumer.py` | 環 9、11 才要；不用改，全靠環境變數開關 |
 
 ### 搬家後第一次要做的外部步驟
 

@@ -35,6 +35,11 @@ yarn-error.log*
 pnpm-debug.log*
 # 測試
 .pytest_cache/
+# 【關卡 21】Playwright 的報告、截圖與 trace
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
+frontend/playwright/.cache/
 
 # ruff
 .ruff_cache/
