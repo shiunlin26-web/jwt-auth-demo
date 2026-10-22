@@ -1,0 +1,59 @@
+# 【關卡 21】基礎設施的 CI：和 ci.yml 分開
+#
+# ci.yml 是每次 push 都跑的「程式對不對」；這個檔案是「基礎設施能不能跑起來」：compose（21）、指標與追蹤（22）、
+# Kubernetes（23）、訊息（24）各一個 job。分開的原因：
+# 1. 這些 job 比較慢（要 build image、拉好幾個 image），不想改一行文件也跑
+# 2. 只在 PR 和手動觸發跑，而且只有 infra/、backend/、前端 E2E 或這個檔案本身有改動才跑（docs/PLAN-INFRA.md 第 2 節第 1 條）
+# 3. 壞了一眼看得出是「程式壞」還是「基礎設施壞」
+#
+# 沒有 Docker 的機器就是看這裡的 log：每一步印什麼、對應 infra/ 的哪一行。
+
+name: Infra
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - "backend/**"
+      - "frontend/e2e/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+
+# 同一個分支連推兩次，前一次還在跑就取消，省 runner 時間
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==================================================================
+  # 【關卡 21】compose：整套起來、打 /api/health、印 log、關掉
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # --build：照 backend/Dockerfile 建 image；--wait：等所有有 healthcheck 的服務都 healthy 才回來，
+      # 有任何一個變 unhealthy 就直接失敗。不用自己寫 sleep 迴圈（對照 ci.yml 的 Smoke test）
+      - name: compose up（build backend、起 postgres、等兩個都 healthy）
+        run: docker compose -f infra/compose.yaml up -d --build --wait --wait-timeout 120
+
+      # 和 ci.yml 一樣的檢查，但多一個：migration 要等於 backend/migrations/versions/ 裡最新的編號，
+      # 證明容器啟動時真的跑了 alembic upgrade head（Dockerfile 的 CMD）
+      - name: Smoke test（/api/ping、/api/health、遷移版本）
+        run: |
+          curl -fsS http://localhost:8000/api/ping; echo
+          curl -fsS http://localhost:8000/api/health | tee health.json; echo
+          latest=$(ls backend/migrations/versions/*.py | sort | tail -n 1 | xargs -n 1 basename | cut -d_ -f1)
+          echo "最新的遷移編號：$latest"
+          grep -q '"db": *"ok"' health.json || { echo "❌ /api/health 說資料庫連不上"; exit 1; }
+          grep -q "\"migration\": *\"$latest\"" health.json || { echo "❌ migration 不是最新的 $latest"; exit 1; }
+          echo "✅ compose 整套跑起來了"
+
+      # 看兩個 container 的 log：postgres 的啟動、backend 的 alembic「Running upgrade」和 uvicorn「Application startup complete」
+      - name: compose logs
+        if: always()
+        run: docker compose -f infra/compose.yaml logs --no-color
+
+      - name: compose down
+        if: always()
+        run: docker compose -f infra/compose.yaml down -v
