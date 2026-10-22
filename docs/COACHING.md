@@ -27,6 +27,7 @@
 - **他說「我沒看到你說的東西」**：相信他，是你記錯了。改成用指令、數字或檔案內容驗證，不要再描述畫面。
 - **每個實驗結束一句話「這證明了什麼」**。一關結束用「你看到的 → 對應的觀念」表格收尾，**收尾之後要問「哪一步要我再講一次？」**，他說沒有再進下一關（關卡 19 曾經收尾講太快）。
 - **一關的收尾有三段，缺一不可，而且不要催**（關卡 0 曾經因為催太快，被要求先整理好再往下）：(1) 用一個情境把整關脈絡從頭講一遍（一個請求走幾站、每站誰在做、出錯回什麼）；(2) 出 5～7 題讓他用自己的話答，題目要蓋到這關的每個觀念；(3) 逐題對答案，對一半的說清楚缺哪一半，錯的用情境重講，再補一輪只問錯的。最後給一份「整理」：一句話、脈絡表、狀態碼表、規則、他誤解過的地方。**他說「下一關」才開下一關**，不要在收尾訊息的結尾就塞下一關的第一步。
+- **出題只問他打得開的程式**（曾經問「關卡 2 之前的 `os.getenv` 寫法會怎樣」，那段程式已經不在 repo 裡，他沒地方看）。要問歷史版本，先給 `git show <commit>~1:<檔案>` 讓他看到再問。
 - **需要他改程式的步驟**（動手玩）：給檔案路徑、改前一行、改後一行，最後一定寫「改回來：`git checkout -- <檔案>`」。
 - **會碰到付費門檻的步驟先說**（`AGENTS.md`）。
 - **一關帶完更新 `HANDOFF.md` 第 2 節的「觀念關的帶做進度」**，寫到哪一關、哪一步。
@@ -76,7 +77,7 @@
 | 2 | 同上，密碼換 `中文密碼中文密碼` | `422`，`type` 是 `value_error`、`msg` 是中文「只能包含英文字母」 | 自己寫的驗證器 `check_password_chars`（`schemas.py:16`），所以是中文。bcrypt 只看前 72 個 **byte**，一個中文字 3 個 byte。與其默默截掉不如老實擋。PowerShell 畫面上指令會顯示 `????`，看回應的 `input` 確認送的是中文 |
 | 3 | 同上，密碼換 `('a'*73)`：`-d ('{\"email\":\"t@test.com\",\"password\":\"' + ('a'*73) + '\"}')` | `422`，「最多 72」 | 72 這個數字就是 bcrypt 的上限 |
 | 4 | 同上，密碼 `Passw0rd!x` | `201`，內容有 `id`、`email`，沒有密碼；多了 `x-ratelimit-*` | 201 是「成功而且建立了東西」。422 沒有 `x-ratelimit-*` 是因為擋在進函式之前，頻率限制掛在函式上 |
-| 5 | 再跑一次步驟 4 | `400`，`detail` 是一句字串 | 400 是「你送的東西有問題」。`detail` 字串 = `routes/auth.py` 自己 raise 的 `HTTPException`，陣列 = Pydantic。順便講 `register` 四塊：函式頭（裝飾器、`data: UserCreate`、`Depends`）、查重、建立（明碼只活到 `hash_password`）、commit 的 `try/except IntegrityError`（資料庫例外不翻譯成 HTTPException 就是 500） |
+| 5 | 再跑一次步驟 4 | `400`，`detail` 是一句字串 | 400 是「你送的東西有問題」。`detail` 字串 = `routes/auth.py` 自己 raise 的 `HTTPException`，陣列 = Pydantic。順便講 `register` 四塊：函式頭（裝飾器、`data: UserCreate`、`Depends`）、查重、建立（明碼只活到 `hash_password`）、commit 的 `try/except IntegrityError`（資料庫例外不翻譯成 HTTPException 就是 500）。關卡 24 之後中間多了兩段先跳過：`MAX_USERS` 額滿回 503（示範站的保險）、`flush` + `enqueue` 把「有人註冊了」事件和使用者寫進同一個交易，關卡 24 再講 |
 | 6 | 用 7 個字元的密碼**登入**：`-d '{\"email\":\"t@test.com\",\"password\":\"abc1234\"}'` 打 `/api/auth/login` | `401`，不是 422 | 登入不檢查密碼規則，只回「帳號或密碼錯」，不給攻擊者線索 |
 | 7 | 瀏覽器 `localhost:5173/register`，密碼打 `short` | 按鈕不能按、出現提示文字 | 前端驗證是體驗，後端驗證是安全，規則兩邊各一份 |
 | 8 | 在 `backend`：`uv run python -c "from schemas import UserCreate; UserCreate(email='a@b.com', password='abc')"` | traceback，最後一行 `ValidationError: 1 validation error for UserCreate`，上面兩行是 `pydantic/main.py` 的 `__init__` | Pydantic 在「建物件」那一刻丟錯，FastAPI 接住轉成 422，`register` 沒被呼叫。traceback 從最後一行往上讀（關卡 20 第 2 條）。`uv` 找不到：`$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"` |
@@ -91,7 +92,7 @@
 
 ### 關卡 1：Refresh token 輪替與重複使用偵測
 
-**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（28）、`issue_refresh_token`（41）、`revoke_all_refresh_tokens`（54）、`login`（119）、`refresh`（159）；`backend/security.py` 的 `_hash_password_sync`（19）、`create_access_token`（44）、`decode_access_token`（55）、`create_refresh_token`（66）、`hash_token`（75）；`backend/models.py` 的 `RefreshToken`；`frontend/src/api/client.ts` 的 `refreshPromise`（42～55）與 response 攔截器（74～97）
+**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（29）、`issue_refresh_token`（42）、`revoke_all_refresh_tokens`（55）、`login`（136）、`refresh`（177）；`backend/security.py` 的 `_hash_password_sync`（19）、`create_access_token`（44）、`decode_access_token`（55）、`create_refresh_token`（66）、`hash_token`（75）；`backend/models.py` 的 `RefreshToken`；`frontend/src/api/client.ts` 的 `refreshPromise`（42～55）與 response 攔截器（74～97）
 
 **前置**：後端跑起來、帳號存在。這關和關卡 19 共用同一套 curl，先帶哪一關都可以。
 
@@ -106,9 +107,9 @@
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
 | 1 | `curl.exe -s -c jar.txt localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` 然後 `type jar.txt` | JSON 有 `access_token`；罐子最後一行 `#HttpOnly_localhost FALSE /api/auth FALSE <秒數> refresh_token <43 字>` | 罐子 = curl 存 cookie 的檔案，模擬瀏覽器。只問 `/api/auth`（Path：只有打這路徑才帶）和**第二個** `FALSE`（Secure 沒開，http 也送；正式是 TRUE）。第一個 FALSE 是 curl 內部欄位，**不要問**。43 字 = `secrets.token_urlsafe(32)`：32 個隨機 byte 用 base64 印成可讀的字（3 byte → 4 字，所以 43）。`set-cookie` = 後端請瀏覽器把這張存起來 |
-| 2 | `curl.exe -v -b jar.txt -c jar.txt -X POST localhost:8000/api/auth/refresh` | `>` 有 `Cookie: refresh_token=舊值`；`<` 有 `set-cookie: refresh_token=新值`；`* Replaced cookie` | `-b`/`--cookie` 從罐子帶出去、`-c`/`--cookie-jar` 存回來，是 curl 自己的參數（`curl.exe --help all \| Select-String cookie`）。後端五段：`Cookie(...)` 取票（162）→ `hash_token` 查表、`with_for_update` 鎖（174～178）→ 舊的 `revoked = True`（211）→ `issue_refresh_token` 發新的（212）→ `set_refresh_cookie` + 新 access token（215～219）。瀏覽器平常同時做 `-b` 和 `-c`，自動的 |
-| 3 | 舊值已不在罐子裡，用字串帶：`curl.exe -s -i -b "refresh_token=<步驟 1 的 43 字>" -X POST localhost:8000/api/auth/refresh` | `401`，`Refresh token reused` | 票**還在**表裡，`revoked = true` 又被送來 → 當成被偷 → `revoke_all_refresh_tokens` 把這個人全部的 refresh token **刪掉**（61 行是 `delete`，不是標記）。先讓他猜：罐子裡的新票還能用嗎 |
-| 4 | `curl.exe -s -i -b jar.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Invalid refresh token` | 票**不在**表裡（182 行）。兩句 401：`reused` = 還在但蓋章，`Invalid` = 查不到。輪替是標記（留證據），重用偵測是刪除（全清） |
+| 2 | `curl.exe -v -b jar.txt -c jar.txt -X POST localhost:8000/api/auth/refresh` | `>` 有 `Cookie: refresh_token=舊值`；`<` 有 `set-cookie: refresh_token=新值`；`* Replaced cookie` | `-b`/`--cookie` 從罐子帶出去、`-c`/`--cookie-jar` 存回來，是 curl 自己的參數（`curl.exe --help all \| Select-String cookie`）。後端五段：`Cookie(...)` 取票（179）→ `hash_token` 查表、`with_for_update` 鎖（191～195）→ 舊的 `revoked = True`（229）→ `issue_refresh_token` 發新的（230）→ `set_refresh_cookie` + 新 access token（233～237）。瀏覽器平常同時做 `-b` 和 `-c`，自動的 |
+| 3 | 舊值已不在罐子裡，用字串帶：`curl.exe -s -i -b "refresh_token=<步驟 1 的 43 字>" -X POST localhost:8000/api/auth/refresh` | `401`，`Refresh token reused` | 票**還在**表裡，`revoked = true` 又被送來 → 當成被偷 → `revoke_all_refresh_tokens` 把這個人全部的 refresh token **刪掉**（62 行是 `delete`，不是標記）。先讓他猜：罐子裡的新票還能用嗎 |
+| 4 | `curl.exe -s -i -b jar.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Invalid refresh token` | 票**不在**表裡（201 行）。兩句 401：`reused` = 還在但蓋章，`Invalid` = 查不到。輪替是標記（留證據），重用偵測是刪除（全清） |
 | 5 | Neon SQL Editor **先確認選的是 `DATABASE_URL` 那個資料庫**（關卡 18 用的是 `TEST_DATABASE_URL`，Editor 會停在那裡；`Get-Content backend\.env \| Select-String DATABASE_URL` 看資料庫名）。跑 `SELECT count(*) FROM refreshtoken WHERE user_id = <他的 id>;` | `0` | 和步驟 4 對上。資料庫不對會查到「都沒有」 |
 | 6 | 重新登入（步驟 1），再查 `SELECT token_hash, revoked, created_at FROM refreshtoken WHERE user_id = <id>;`，然後在 `backend` 跑 `uv run python -c "from security import hash_token; print(hash_token('<罐子裡的 43 字>'))"` | 一筆 `revoked = f`，`token_hash` 64 字；自己算出來的跟資料庫**一模一樣** | 資料庫只有 SHA-256 亂碼，沒有原值。後端收到 cookie 就是這樣找到那筆：原值 → SHA-256 → `WHERE token_hash =`。`hashlib.sha256(token.encode()).hexdigest()`：文字變 byte → 雜湊 32 byte → 印成 64 個 16 進位字 |
 | 7 | **前端 single-flight**。不要等 token 過期（TanStack 的自動重抓會搶先換票）：瀏覽器登入，DevTools Network 清空，Console 第一次貼要先打 `allow pasting` Enter，再貼 `const s = await import("/src/auth/authStore.ts"); const m = await import("/src/api/auth.ts"); s.useAuthStore.getState().setAccessToken("bad"); await Promise.all([m.getMe(), m.getMe(), m.getMe()]);` | Network 照順序：`me 401, me 401, me 401, refresh 200, me 200, me 200, me 200` | `client.ts:42` 的 `refreshPromise`：第一個 401 發 refresh 並把「進行中的 Promise」存進變數；第二、三個看到不空就不發，一起等；`finally` 清空。改成 `if (true)` 會變 3 個 refresh、後兩個 `reused`、整排刪掉、`clearSession` 登出。用時間軸表（t0～t5）講 A/B/C 三個請求 |
@@ -122,24 +123,30 @@
 
 ### 關卡 2：設定管理
 
-**搭配看的程式**：`backend/config.py` 的 `Settings`；`backend/database.py`；`backend/.env.example`；`backend/main.py` 的 `CORSMiddleware`；`frontend/vite.config.ts` 的 `proxy`
+**搭配看的程式**：`backend/config.py` 的 `Settings`（20～102，每個欄位一個設定；25 行 `env_file`、26 行 `extra="ignore"`、94 行 `cors_origin_list`、102 行 `settings = Settings()`）；`backend/.env.example`；`backend/routes/auth.py:37`（`max_age` 用設定算）；`backend/security.py:71`（`refresh_token_expiry` 用同一個設定）；`backend/main.py` 的 `CORSMiddleware`；`frontend/vite.config.ts:32` 的 `proxy`
 
-**前置**：後端能跑。這關每一步都要重啟後端。
+**前置**：後端能跑。**每一步改完 `.env` 都要 `Ctrl+C` 手動重啟**，`--reload` 只監看 `.py`，不看 `.env`（曾經改了 `.env` 以為沒效果，其實沒重啟）。
+
+**先講名詞**：設定（會因機器而不同的值）、環境變數（作業系統給程式的「名字 = 值」）、`.env`（環境變數寫成檔案，永遠不進 git，Render 上沒有這個檔改用平台的環境變數頁）、fail fast（缺了啟動就死，不等人登入才 500）。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `backend\.env` 把 `JWT_SECRET=` 那行前面加 `#`，啟動後端 | 起不來，terminal 最後幾行有 `jwt_secret` 和 `Field required` | fail fast：設定缺了就不要跑。`config.py` 的 `Settings`。改回來 |
-| 2 | `.env` 加 `DB_ECHO=true`，重啟，用 curl 登入一次 | terminal 多出 `SELECT ...`、`INSERT ...`、`UPDATE ...` 好幾行 | 這是 ORM 真的送去資料庫的 SQL，對照 `login` 的每一步。看完刪掉 |
-| 3 | `.env` 加 `REFRESH_TOKEN_EXPIRE_DAYS=1`，重啟，`curl.exe -s -i` 登入 | `set-cookie` 裡 `Max-Age=86400` | 86400 = 1 天的秒數。設定值一路傳到 cookie。刪掉 |
-| 4 | `curl.exe -s -i localhost:8000/api/health -H "Origin: http://evil.com"` | `200`，但**沒有** `access-control-allow-origin` | `CORS_ORIGINS` 預設只有 `localhost:5173`。CORS 的細節留到關卡 19 |
-| 5 | `uv run python -c "from config import settings; print(settings.jwt_expire_minutes, settings.cors_origin_list)"`（在 `backend`） | `30 ['http://localhost:5173']` | 設定是一個物件，程式各處都從它讀，不散落 |
+| 1 | `backend\.env` 的 `JWT_SECRET=` 那行**行首**加 `#`，存檔，`Ctrl+C`，`uv run uvicorn main:app --reload --port 8000` | 起不來，最後三行 `ValidationError: 1 validation error for Settings` / `jwt_secret` / `Field required [type=missing, ...]` | fail fast：錯在 import 那一刻（traceback 裡 `main.py` 的 `from config import settings` → `config.py:102`），伺服器沒開始聽 8000。**`#` 加在 `=` 後面不算註解**，會變成密鑰的一部分照樣合法（學習者撞過）。順便教 traceback：從最後一行往上，只看「專案路徑且沒有 `.venv`」的那幾組，`.venv\Lib\site-packages\` 是裝在專案裡的套件、`AppData\...\python` 是 Python 本身、`<frozen importlib>` 是 import 機制，全部跳過；啟動錯誤的 traceback 特別長（疊了 uvicorn 子程序和 import 鏈），平常請求出錯大約 10 行。`input_value={...}` 會印出其他設定的一部分，正式環境 log 不能隨便貼 |
+| 2 | 拿掉 `#`，加 `DB_ECHO=true`，重啟，另一個視窗 curl 登入一次 | uvicorn 視窗：啟動時三句 `select pg_catalog.version()`、`current_schema()`、`show standard_conforming_strings`（SQLAlchemy 第一次連線問版本，跳過）；登入那下 `BEGIN` → `SELECT "user"... WHERE email = $1` → `UPDATE "user" SET last_login_at` → `DELETE FROM refreshtoken WHERE ... expires_at <` → `INSERT INTO refreshtoken (token_hash, ...)` → `COMMIT` | 一句 SQL 對一行 `login`：SELECT = 143 行找人；bcrypt 和簽章沒有 SQL（Python 裡做）；UPDATE = 163 行改屬性 ORM 自動變 UPDATE；DELETE = 166 行清過期；INSERT = 169 行存雜湊；COMMIT = 170 行才真的寫。INSERT 參數裡印出 64 字 token 雜湊 → 這就是 `DB_ECHO` 只能本機開的理由（另一個理由：正式環境每個請求幾行 SQL 會灌爆 log）。`$1::VARCHAR` 是參數化，SQL injection 擋在這。第一次登入 `duration_ms` 幾千是 Neon 冷啟動，再打一次會掉到 100 多 |
+| 3 | 加 `REFRESH_TOKEN_EXPIRE_DAYS=1`，重啟，`curl.exe -s -i` 登入 | `set-cookie` 的 `Max-Age=86400`（原本 604800） | 數字走的路：`.env` 字串 `"1"` → `config.py:37` 轉 int 蓋掉預設 7 → `routes/auth.py:37` 算 `max_age` → 同一個設定 `security.py:71` 算資料庫 `expires_at`。一個設定、一處定義、兩處用 |
+| 4 | 不重啟，在 `backend`：`uv run python -c "from config import settings; print(settings.refresh_token_expire_days, type(settings.refresh_token_expire_days)); print(settings.db_echo, type(settings.db_echo)); print(settings.cors_origin_list)"` | `1 <class 'int'>` / `True <class 'bool'>` / `['http://localhost:5173']` | `.env` 全是字串，欄位的型別標註決定轉成什麼；`cors_origin_list` 是 94 行的 property 把 `"a,b"` 切成 list。**這個指令是「改了設定沒生效」的萬用檢查**：印的是 `Settings` 真的讀到的值，沒重啟、改錯檔、名字打錯（26 行 `extra="ignore"` 會安靜忽略）、系統環境變數蓋掉（優先於 `.env`、最陰因為不在任何檔案裡）四種原因都抓得到 |
+| 5 | 刪掉 `REFRESH_TOKEN_EXPIRE_DAYS=1` 和 `DB_ECHO=true`，重啟 | `.env` 回原狀 | |
+| 6 | 整個 `.env` 改名（`Rename-Item .env .env.bak`），重啟，看完改回來 | `2 validation errors`：`database_url`、`jwt_secret` | 必填的一次全列出來（不同欄位各報一個，和關卡 0 的規則一樣）。可以當題目讓他先猜幾個 |
 
-**收尾**：設定缺了立刻死 / 設定值改了行為就改 / 密鑰只在 `.env` 和平台的環境變數。
-**動手玩**：`LEARNING.md` 關卡 2 的 1、3。
+**收尾一句話**：會因機器而不同的值集中在 `config.py` 一個 class，從 `.env` 或系統環境變數讀，自動轉型別，缺了就起不來。
+**收尾要講到**：一個設定值走的路（`.env` → `Settings` 欄位 → `settings` 物件 → 用的地方）/ 關卡 2 之前 `os.getenv` 找不到回 `None` 不報錯，後端照常起來，第一個人登入 `jwt.encode(payload, None)` 才 500，這關把錯誤提前到啟動 / `.env` 的 `#` 只有行首才是註解 / `--reload` 不看 `.env` / 正式環境沒有 `.env`，Render 環境變數填同樣名字程式不改 / traceback 讀法。
+**出題注意**：只問他打得開的程式。「`os.getenv` 的舊寫法會怎樣」這種題他沒地方看，要問就先給 `git show <關卡 2 的 commit>~1:backend/security.py` 讓他看到再問。
+**他誤解過的地方**：「舊寫法 `.env` 沒填後端起不來」（反了，起得來，登入才 500）；「改了 `AUTH_RATE_LIMIT` 沒 429 是標頭的問題」（是沒重啟 / 沒讀到，先跑萬用檢查）。
+**動手玩**：`LEARNING.md` 關卡 2 的 3（自己加一個設定，很短）。
 
 ### 關卡 3：登出所有裝置、改密碼
 
-**搭配看的程式**：`backend/routes/auth.py` 的 `delete_expired_refresh_tokens`（64）、`logout`（224）、`logout_all`（249）、`change_password`（269）；`backend/schemas.py` 的 `ChangePasswordRequest`；`frontend/src/pages/SettingsPage.tsx`
+**搭配看的程式**：`backend/routes/auth.py` 的 `delete_expired_refresh_tokens`（65）、`logout`（241）、`logout_all`（266）、`change_password`（286）；`backend/schemas.py` 的 `ChangePasswordRequest`；`frontend/src/pages/SettingsPage.tsx`
 
 **前置**：後端跑起來、帳號存在。用兩個 cookie 罐模擬兩台裝置。
 
@@ -413,14 +420,14 @@
 
 ### 關卡 19：HTTP 與瀏覽器規則
 
-**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（28～38）、`main.py` 的 request log middleware（`Cache-Control`）與 `CORSMiddleware`、`frontend/vercel.json`、`vite.config.ts` 的 `proxy`
+**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（29～39）、`main.py` 的 request log middleware（`Cache-Control`）與 `CORSMiddleware`、`frontend/vercel.json`、`vite.config.ts` 的 `proxy`
 
 **前置**：後端跑起來、帳號存在。2026-10-20 實際帶過的順序，照做。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
 | 1 | `curl.exe -v localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` | `>` 四行請求、`<` 一串回應、最後一行 JSON | `>` 是你送的、`<` 是回來的、`*` 是 curl 碎念。請求行、標頭、空行、內容 |
-| 2 | 找 `< set-cookie:` 那行 | `HttpOnly; Max-Age=604800; Path=/api/auth; SameSite=lax`，本機沒有 `Secure` | 一個分號一個規則：JS 讀不到 / 7 天 / 只在 `/api/auth` 帶 / 跨站不帶 / 正式才限 https。`routes/auth.py` 第 33 行附近 |
+| 2 | 找 `< set-cookie:` 那行 | `HttpOnly; Max-Age=604800; Path=/api/auth; SameSite=lax`，本機沒有 `Secure` | 一個分號一個規則：JS 讀不到 / 7 天 / 只在 `/api/auth` 帶 / 跨站不帶 / 正式才限 https。`routes/auth.py` 第 34 行附近 |
 | 3 | 找 `x-ratelimit-remaining`、`cache-control: no-store`、`x-request-id` | 三行都在 | 關卡 17、19、11 各加的 |
 | 4 | 關卡 1 的步驟 1～4（cookie 罐、換票、舊票重用、新票也失效） | 同關卡 1 | 用 curl 看最清楚 |
 | 5 | 重新登入 `-c jar.txt`，`curl.exe -v -b jar.txt localhost:8000/api/me` | `>` **沒有** `Cookie:` 行；`401`、`www-authenticate: Bearer` | Path 不是 `/api/auth` 就不帶；`/api/me` 要的是另一張票 |
