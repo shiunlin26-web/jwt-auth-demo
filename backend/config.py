@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # 名字刻意和 OpenTelemetry SDK 讀的環境變數一樣，SDK 自己也會讀它
     otel_exporter_otlp_endpoint: str | None = None
 
+    # ---- 【關卡 24】outbox 與訊息 ----
+    # Kafka（或 Redpanda）的位址，例如 redpanda:9092。沒設就不用 Kafka：worker 把事件印到 log（outbox.py）
+    kafka_bootstrap_servers: str | None = None
+    # worker 沒事做時每隔幾秒再撿一次
+    outbox_poll_seconds: float = 5
+
     # 【關卡 17】登入與註冊的頻率限制（slowapi 的格式："10/minute"、"100/hour"）
     rate_limit_enabled: bool = True
     auth_rate_limit: str = "10/minute"

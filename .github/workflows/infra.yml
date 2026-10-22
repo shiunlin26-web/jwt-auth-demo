@@ -303,3 +303,54 @@ jobs:
           kubectl -n $NS describe deployment/backend | tail -n 25
           echo "--- backend pod 的 log（每個 pod 最後 15 行）---"
           kubectl -n $NS logs -l app=backend --tail=15 --prefix=true || true
+
+  # ==================================================================
+  # 【關卡 24】messaging：Redpanda + outbox worker + consumer，驗證「註冊 → outbox 表 → worker 送 Kafka → consumer 收到 → 同一筆再送只處理一次」
+  messaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: compose up（--profile messaging 多起 redpanda、worker、consumer）
+        run: docker compose -f infra/compose.yaml --profile messaging up -d --build --wait --wait-timeout 240
+
+      # 註冊一個帳號 → outbox 多一筆 → worker 最多 5 秒內送出 → consumer 收到。用 email 在 log 裡找
+      - name: 註冊 → worker published → consumer consumed
+        run: |
+          email="ci-$(date +%s)@example.com"
+          curl -fsS -X POST http://localhost:8000/api/auth/register -H 'Content-Type: application/json' \
+            -d "{\"email\":\"$email\",\"password\":\"Passw0rd!x\"}" | tee register.json; echo
+          for i in $(seq 1 30); do
+            if docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -q "consumed .*email=$email"; then break; fi
+            sleep 1
+          done
+          echo "--- worker ---"; docker compose -f infra/compose.yaml --profile messaging logs --no-color worker | grep -E "published|Kafka" | tail -n 3
+          echo "--- consumer ---"; docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -E "consumed|開始讀" | tail -n 3
+          docker compose -f infra/compose.yaml --profile messaging logs --no-color worker | grep -q "published .*transport=kafka" || { echo "❌ worker 沒有送到 Kafka"; exit 1; }
+          docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -q "consumed .*email=$email" || { echo "❌ consumer 30 秒內沒收到"; exit 1; }
+          echo "✅ 事件走完：outbox → Kafka → consumer"
+          echo "--- 資料庫裡的 outbox 與 processed ---"
+          docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo -c "SELECT id, topic, published_at IS NOT NULL AS published FROM outboxevent;" -c "SELECT id, topic FROM processedevent;"
+
+      # 冪等：把 Kafka 裡那一筆原封不動再送一次（rpk 讀出來再寫回去），consumer 要認出 duplicate、processedevent 不多一筆
+      - name: 同一筆再送一次 → duplicate
+        run: |
+          docker compose -f infra/compose.yaml --profile messaging exec -T redpanda sh -c \
+            "rpk topic consume user.registered -n 1 -o start -f '%v\\n' --brokers redpanda:9092 | rpk topic produce user.registered --brokers redpanda:9092"
+          for i in $(seq 1 30); do
+            if docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -q "duplicate"; then break; fi
+            sleep 1
+          done
+          docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -E "duplicate" | tail -n 1 || { echo "❌ consumer 沒認出重複的事件"; exit 1; }
+          count=$(docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo -tAc "SELECT count(*) FROM processedevent;")
+          echo "processedevent 筆數：$count"
+          [ "$count" = "1" ] || { echo "❌ 重複的事件被處理了第二次"; exit 1; }
+          echo "✅ 冪等：同一筆事件只處理一次"
+
+      - name: compose logs
+        if: failure()
+        run: docker compose -f infra/compose.yaml --profile messaging logs --no-color
+
+      - name: compose down
+        if: always()
+        run: docker compose -f infra/compose.yaml --profile messaging down -v
