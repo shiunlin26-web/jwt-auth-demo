@@ -92,7 +92,7 @@
 
 ### 關卡 1：Refresh token 輪替與重複使用偵測
 
-**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（29）、`issue_refresh_token`（42）、`revoke_all_refresh_tokens`（55）、`login`（136）、`refresh`（177）；`backend/security.py` 的 `_hash_password_sync`（19）、`create_access_token`（44）、`decode_access_token`（55）、`create_refresh_token`（66）、`hash_token`（75）；`backend/models.py` 的 `RefreshToken`；`frontend/src/api/client.ts` 的 `refreshPromise`（42～55）與 response 攔截器（74～97）
+**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（29）、`issue_refresh_token`（42）、`revoke_all_refresh_tokens`（55）、`login`（136）、`refresh`（177）；`backend/security.py` 的 `_hash_password_sync`（29）、`create_access_token`（59）、`decode_access_token`（69）、`create_refresh_token`（80）、`hash_token`（89）；`backend/models.py` 的 `RefreshToken`；`frontend/src/api/client.ts` 的 `refreshPromise`（42～55）與 response 攔截器（74～97）
 
 **前置**：後端跑起來、帳號存在。這關和關卡 19 共用同一套 curl，先帶哪一關都可以。
 
@@ -123,7 +123,7 @@
 
 ### 關卡 2：設定管理
 
-**搭配看的程式**：`backend/config.py` 的 `Settings`（20～102，每個欄位一個設定；25 行 `env_file`、26 行 `extra="ignore"`、94 行 `cors_origin_list`、102 行 `settings = Settings()`）；`backend/.env.example`；`backend/routes/auth.py:37`（`max_age` 用設定算）；`backend/security.py:71`（`refresh_token_expiry` 用同一個設定）；`backend/main.py` 的 `CORSMiddleware`；`frontend/vite.config.ts:32` 的 `proxy`
+**搭配看的程式**：`backend/config.py` 的 `Settings`（20～102，每個欄位一個設定；25 行 `env_file`、26 行 `extra="ignore"`、94 行 `cors_origin_list`、102 行 `settings = Settings()`）；`backend/.env.example`；`backend/routes/auth.py:37`（`max_age` 用設定算）；`backend/security.py:85`（`refresh_token_expiry` 用同一個設定）；`backend/main.py` 的 `CORSMiddleware`；`frontend/vite.config.ts:32` 的 `proxy`
 
 **前置**：後端能跑。**每一步改完 `.env` 都要 `Ctrl+C` 手動重啟**，`--reload` 只監看 `.py`，不看 `.env`（曾經改了 `.env` 以為沒效果，其實沒重啟）。
 
@@ -133,7 +133,7 @@
 | --- | --- | --- | --- |
 | 1 | `backend\.env` 的 `JWT_SECRET=` 那行**行首**加 `#`，存檔，`Ctrl+C`，`uv run uvicorn main:app --reload --port 8000` | 起不來，最後三行 `ValidationError: 1 validation error for Settings` / `jwt_secret` / `Field required [type=missing, ...]` | fail fast：錯在 import 那一刻（traceback 裡 `main.py` 的 `from config import settings` → `config.py:102`），伺服器沒開始聽 8000。**`#` 加在 `=` 後面不算註解**，會變成密鑰的一部分照樣合法（學習者撞過）。順便教 traceback：從最後一行往上，只看「專案路徑且沒有 `.venv`」的那幾組，`.venv\Lib\site-packages\` 是裝在專案裡的套件、`AppData\...\python` 是 Python 本身、`<frozen importlib>` 是 import 機制，全部跳過；啟動錯誤的 traceback 特別長（疊了 uvicorn 子程序和 import 鏈），平常請求出錯大約 10 行。`input_value={...}` 會印出其他設定的一部分，正式環境 log 不能隨便貼 |
 | 2 | 拿掉 `#`，加 `DB_ECHO=true`，重啟，另一個視窗 curl 登入一次 | uvicorn 視窗：啟動時三句 `select pg_catalog.version()`、`current_schema()`、`show standard_conforming_strings`（SQLAlchemy 第一次連線問版本，跳過）；登入那下 `BEGIN` → `SELECT "user"... WHERE email = $1` → `UPDATE "user" SET last_login_at` → `DELETE FROM refreshtoken WHERE ... expires_at <` → `INSERT INTO refreshtoken (token_hash, ...)` → `COMMIT` | 一句 SQL 對一行 `login`：SELECT = 143 行找人；bcrypt 和簽章沒有 SQL（Python 裡做）；UPDATE = 163 行改屬性 ORM 自動變 UPDATE；DELETE = 166 行清過期；INSERT = 169 行存雜湊；COMMIT = 170 行才真的寫。INSERT 參數裡印出 64 字 token 雜湊 → 這就是 `DB_ECHO` 只能本機開的理由（另一個理由：正式環境每個請求幾行 SQL 會灌爆 log）。`$1::VARCHAR` 是參數化，SQL injection 擋在這。第一次登入 `duration_ms` 幾千是 Neon 冷啟動，再打一次會掉到 100 多 |
-| 3 | 加 `REFRESH_TOKEN_EXPIRE_DAYS=1`，重啟，`curl.exe -s -i` 登入 | `set-cookie` 的 `Max-Age=86400`（原本 604800） | 數字走的路：`.env` 字串 `"1"` → `config.py:37` 轉 int 蓋掉預設 7 → `routes/auth.py:37` 算 `max_age` → 同一個設定 `security.py:71` 算資料庫 `expires_at`。一個設定、一處定義、兩處用 |
+| 3 | 加 `REFRESH_TOKEN_EXPIRE_DAYS=1`，重啟，`curl.exe -s -i` 登入 | `set-cookie` 的 `Max-Age=86400`（原本 604800） | 數字走的路：`.env` 字串 `"1"` → `config.py:37` 轉 int 蓋掉預設 7 → `routes/auth.py:37` 算 `max_age` → 同一個設定 `security.py:85` 算資料庫 `expires_at`。一個設定、一處定義、兩處用 |
 | 4 | 不重啟，在 `backend`：`uv run python -c "from config import settings; print(settings.refresh_token_expire_days, type(settings.refresh_token_expire_days)); print(settings.db_echo, type(settings.db_echo)); print(settings.cors_origin_list)"` | `1 <class 'int'>` / `True <class 'bool'>` / `['http://localhost:5173']` | `.env` 全是字串，欄位的型別標註決定轉成什麼；`cors_origin_list` 是 94 行的 property 把 `"a,b"` 切成 list。**這個指令是「改了設定沒生效」的萬用檢查**：印的是 `Settings` 真的讀到的值，沒重啟、改錯檔、名字打錯（26 行 `extra="ignore"` 會安靜忽略）、系統環境變數蓋掉（優先於 `.env`、最陰因為不在任何檔案裡）四種原因都抓得到 |
 | 5 | 刪掉 `REFRESH_TOKEN_EXPIRE_DAYS=1` 和 `DB_ECHO=true`，重啟 | `.env` 回原狀 | |
 | 6 | 整個 `.env` 改名（`Rename-Item .env .env.bak`），重啟，看完改回來 | `2 validation errors`：`database_url`、`jwt_secret` | 必填的一次全列出來（不同欄位各報一個，和關卡 0 的規則一樣）。可以當題目讓他先猜幾個 |
