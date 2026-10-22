@@ -63,6 +63,7 @@
 | 19 | HTTP 與瀏覽器規則 | 狀態碼、標頭、cookie、CORS、快取 | ✅ 完成 |
 | 20 | 讀 log 與除錯（故障演練） | 分段確認、request id、用測試抓 bug | ✅ 完成 |
 | 21 | docker compose 與 Playwright E2E | 一個檔案起整套、healthcheck 與 depends_on、真瀏覽器走主路徑 | ✅ 完成 |
+| 22 | 指標與追蹤 | Prometheus 拉 /metrics、label 與 cardinality、p95、儀表板進 git、OpenTelemetry 與 collector、log ↔ trace | ✅ 完成 |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -3824,6 +3825,204 @@ ci.yml 驗的是「這個 image 做得出來、跑得起來」，資料庫是 Gi
 <summary>Q4：`down` 和 `down -v` 差在哪，什麼時候該用哪個？</summary>
 
 `down` 刪容器和網路，保留 volume：資料還在，下次 `up` 不用重新註冊。`down -v` 連 volume 一起刪：全新的倉庫，遷移會從 0001 跑一遍。CI 用 `-v`（每次都要乾淨），本機學習時想保留帳號就不加。
+
+</details>
+
+---
+
+## 關卡 22：指標（Prometheus + Grafana）與追蹤（OpenTelemetry）✅
+
+**改動的檔案**：新增 `backend/metrics.py`、`backend/tracing.py`、`backend/tests/test_metrics.py`、`backend/tests/test_tracing.py`、`infra/prometheus/prometheus.yml`、`infra/grafana/provisioning/`（datasources、dashboards）、`infra/grafana/dashboards/backend.json`、`infra/otel/collector.yaml`；改 `backend/main.py`（掛上兩者、log 帶 trace_id）、`config.py`（`METRICS_ENABLED`、`OTEL_EXPORTER_OTLP_ENDPOINT`）、`pyproject.toml`（`prometheus-client`、`opentelemetry-*`）、`.env.example`、`infra/compose.yaml`（profile `observability`）、`infra.yml`（`observability` job）。
+
+**一句話**：除了錯誤（Sentry）和 log，還要有「數字」和「一個請求走了哪幾站」，而且儀表板進 git；兩個都是開關，預設關，線上行為不變。
+
+### 觀念 1：三種訊號各管一件事
+
+| | log（關卡 11） | 指標 metrics | 追蹤 tracing |
+| --- | --- | --- | --- |
+| 長什麼樣 | 一筆一筆的事件 | 累計的數字，定期取樣 | 一棵樹：請求與它底下的每一步 |
+| 回答什麼 | 「那個請求發生了什麼」 | 「這小時多快、錯誤率、趨勢」 | 「這 120 毫秒花在哪一步」 |
+| 成本 | 每個請求一行，量大 | 幾個數字，再多請求也不變大 | 每個請求一棵樹，通常抽樣 |
+| 拿來 | 查單一事件、除錯 | 儀表板、告警 | 找慢的那一句 SQL |
+
+三種要能互相找：log 帶 `request_id` 和 `trace_id`，span 帶 `X-Request-ID`。使用者回報一個 request id，三邊都查得到。
+
+### 觀念 2：指標是「拉」的，而且 label 的值要有限
+
+程式只負責把數字放在 `/metrics`（純文字，一行一個），Prometheus 每隔 `scrape_interval`（這裡 5 秒）主動來抓，存成時間序列。程式不知道 Prometheus 在哪、有幾個，這就是「拉」模式的好處。
+
+每一組不同的 label 值就是一條時間序列。所以 `route` 用**路由樣板**（`/api/auth/login`）而不是實際路徑：路徑裡有 id 的話（`/todos/123`）每個 id 都是一條新序列，Prometheus 會被撐爆（cardinality 爆炸）。沒對上任何路由的亂打路徑一律記 `unmatched`，同樣是不讓外人灌爆它。`user_id`、`email` 這種永遠不能當 label。
+
+### 觀念 3：耗時用直方圖，看 p95 不看平均
+
+平均 50 毫秒可能是「大家都 50」，也可能是「95% 的人 10 毫秒、5% 的人 800 毫秒」。後者才是要修的，平均看不出來。`http_request_duration_seconds` 是直方圖：把每個請求的耗時丟進「≤5ms、≤10ms、…、≤10s」的桶子各加一，Grafana 用 `histogram_quantile(0.95, …)` 算出「95% 的請求在幾毫秒內完成」。桶子的邊界是固定的，所以算出來是近似值，夠用。
+
+### 觀念 4：儀表板進 git
+
+Grafana 開起來就已經接好 Prometheus、已經有一張「JWT Auth Demo backend」：資料來源和儀表板都是從 `infra/grafana/` 的檔案載入的（provisioning）。和 `render.yaml`、關卡 23 的 k8s 清單是同一個概念：設定用檔案描述，進 git，改了有 diff，重開不會不見，別的專案直接複製。畫面上改了存不回檔案，所以設 `allowUiUpdates: false`，要改就改 json。
+
+### 觀念 5：OpenTelemetry：程式只產生 span，送去哪是設定
+
+追蹤用 OpenTelemetry（OTel），廠商中立的標準：程式產生 span、用 OTLP 協定送出去，收的那頭可以是本機的 collector（這關，只印到 log）、Grafana Cloud、Jaeger、Datadog……換廠商只改環境變數，程式一行不改。這就是不直接用某家 SDK 的理由。
+
+collector 是中繼站：收 → 處理 → 轉送。程式只送到它，要轉去哪在 `infra/otel/collector.yaml` 改。正式環境常用它做批次、抽樣、加標籤、同時送兩家。
+
+span 的來源有兩層：`FastAPIInstrumentor` 每個 HTTP 請求一個 span（名稱是路由樣板）、`AsyncPGInstrumentor` 每句 SQL 一個子 span（掛在驅動層，因為 OTel 的 SQLAlchemy 套件還不支援 2.1）。`/api/ping` 和 `/metrics` 不追蹤：平台每幾秒打一次，追了只是噪音。span 先攢著、每幾秒一批送（`BatchSpanProcessor`），不拖慢請求；collector 掛了也只是 export 失敗，請求照常回。
+
+### 觀念 6：兩個開關，預設都關
+
+`METRICS_ENABLED` 沒設 → `/metrics` 回 404；`OTEL_EXPORTER_OTLP_ENDPOINT` 沒設 → `setup_tracing` 什麼都不做。線上 Render 兩個都沒設，行為和關卡 21 之前一模一樣。而且 `/metrics` 刻意不放 `/api` 底下：Vercel 只轉發 `/api/*`，就算線上打開外面也打不到。同一個 image，compose 給它 `METRICS_ENABLED=true` 和 collector 的位址就全開：12-factor，和 `DATABASE_URL` 同一個道理。
+
+### 程式怎麼寫
+
+`backend/metrics.py` 的 middleware，二十行：
+
+```python
+REQUESTS = Counter("http_requests_total", "HTTP 請求數", ["method", "route", "status"])
+DURATION = Histogram("http_request_duration_seconds", "HTTP 請求耗時（秒）", ["method", "route"])
+
+@app.middleware("http")
+async def record_metrics(request, call_next):
+    if request.url.path == "/metrics":      # 抓指標的請求本身不算
+        return await call_next(request)
+    start = time.perf_counter()
+    status = "500"                          # 沒接住的例外也要算
+    try:
+        response = await call_next(request)
+        status = str(response.status_code)
+        return response
+    finally:
+        route = _route_template(request)    # 路由樣板或 unmatched
+        REQUESTS.labels(request.method, route, status).inc()
+        DURATION.labels(request.method, route).observe(time.perf_counter() - start)
+```
+
+`backend/tracing.py` 的開關與兩層 instrumentation：
+
+```python
+def setup_tracing(app, exporter=None):
+    if exporter is None:
+        if not settings.otel_exporter_otlp_endpoint:
+            return None                     # 沒設端點就完全不啟用
+        exporter = OTLPSpanExporter()       # 端點、header 由 SDK 讀 OTEL_* 環境變數
+    provider = TracerProvider(resource=Resource.create({SERVICE_NAME: "jwt-auth-demo-backend", ...}))
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    FastAPIInstrumentor.instrument_app(app, tracer_provider=provider,
+        excluded_urls="metrics,api/ping",
+        http_capture_headers_server_response=["x-request-id"])   # span 帶回應的 X-Request-ID
+    AsyncPGInstrumentor().instrument(tracer_provider=provider)   # 每句 SQL 一個子 span
+```
+
+`backend/main.py` 的 log middleware 多一行，log ↔ trace 互相找：
+
+```python
+trace_id = current_trace_id()   # 有在追蹤才有值
+if trace_id:
+    extra["trace_id"] = trace_id
+```
+
+`infra/prometheus/prometheus.yml` 抓誰：
+
+```yaml
+scrape_configs:
+  - job_name: backend
+    static_configs:
+      - targets: ["backend:8000"]   # compose 的服務名
+```
+
+`infra/otel/collector.yaml` 的管線：收 OTLP、印到 log。要接真的後端就把 `debug` 換成 `otlphttp` 填目的地：
+
+```yaml
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
+```
+
+### ⚠️ 開始前（Mac）
+
+同關卡 21：有 Docker、`bash scripts/doctor.sh` 說關卡 22 可以。這關多開三個 container（Prometheus、Grafana、collector），第一次會多拉約 500 MB 的 image。沒有 Docker 就看 CI 的 `observability` job（`COACHING.md` 關卡 22 的 VM 路線）。
+
+### ⚠️ 開始前（選配：把 Render 上的 trace 送到 Grafana Cloud）
+
+這段是 `PLAN-INFRA.md` 的 22-C。**全程免費、不用信用卡**；整關不做這段也算完成。你自己開帳號，AI 不替你開。
+
+| 項目 | 2026-10-22 查到的 | 注意 |
+| --- | --- | --- |
+| Grafana Cloud Free | 不用信用卡；10,000 個 metrics series、logs 與 traces 各 50 GB／月、14 天保留 | 額度會變，註冊前再看 grafana.com 的 pricing 頁；**畫面若要求信用卡就停下來** |
+| Render 改環境變數 | 免費方案可以改 | 存檔會自動重新部署一次 |
+
+1. 到 grafana.com 註冊免費帳號，建一個 stack（區域選離你近的）。
+2. stack 裡 **Connections → Add new connection**，搜 **OpenTelemetry (OTLP)**。它會產生一個 token（access policy token，`glc_` 開頭，勾 traces 的 write 權限），並顯示三個值：OTLP endpoint（`https://otlp-gateway-prod-<region>.grafana.net/otlp`）、**Instance ID**（用這張卡片上的數字，不是 stack 的其他 id）、token。token 只顯示一次，先存起來。
+3. 把 `instance id:token` 做成 base64，**不能有換行**（有換行 header 就壞了，會 401）：
+
+   ```bash
+   printf '%s' '<instance id>:<glc_token>' | base64 | tr -d '\n'
+   ```
+
+4. Render → 後端服務 → **Environment**，加兩個變數（Grafana 畫面會給第三個 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`，這個專案用不到：`tracing.py` 直接用 HTTP 的 exporter；設了也無妨）：
+
+   | 變數 | 值 |
+   | --- | --- |
+   | `OTEL_EXPORTER_OTLP_ENDPOINT` | 第 2 步的 endpoint（SDK 會自己接上 `/v1/traces`） |
+   | `OTEL_EXPORTER_OTLP_HEADERS` | `Authorization=Basic%20<第 3 步的 base64>`：空格要寫成 `%20`（OTLP 規範的 header 值要 URL 編碼） |
+
+5. 存檔，等 Render 部署完。Logs 搜 `OpenTelemetry 追蹤已啟用`。
+6. 開一次前端網址（或 `curl https://<你的 Render 網址>/api/health`），等 10 秒。Grafana Cloud → **Explore** → 資料來源選 `grafanacloud-<stack>-traces` → Search → Service Name 選 `jwt-auth-demo-backend` → 看到 `GET /api/health` 的 trace，點開底下有兩個 `SELECT`。這就是 Mac 路線步驟 8～9 的雲端版，差別只有環境變數。
+7. 401 的話：Instance ID 拿錯（要 OTLP 卡片上的）、base64 有換行、token 沒勾 traces write。看完想關掉就把兩個變數刪掉，再部署一次。
+
+### 驗證方式
+
+1. `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose -f infra/compose.yaml --profile observability up -d --build --wait` 五個 `Healthy`。
+2. 打幾次 `/api/ping` 後 `curl -s localhost:8000/metrics | grep '^http_requests_total'` 有 `route="/api/ping"` 的那行，數字會動。
+3. `localhost:9090/targets` 的 `backend` 是 UP；`localhost:3000` 的「JWT Auth Demo backend」五個面板有線。
+4. 打一次 `/api/health`，8 秒後 `logs otel-collector` 有 `Name : GET /api/health` 與 `Name : SELECT`；`logs backend` 同一筆有 `trace_id=`，和 collector 裡的 `Trace ID` 一樣。
+5. `uv run pytest -q`（在 `backend/`）：`test_metrics.py` 3 個、`test_tracing.py` 2 個都綠。
+6. GitHub Actions 的 Infra workflow：`observability` job 有 `✅ Prometheus：…`、`儀表板：JWT Auth Demo backend`、`✅ collector 收到 HTTP 的 span：`。
+
+### 動手玩
+
+1. **label 爆炸**：`backend/metrics.py` 的 `_route_template` 整個函式改成只有 `return request.url.path`，`up -d --build`，打 `/api/nope/1` 到 `/api/nope/5`，`/metrics` 多出五條 `route="/api/nope/N"`。想像 N 是使用者 id、有十萬個使用者。改回來。
+2. **把 /metrics 自己也算進去**：middleware 開頭那個 `if request.url.path == "/metrics"` 兩行拿掉，`up -d --build`，等 30 秒看 `/metrics`：多了 `route="/metrics"` 的 counter，每 5 秒 +1，是 Prometheus 自己打的。改回來。
+3. **同一個 image、少一個環境變數**：不帶 `OTEL_EXPORTER_OTLP_ENDPOINT=…` 重新 `up -d --force-recreate backend`，打 `/api/health`：`logs backend` 沒有 `OpenTelemetry 追蹤已啟用`、沒有 `trace_id=`；collector 的 log 沒有新的 span。程式一行沒改。
+4. **collector 掛了，請求還好嗎**：`docker compose -f infra/compose.yaml --profile observability stop otel-collector`，再打三次 `/api/health`：全部 200、一樣快；幾秒後 `logs backend` 多出 export 失敗的錯誤（有 `export` 字樣），是 exporter 自己在重試，沒有影響請求。`start otel-collector` 回來。
+5. **p95 看得出平均看不出的**：`backend/routes/users.py` 的 `/me` 加一行 `await asyncio.sleep(0.5)`（記得 `import asyncio`），`up -d --build`，登入後重新整理首頁十次、打 `/api/ping` 一百次。Grafana 的「每秒請求數」兩條線差不多，「p95 耗時」被 `/me` 拉到 0.5 秒。改回來：`git checkout -- backend`。
+
+### 想一想
+
+<details>
+<summary>Q1：Sentry（關卡 11）已經會告訴我錯誤了，為什麼還要指標？</summary>
+
+Sentry 抓的是「例外」：程式噴了什麼。指標抓的是「沒噴例外但不對勁」：p95 從 80 毫秒變 800、5xx 比例從 0 變 2%、請求數突然掉到 0。這些沒有 traceback，Sentry 不會響，儀表板和告警會。
+
+</details>
+
+<details>
+<summary>Q2：為什麼線上 Render 預設不開 /metrics、不開追蹤？</summary>
+
+三個理由：線上沒有 Prometheus 來抓，開了也沒人讀；Vercel 只轉發 `/api/*`，`/metrics` 外面本來就打不到；追蹤要有地方收，沒設端點 SDK 連 exporter 都不建。這關的重點是「同一個 image，靠環境變數決定開不開」，不是「線上一定要開」。要開就照「開始前」第二段接 Grafana Cloud。
+
+</details>
+
+<details>
+<summary>Q3：為什麼不直接從程式送到 Grafana Cloud，中間要有 collector？</summary>
+
+本機學習時 collector 只印 log，讓你看得到 span 長什麼樣，不用開帳號。正式環境它負責批次、抽樣、加標籤（環境、版本）、同時送兩家、換廠商時只改它的設定。程式永遠只送到「一個 OTLP 端點」，這就是標準的價值。這個專案線上直送 Grafana Cloud 也行（開始前第二段），因為只有一個服務、不需要中繼。
+
+</details>
+
+<details>
+<summary>Q4：`http_requests_total` 是 13，Prometheus 查出來是 3，哪個對？</summary>
+
+都對。`/metrics` 是「現在」的累計值；Prometheus 存的是「上次抓到時」的值，5 秒抓一次，抓到時 10 次 curl 還沒打。指標是取樣不是逐筆，所以看趨勢用指標、查單一事件用 log。
+
+</details>
+
+<details>
+<summary>Q5：為什麼 SQL 的 span 掛在 asyncpg 而不是 SQLAlchemy？</summary>
+
+做的時候 OTel 的 SQLAlchemy 套件只支援到 2.0，這個專案是 2.1。掛在驅動層反而更貼近真的送出去的 SQL（`db.statement` 就是 Postgres 收到的那句）。代價是看不到 SQLAlchemy 層的 ORM 名稱，對這個專案夠用。
 
 </details>
 
