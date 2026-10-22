@@ -159,6 +159,13 @@
 **為什麼重要**：三種訊號各管一件事：日誌找單一請求、指標看趨勢與告警、追蹤看一個請求走了哪幾站。而且用的是 OpenTelemetry 標準：送到本機的 collector、Grafana Cloud、Datadog 都只改環境變數，程式不動。
 **動手**：Mac 上 `--profile observability` 起來看 localhost:3000 的儀表板和 collector 的 log；沒 Docker 看 CI 的 `observability` job。選配：把 Render 的 trace 送到 Grafana Cloud 免費方案。
 
+## 關卡 23：Kubernetes
+
+**情境**：Render 幫你做了很多事：起容器、掛了重啟、換版時先起新的再關舊的、health check。你只看得到結果，不知道是誰在做、怎麼做。
+**做了什麼**：把同一張光碟（image）交給 Kubernetes（本機用 kind，一個叢集就是一個 Docker 容器）：寫清楚「我要 2 個副本、活著的定義、能服務的定義、要多少 CPU 記憶體、換版時舊的要等新的 Ready 才能關」。遷移獨立成一個 Job 先跑。然後親眼看：換版期間連續打 80 次全部 200；退版一個指令；故意給一個不存在的版本，新 pod 起不來、舊 pod 繼續服務、流量根本沒切過去。
+**為什麼重要**：這些就是 Render 的「自動」背後的事。清單進 git，別的專案直接複製；面試時「零停機怎麼做到」可以指著 `maxUnavailable: 0` 和 `preStop` 說。
+**動手**：Mac 上 `brew install kind kubectl` 照 COACHING 的指令一步步做；沒 Docker 看 CI 的 `k8s` job。線上仍是 Render，這關不換平台。
+
 ---
 
 ## 整個專案一句話

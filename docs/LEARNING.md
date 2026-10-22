@@ -64,6 +64,7 @@
 | 20 | 讀 log 與除錯（故障演練） | 分段確認、request id、用測試抓 bug | ✅ 完成 |
 | 21 | docker compose 與 Playwright E2E | 一個檔案起整套、healthcheck 與 depends_on、真瀏覽器走主路徑 | ✅ 完成 |
 | 22 | 指標與追蹤 | Prometheus 拉 /metrics、label 與 cardinality、p95、儀表板進 git、OpenTelemetry 與 collector、log ↔ trace | ✅ 完成 |
+| 23 | Kubernetes | Deployment 與探針、Service、遷移 Job、ConfigMap 與 Secret、零停機滾動更新、rollout undo、kustomize | ✅ 完成 |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -4023,6 +4024,166 @@ Sentry 抓的是「例外」：程式噴了什麼。指標抓的是「沒噴例�
 <summary>Q5：為什麼 SQL 的 span 掛在 asyncpg 而不是 SQLAlchemy？</summary>
 
 做的時候 OTel 的 SQLAlchemy 套件只支援到 2.0，這個專案是 2.1。掛在驅動層反而更貼近真的送出去的 SQL（`db.statement` 就是 Postgres 收到的那句）。代價是看不到 SQLAlchemy 層的 ORM 名稱，對這個專案夠用。
+
+</details>
+
+---
+
+## 關卡 23：Kubernetes（kind、Deployment、滾動更新、退版）✅
+
+**改動的檔案**：新增 `infra/k8s/base/`（`namespace.yaml`、`configmap.yaml`、`secret.example.yaml`、`migrate-job.yaml`、`deployment.yaml`、`service.yaml`、`kustomization.yaml`）、`infra/k8s/overlays/ci/kustomization.yaml`、`infra/k8s/ci/`（CI 與本機學習用的 Postgres）；`.github/workflows/infra.yml` 加 `k8s` job；`docs/RUNBOOK.md` 第 2 節加 k8s 的退版。程式沒動，image 沒動。
+
+**一句話**：同一個 image 不靠 Render，交給 Kubernetes 排程：幾個副本、怎麼探活、怎麼滾動更新與退版。Render 幫你做的事，這關讓你親眼看見是誰在做。線上仍是 Render，這關不換平台。
+
+### 觀念 1：Render 幫你做的事，在 k8s 全部寫成字
+
+| Render 做的 | k8s 清單裡的 | 在哪 |
+| --- | --- | --- |
+| 起一個實例 | `replicas: 2` | `deployment.yaml` |
+| 掛了重啟 | `livenessProbe`（`/api/ping` 不過就重啟容器） | 同上 |
+| 起來了才給流量 | `readinessProbe`（`/api/health` 不過就不進 Service 名單） | 同上 |
+| 換版先起新的再關舊的 | `strategy.rollingUpdate`：`maxSurge: 1`、`maxUnavailable: 0` | 同上 |
+| 一鍵退版 | `kubectl rollout undo` | `RUNBOOK.md` 第 2 節 |
+| 環境變數 | `ConfigMap`（一般設定）+ `Secret`（密鑰） | `configmap.yaml`、`secret.example.yaml` |
+| 啟動時跑遷移 | 獨立的 `Job` | `migrate-job.yaml` |
+| 固定網址 | `Service`（叢集內的固定名字）；對外還要 Ingress，這關刻意不做 | `service.yaml` |
+
+清單是「我要的狀態」，k8s 的工作是一直讓現況等於它：pod 死了補一個、副本數不對就調、image 變了就換版。
+
+### 觀念 2：pod 會死，Service 給它們固定的名字
+
+pod 是一次性的：換版、掛掉、節點壞了都會換一個新的，IP 也換。Service 用 label（`app: backend`）找到現在活著的 pod，給它們一個固定的名字 `backend` 和 IP，流量平均分給 **Ready** 的那幾個。這和 compose 的服務名是同一個概念，只是多了「只分給 Ready 的」。
+
+`port-forward` 是開一條通道到「某一個 pod」，換版那個 pod 被關它就斷了；所以 CI 量零停機是在叢集裡開一個 curl pod 直接打 Service。
+
+### 觀念 3：遷移用 Job，不放在啟動指令裡
+
+Render 只有一個實例，Dockerfile 的 CMD「先 `alembic upgrade head` 再 uvicorn」沒問題。叢集有 2 個副本，每個 pod 啟動都跑遷移會互相打架。所以遷移獨立成 Job：跑一次、跑完就 `Completed`、失敗重試 `backoffLimit` 次，Deployment 的 `command` 蓋掉 CMD 只跑 uvicorn。Job 的 spec 建好就不能改，要重跑得先 `delete job`（正式環境常讓名字帶版本，或用 Helm hook）。
+
+### 觀念 4：零停機是三件事加起來
+
+1. `maxUnavailable: 0`：舊的要等新的 Ready 才能關，全程至少 N 個在服務。
+2. `readinessProbe`：「Ready」有定義（`/api/health` 回 200），不是容器起來就算。
+3. `preStop: sleep 5`：pod 要關的時候，「從 Service 名單移除」和「送 SIGTERM」是同時發的，名單更新要一兩秒才傳遍叢集，這一兩秒還有流量進來；先睡 5 秒再關，就不會有人打到正在關的 pod。`terminationGracePeriodSeconds: 30` 要大於 preStop 加程式收尾的時間，不然被 SIGKILL。
+
+CI 的 `k8s` job 把這件事數出來：換版期間每 0.5 秒打一次 Service，80 次全部 200。
+
+### 觀念 5：壞版本上不去，退版一個指令
+
+image 不存在、程式起不來、readiness 一直不過：新 pod 永遠不 Ready，`maxUnavailable: 0` 代表舊的不能關，流量永遠只到舊的。使用者沒感覺，`rollout status` 會逾時提醒你。`rollout undo` 退回上一個 revision（上一個 ReplicaSet），本身也是一次滾動更新。和 Render 的 Rollback 按鈕一樣：退版不退資料庫，退完記得修 main。
+
+### 觀念 6：設定與密鑰分開，密鑰不進 git
+
+`ConfigMap` 放一般設定（`LOG_JSON`、`COOKIE_SECURE`），`Secret` 放密鑰（`DATABASE_URL`、`JWT_SECRET`），和 `render.yaml` 的 `envVars`、compose 的 `environment` 同一組名字。`secret.example.yaml` 只是範本，刻意不列進 `kustomization.yaml`；CI 用 `kubectl create secret --from-literal` 建，正式環境由雲端 secret manager 同步、或 Sealed Secrets / SOPS 加密後才進 git。Secret 存的只是 base64 不是加密，叢集要另外開 encryption at rest。還有一個常見的坑：改了 ConfigMap 不會自動重啟 pod，要 `rollout restart`。
+
+### 觀念 7：kustomize：base 加 overlay，不複製貼上
+
+`base/` 是共同的清單，`overlays/ci/` 疊上這個環境的差異（image tag 用 `ci`、多一個 CI 用的 Postgres）。正式環境會有另一個 overlay：registry 的 image、`COOKIE_SECURE=true`、副本數、Ingress，資料庫用託管的不在叢集裡。`kubectl apply -k` 內建，不用裝東西。
+
+### 觀念 8：安全基線，從第一天就寫
+
+`runAsNonRoot`、`readOnlyRootFilesystem`（程式被攻破也寫不了 image 裡的檔案，要寫只有 `/tmp`）、`capabilities: drop ALL`、`allowPrivilegeEscalation: false`、`resources`（requests 是排程的保證量，memory limit 超過會被 OOM 殺掉；不設 CPU limit 因為 CPU 只會被節流不會被殺）。這些在 Dockerfile 的 `USER app` 之上再加一層，正式叢集的 admission policy 通常會要求。
+
+### 程式怎麼寫
+
+`deployment.yaml` 的核心，其他都是註解：
+
+```yaml
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }   # 先起新的、舊的等新的 Ready 才關
+  template:
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: backend
+          image: jwt-backend:latest        # tag 由 overlay 的 images 換
+          command: [uvicorn, main:app, --host, 0.0.0.0, --port, "8000", --no-access-log]  # 蓋掉 CMD，遷移交給 Job
+          envFrom:
+            - configMapRef: { name: backend-config }
+            - secretRef: { name: backend-secret }
+          livenessProbe:  { httpGet: { path: /api/ping,   port: http }, periodSeconds: 10 }
+          readinessProbe: { httpGet: { path: /api/health, port: http }, periodSeconds: 5, failureThreshold: 12 }
+          lifecycle:
+            preStop: { exec: { command: [sleep, "5"] } }  # 等 Service 名單更新完才關
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+```
+
+`migrate-job.yaml`：同一個 image、`command: ["alembic", "upgrade", "head"]`、`restartPolicy: Never`、`backoffLimit: 3`、`ttlSecondsAfterFinished: 600`。
+
+`overlays/ci/kustomization.yaml` 怎麼疊：
+
+```yaml
+resources: [../../base, ../../ci]
+images:
+  - name: jwt-backend
+    newTag: ci          # kind load 進去的那個 tag
+```
+
+CI 的 `k8s` job 一條龍：`docker build` → `kind create cluster` → `kind load docker-image` → namespace + CI 的 Postgres → `create secret` → `apply -k` → `wait job` → `rollout status` → `port-forward` + curl → 換版到 v2 同時 probe pod 打 80 次 → `rollout undo` → 壞 image → undo → `describe`。
+
+### ⚠️ 開始前（Mac，一次性）
+
+- `brew install kind kubectl`，都免費、開源。`bash scripts/doctor.sh` 要說關卡 23 可以。
+- Docker 要在跑（kind 的節點是一個 container）。第一次 `kind create cluster` 拉 `kindest/node` 約 1 GB。
+- 沒有 Docker 的機器看 CI 的 `k8s` job（`COACHING.md` 關卡 23 的 VM 路線）。
+- 這關**不**碰 Render、Neon、Vercel；不會產生任何費用。想在雲端跑真的叢集（GKE、EKS）會有費用，這關刻意不做。
+
+### 驗證方式
+
+1. `kubectl -n jwt-auth-demo get pods`：兩個 `backend-… 1/1 Running`、一個 `backend-migrate-… 0/1 Completed`。
+2. `port-forward` 後 `curl localhost:8080/api/health` 的 `migration` 是最新的（`0006`）、`version` 是 `k8s`。
+3. 換版期間 probe pod 的 80 次全部 `200`。
+4. `rollout undo` 後 image 回到 `jwt-backend:ci`；`rollout history` 多一個 revision。
+5. 壞 image 時 `get pods` 一個 `ErrImagePull`／`ImagePullBackOff`、兩個 `Running`，Service 仍回 `200`。
+6. GitHub Actions 的 Infra workflow：`k8s` job 有 `✅ 零停機：換版期間每一次請求都 200`、`✅ 退版成功`、`✅ 壞版本期間 Service 照常回 200`。
+
+### 動手玩
+
+（都在叢集還開著的時候做；`<pod>` 用 `get pods` 看到的 backend pod 名字）
+
+1. **pod 死了誰補**：`kubectl -n jwt-auth-demo delete pod <pod>`，馬上 `get pods`：被刪的在 `Terminating`，同時多一個 AGE 幾秒的新 pod，幾秒後還是兩個 `Running`。Deployment 的工作就是讓現況等於 `replicas: 2`。
+2. **副本數**：`kubectl -n jwt-auth-demo scale deployment/backend --replicas=3`，`get pods` 三個。再 `kubectl apply -k infra/k8s/overlays/ci`：變回兩個，因為清單說 2。改清單才是正途，指令改的會被下一次 apply 蓋掉。
+3. **程式掛了誰拉起來**：`kubectl -n jwt-auth-demo exec <pod> -- kill 1`（PID 1 就是 uvicorn），`get pods`：同一個 pod 名字、`RESTARTS` 變 1。對照第 1 題：容器掛了是原地重啟，pod 被刪是換新的。
+4. **改了 ConfigMap 不會自動生效**：`infra/k8s/base/configmap.yaml` 把 `LOG_JSON` 改成 `"false"`，`kubectl apply -k infra/k8s/overlays/ci` → `configmap/backend-config configured`，但 `get pods` 的 AGE 沒變、`logs <pod> --tail=3` 還是 JSON。`kubectl -n jwt-auth-demo rollout restart deployment/backend` 之後才換成新 pod、log 變一行文字。改回來，再 apply + rollout restart。
+5. **唯讀檔案系統**：`kubectl -n jwt-auth-demo exec <pod> -- touch /app/x` → `Read-only file system`；`-- touch /tmp/x` 成功。程式被攻破也改不了 image 裡的檔案。
+6. **把零停機弄壞（不保證看得到）**：`deployment.yaml` 的 `maxUnavailable` 改成 `1`、`preStop` 那三行拿掉，`apply -k`，再做一次 COACHING 步驟 9～11 的換版 + probe。可能看到幾次 `000`（連線被拒）：那就是舊 pod 關掉、名單還沒更新的那一兩秒。沒看到也沒關係，kind 單節點更新名單很快；正式叢集幾十個節點就會看到。改回來：`git checkout -- infra`。
+
+### 想一想
+
+<details>
+<summary>Q1：Render 的 Dockerfile CMD 先跑遷移再起伺服器，為什麼 k8s 要拆成 Job？</summary>
+
+Render 一個實例，遷移只會跑一次。k8s 兩個副本同時啟動、同時跑 `alembic upgrade head`，兩個都想建同一張表，一個會失敗、pod 重啟、再跑一次……Job 讓遷移只有一個執行者，Deployment 只負責跑伺服器。正式環境還會用 Helm hook 或 Argo CD 的 sync wave 保證 Job 一定在新版 pod 之前跑完。
+
+</details>
+
+<details>
+<summary>Q2：Secret 只是 base64，誰都解得開，為什麼還不能進 git？</summary>
+
+base64 不是加密，所以 Secret 進 git 等於明文進 git：歷史永遠留著，所有看得到 repo 的人都拿得到。Secret 的意義是「k8s 在存取控制上把它當密鑰」（RBAC 可以只讓某些人讀、可以開 encryption at rest、不會印在 describe 裡），不是「它自己加密了」。要進 git 得先用 Sealed Secrets 或 SOPS 加密。
+
+</details>
+
+<details>
+<summary>Q3：liveness 用 /api/ping、readiness 用 /api/health，反過來會怎樣？</summary>
+
+liveness 用 `/api/health`：資料庫短暫斷線時程式沒壞，但探針不過，k8s 不斷重啟它，反而更糟（關卡 11 的觀念）。readiness 用 `/api/ping`：程式起來了但連不到資料庫也會收流量，使用者看到 500。所以活著用輕的、能服務用重的。注意現在的 `/api/health` 資料庫壞了也回 200（`status` 是 `degraded`），所以 readiness 其實只擋「程式還沒起來」；要讓資料庫壞時真的不接流量，得讓它回 503，這是刻意留給你的作業（想一想代價：Neon 休眠喚醒的那幾秒，兩個 pod 會同時被移出名單）。
+
+</details>
+
+<details>
+<summary>Q4：CI 量零停機為什麼用叢集裡的 probe pod，不用 port-forward？</summary>
+
+port-forward 黏在一個 pod 上，那個 pod 換版被關它就斷了，量到的是「port-forward 斷了」不是「Service 有沒有中斷」。probe pod 在叢集裡直接打 Service 的名字，走的是真的負載平衡，每一次請求都可能到不同的 pod，這才是使用者的視角。
+
+</details>
+
+<details>
+<summary>Q5：所以要把線上從 Render 搬到 k8s 嗎？</summary>
+
+不用。一個服務、一個開發者、免費額度夠用，Render 幫你做的事就是這關寫出來的這些，它做得很好。k8s 的價值在很多服務、很多人、要自己控制網路與排程的時候；代價是這份清單和背後的叢集要有人養。這關的目的是「知道 Render 背後是什麼、換平台時知道要看哪些字」，不是搬家。面試被問「你用過 k8s 嗎」，答案是這個 job 和這份清單。
 
 </details>
 
