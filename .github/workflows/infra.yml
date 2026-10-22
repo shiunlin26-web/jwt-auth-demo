@@ -57,3 +57,52 @@ jobs:
       - name: compose down
         if: always()
         run: docker compose -f infra/compose.yaml down -v
+
+  # ==================================================================
+  # 【關卡 21】e2e：真的瀏覽器走一遍「註冊 → 登入 → 重新整理 → 登出」（frontend/e2e/）
+  # 後端用上面同一份 compose 起（job 之間不共用機器，所以要再起一次）；前端由 Playwright 自己跑 npm run dev，
+  # Vite 把 /api 代理到 compose 的後端（vite.config.ts），瀏覽器看到的是同一個網站，cookie 行為和正式環境一樣
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: compose up（後端整套）
+        run: docker compose -f infra/compose.yaml up -d --build --wait --wait-timeout 120
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安裝套件
+        working-directory: frontend
+        run: npm ci
+
+      # Playwright 的瀏覽器不在 npm 套件裡，要另外下載；--with-deps 順便裝 Chromium 需要的系統函式庫
+      - name: 安裝 Chromium
+        working-directory: frontend
+        run: npx playwright install chromium --with-deps
+
+      # playwright.config.ts 的 webServer 會自己起 Vite dev server；CI=true 時不重用、不重試、留下 HTML 報告
+      - name: E2E（Playwright）
+        working-directory: frontend
+        run: npx playwright test
+
+      # 報告上傳成 artifact：在 run 頁面最下面下載，解開後開 index.html，失敗的測試有每一步的截圖和 trace
+      - name: 上傳 Playwright 報告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+      - name: compose logs
+        if: failure()
+        run: docker compose -f infra/compose.yaml logs --no-color
+
+      - name: compose down
+        if: always()
+        run: docker compose -f infra/compose.yaml down -v
