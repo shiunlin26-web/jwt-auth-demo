@@ -39,6 +39,8 @@ jwt-auth-demo/
 ├── docs/                      # PLAIN（每關白話版）、COACHING（帶做腳本）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環任務書）、QA、DEBUGGING、RUNBOOK、PLAN
 ├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
 ├── scripts/setup.ps1          # 乾淨的 Windows 機器一鍵建置（裝工具、拉 main、.env、sync、測試）
+├── scripts/setup.sh           # 同一件事的 Mac 版
+├── scripts/doctor.sh, .ps1    # 這台能做哪幾關（有沒有 Docker、kind）
 └── frontend/src/
     ├── app/
     │   ├── router.tsx     # 路由表：哪個網址顯示哪個頁面、哪些頁面要登入
@@ -62,7 +64,7 @@ jwt-auth-demo/
 **前後端怎麼接**：前端只打「自己網域的 `/api/...`」。本機由 Vite 轉發到 `localhost:8000`，正式環境由 Vercel 轉發到 Render。
 對瀏覽器來說前後端永遠是同一個網站，refresh cookie 才會被帶上，也不需要 CORS。說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10。
 
-## 每次開機怎麼把專案跑起來（乾淨機器，Windows）
+## 每次開機怎麼把專案跑起來（乾淨機器，Windows；Mac 見本節末）
 
 電腦每次開機都是乾淨系統（連 repo 都會消失）的話，不用照後面的手動步驟，每次開機在 PowerShell 貼兩行：
 
@@ -72,7 +74,7 @@ powershell -ExecutionPolicy Bypass -File $HOME\jwt-auth-demo\scripts\setup.ps1 -
 ```
 
 - 連 git 都沒有時，先到 git-scm.com 裝，或有 winget 的話 `winget install Git.Git`。
-- `git clone` 會跳瀏覽器登入 GitHub（repo 是私有的），每次開機都會問一次。
+- repo 是公開的，`git clone` 不用登入；之後要 `git push` 時才會跳瀏覽器登入 GitHub。
 - `-ExecutionPolicy Bypass -File` 是為了繞過 Windows 預設擋 `.ps1` 的設定；你的機器本來就允許的話，`& .\scripts\setup.ps1 -SkipTests` 也可以。
 - repo 還在（沒被清掉）的話只要第二行，腳本自己會 `git pull`。
 
@@ -91,6 +93,8 @@ cd frontend; npm run dev
 ```
 
 瀏覽器開 <http://localhost:5173>。連線字串打錯：`Ctrl+C`，`Remove-Item backend\.env -ErrorAction SilentlyContinue`，重跑第二行；其他症狀見 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)「安裝與啟動」。
+
+**Mac**（晚上與週末那台，有 Docker）：`bash scripts/setup.sh --skip-tests`，做的事和 `setup.ps1` 一樣，參數是 `--skip-tests`、`--env-file ~/jwt.env`。Mac 不會清空，之後再跑只是 `git pull` 加同步套件。開任何一關之前先跑 `bash scripts/doctor.sh`（Windows：`powershell -ExecutionPolicy Bypass -File scripts\doctor.ps1`），它會印出這台能做哪幾關；關卡 21 起的路線在 [`docs/PLAN-INFRA.md`](docs/PLAN-INFRA.md)。
 
 > 下面「需要先安裝」到「3. 啟動前端」是手動版，腳本做的就是這些事；想知道每一步為什麼、或不是 Windows，照手動版做。
 
