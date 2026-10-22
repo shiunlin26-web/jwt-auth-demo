@@ -33,6 +33,18 @@ Render 有一鍵退版，不用改程式碼：
 > ⚠️ 退版不會退資料庫。如果壞的那版跑了遷移（例如加了欄位），舊版程式通常還是能跑（多一個欄位不影響）；
 > 但如果遷移是「刪欄位、改型別」，舊版可能會壞。這就是為什麼遷移要寫成「先加、後刪」兩步，見第 3 節。
 
+### Kubernetes 的退版（關卡 23，只有本機 kind 或自己的叢集才用得到）
+
+叢集版沒有按鈕，是指令：
+
+```bash
+kubectl -n jwt-auth-demo rollout history deployment/backend   # 現在在哪一版（每次換版一個 REVISION）
+kubectl -n jwt-auth-demo rollout undo deployment/backend      # 退回上一個 REVISION
+kubectl -n jwt-auth-demo rollout status deployment/backend    # 等它完成
+```
+
+undo 本身也是一次滾動更新（`maxUnavailable: 0`，零停機）。壞版本起不來（`ImagePullBackOff`、readiness 一直不過）時流量根本不會切過去、`rollout status` 會逾時，這時一樣 undo。退版不退資料庫、退完記得修 main，和上面 Render 的注意事項相同。
+
 ## 3. 遷移壞了
 
 **正式環境不要手動 `alembic downgrade`。** 原則是 **roll forward**：推一個新的遷移把它改回去。

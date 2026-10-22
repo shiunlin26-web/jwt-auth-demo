@@ -5,6 +5,29 @@
 - **後端**：FastAPI + SQLModel（async）+ PostgreSQL（Neon 或本地 Postgres）
 - **前端**：React + TypeScript + Vite（React Router、Zustand、axios、TanStack Query、React Hook Form + Zod、Tailwind CSS）
 
+## 這個專案展示了什麼
+
+```
+ 使用者 ── 瀏覽器 ──▶ Vercel（React）──/api/*──▶ Render（FastAPI 容器）──▶ Neon Postgres
+                                                      ├──▶ JSON log（request id）、Sentry
+                                                      ├──▶ /metrics、OTLP span ──▶ Prometheus + Grafana、OTel collector（compose）
+                                                      └──▶ outbox 表 ──▶ worker ──▶ Kafka（Redpanda）──▶ consumer（冪等）
+ git push ──▶ GitHub Actions：ci.yml 全綠才合併；infra.yml 在 PR 上跑 compose、E2E、observability、k8s、messaging ──▶ main ──▶ Render、Vercel 自動部署
+ 同一個 backend/Dockerfile 的 image 跑在三個地方：Render（線上）、infra/compose.yaml（本機整套）、infra/k8s/（kind 上 2 副本、零停機滾動更新、退版）
+```
+
+| 這條鏈的一段 | 做了什麼 | 怎麼證明它會動 |
+| --- | --- | --- |
+| 登入 | JWT access token + 輪替的 refresh token（HttpOnly cookie、重複使用偵測）、前後端同站代理 | `uv run pytest -q`（60 多個測試，以輸出為準）、`npm test` |
+| 上線 | Docker image；Render + Vercel + Neon 全免費方案；`/api/health` 報遷移版本與 commit | 線上開 `/api/health` |
+| CI/CD | ruff、pyright、alembic check、pytest、Docker smoke、eslint、prettier、vitest、tsc；CI 綠才部署 | Actions 的 **CI** workflow |
+| 本機整套與 E2E | `docker compose` 一個指令起整套；Playwright 在真瀏覽器走註冊 → 登入 → 重整 → 登出 | **Infra** workflow 的 `compose`、`e2e` job |
+| 可觀測性 | JSON log + Sentry；Prometheus 指標與 Grafana 儀表板（進 git）；OpenTelemetry 追蹤，log ↔ trace 互相找得到 | `observability` job |
+| Kubernetes | kustomize 清單：遷移 Job、2 副本、探針、資源、非 root；換版期間 80 次請求全部 200、`rollout undo`、壞 image 被擋住 | `k8s` job |
+| 非同步訊息 | transactional outbox；worker 送 Kafka；consumer 同一筆只處理一次；線上免費方案用 inline worker | `messaging` job |
+
+整條鏈的地圖、每一塊怎麼擴充與換棧對照：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。每一段怎麼做、為什麼：[`docs/LEARNING.md`](docs/LEARNING.md) 關卡 0～24。
+
 ## 專案結構
 
 ```
@@ -22,6 +45,10 @@ jwt-auth-demo/
 │   ├── config.py          # 所有設定集中在這裡（讀 .env）
 │   ├── logging_config.py  # log 格式（文字 / JSON）
 │   ├── rate_limit.py      # 登入 / 註冊的頻率限制，與代理後面的客戶端 IP
+│   ├── metrics.py         # 【關卡 22】/metrics 與請求計數、耗時直方圖（METRICS_ENABLED 才開）
+│   ├── tracing.py         # 【關卡 22】OpenTelemetry 追蹤（設了 OTEL_EXPORTER_OTLP_ENDPOINT 才開）
+│   ├── outbox.py          # 【關卡 24】transactional outbox：enqueue、worker、冪等的 consumer
+│   ├── worker.py, consumer.py  # 【關卡 24】同一個 image 的另外兩種入口（compose 的 messaging profile）
 │   ├── alembic.ini        # Alembic（資料庫遷移）設定
 │   ├── migrations/        # 資料庫遷移檔，記錄資料表結構的每一次變更
 │   ├── tests/, pytest.ini # pytest 自動化測試
@@ -35,9 +62,11 @@ jwt-auth-demo/
 ├── AGENTS.md                  # 給 AI 工具（與人）看的專案規矩；CLAUDE.md 指向它
 ├── .editorconfig              # 編輯器共用的縮排、換行規則
 ├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pyright、alembic check、pytest、Docker build；前端 prettier / lint / vitest / build
+├── .github/workflows/infra.yml  # 只在 PR 跑：compose、e2e（Playwright）、observability、k8s（kind）、messaging（Redpanda）
 ├── .github/dependabot.yml     # 每週自動開 PR 更新套件
-├── docs/                      # PLAIN（每關白話版）、COACHING（帶做腳本）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環任務書）、QA、DEBUGGING、RUNBOOK、PLAN
+├── docs/                      # PLAIN（每關白話版）、COACHING（帶做腳本）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環 + 選做四環的任務書）、QA、DEBUGGING、RUNBOOK、PLAN、PLAN-INFRA（基礎設施路線）、ARCHITECTURE（整條鏈的地圖）
 ├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
+├── infra/                     # 關卡 21～24：compose、k8s（kustomize）、prometheus、grafana、otel；怎麼跑看 infra/README.md
 ├── scripts/setup.ps1          # 乾淨的 Windows 機器一鍵建置（裝工具、拉 main、.env、sync、測試）
 ├── scripts/setup.sh           # 同一件事的 Mac 版
 ├── scripts/doctor.sh, .ps1    # 這台能做哪幾關（有沒有 Docker、kind）
@@ -55,6 +84,7 @@ jwt-auth-demo/
     ├── schemas/           # 表單規則（Zod），和後端 schemas.py 一致
     └── test/              # Vitest 的 setup 與 MSW 假後端；測試檔放在被測檔案旁邊（*.test.ts、*.test.tsx）
     frontend/vitest.config.ts  # 前端測試設定（沿用 vite.config.ts）
+    frontend/e2e/, playwright.config.ts  # 【關卡 21】Playwright E2E：真瀏覽器走登入主路徑（npm run test:e2e）
     frontend/index.html, main.tsx, index.css  # 入口：HTML、掛上 React（QueryClientProvider、Router）、Tailwind
     frontend/vercel.json   # Vercel 部署設定：把 /api/* 轉發到 Render、SPA 路由
     frontend/vite.config.ts  # 本機開發：把 /api/* 轉發到 localhost:8000
@@ -312,7 +342,8 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 ## 學習路線
 
 一步步把這個專案練到接近生產級的過程，記錄在 [`docs/LEARNING.md`](docs/LEARNING.md)。
-要接手帶人（或換一個 AI 工具繼續）：先讀 [`docs/HANDOFF.md`](docs/HANDOFF.md)，帶做的方法與每關腳本在 [`docs/COACHING.md`](docs/COACHING.md)；要把這套搬到新專案：[`docs/CHAIN.md`](docs/CHAIN.md)。
+要接手帶人（或換一個 AI 工具繼續）：先讀 [`docs/HANDOFF.md`](docs/HANDOFF.md)，帶做的方法與每關腳本在 [`docs/COACHING.md`](docs/COACHING.md)；要把這套搬到新專案：[`docs/CHAIN.md`](docs/CHAIN.md)（七環主線 + 選做的環 8～11）。
+基礎設施路線（關卡 21～25：compose 與 E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖）的計畫與進度在 [`docs/PLAN-INFRA.md`](docs/PLAN-INFRA.md)，怎麼親手跑在 [`infra/README.md`](infra/README.md)。
 
 ## 常見問題
 

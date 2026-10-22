@@ -12,10 +12,11 @@ JWT 登入的教學範本：FastAPI 後端 + React 前端 + Neon Postgres，已�
 - **帶做的方法與每關腳本：`docs/COACHING.md`**。預設用「一次一個指令、他貼輸出、從輸出講」的方式帶，不要丟整關給他讀
 - 學習路線與每一關的說明：`docs/LEARNING.md`；每關的白話版（給學習者先看）：`docs/PLAIN.md`
 - 照「一個請求怎麼跑」讀程式：`docs/TOUR.md`
-- 開練習專案、搬登入模板：`docs/CHAIN.md`（七環任務書 + 搬家清單）
+- 開練習專案、搬登入模板：`docs/CHAIN.md`（七環任務書 + 選做的環 8～11 + 搬家清單）
 - 壞掉時查：`docs/DEBUGGING.md`；維運流程：`docs/RUNBOOK.md`；觀念問答：`docs/QA.md`
 - 20 天計畫（設計理由，時程已過期）：`docs/PLAN.md`
 - 基礎設施路線（關卡 21～25：compose、E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖）：`docs/PLAN-INFRA.md`。做任何一小塊前讀它的第 2 節與那一小塊的段落，**不要讀 `LEARNING.md` 全文**
+- 整條鏈的地圖（四條路徑、每塊怎麼證明）：`docs/ARCHITECTURE.md`；基礎設施怎麼親手跑：`infra/README.md`
 
 ## 結構
 
@@ -25,7 +26,10 @@ backend/            FastAPI。入口 main.py，設定 config.py，資料表 mode
   tests/            pytest，需要 TEST_DATABASE_URL
 frontend/src/       React + Vite。api/（axios、TanStack Query 快取）、auth/（Zustand store、useMe、守門員）、pages/、components/（含 ui.tsx）、schemas/（Zod）
   test/             Vitest 的 setup 與 MSW 假後端；測試檔放在被測檔案旁邊（*.test.ts、*.test.tsx）
-.github/workflows/  CI：後端 ruff（lint + format）、pyright、alembic check、pytest、Docker build/run/smoke；前端 eslint、prettier、vitest、tsc + build
+.github/workflows/  ci.yml：後端 ruff（lint + format）、pyright、alembic check、pytest、Docker build/run/smoke；前端 eslint、prettier、vitest、tsc + build
+                    infra.yml（只在 PR 跑）：compose、e2e（Playwright）、observability（Prometheus / Grafana / OTel）、k8s（kind）、messaging（Redpanda）
+infra/              關卡 21～24 的基礎設施：compose.yaml（profiles：observability、messaging）、k8s/（kustomize）、prometheus/、grafana/、otel/。搬登入模板可以不搬
+backend/            另有 metrics.py（/metrics）、tracing.py（OpenTelemetry）、outbox.py + worker.py + consumer.py（transactional outbox、Kafka）
 render.yaml         Render 後端設定；frontend/vercel.json：Vercel 轉發 /api 到 Render
 ```
 
