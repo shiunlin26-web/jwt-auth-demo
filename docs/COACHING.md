@@ -147,21 +147,25 @@
 
 ### 關卡 3：登出所有裝置、改密碼
 
-**搭配看的程式**：`backend/routes/auth.py` 的 `delete_expired_refresh_tokens`（65）、`logout`（241）、`logout_all`（266）、`change_password`（286）；`backend/schemas.py` 的 `ChangePasswordRequest`；`frontend/src/pages/SettingsPage.tsx`
+**搭配看的程式**：`backend/routes/auth.py` 的 `delete_expired_refresh_tokens`（65）、`logout`（241）、`logout_all`（266）、`change_password`（286）；`backend/schemas.py` 的 `ChangePasswordRequest`；`frontend/src/api/client.ts` 的 response 攔截器（74～97，第 3 題要用）；`frontend/src/pages/SettingsPage.tsx`
 
-**前置**：後端跑起來、帳號存在。用兩個 cookie 罐模擬兩台裝置。
+**前置**：後端跑起來（先 `curl.exe -s -i localhost:8000/api/ping` 確認，曾經後端沒開、罐子是空的還往下做）、帳號 `t@test.com` / `Passw0rd!x`。用兩個 cookie 罐模擬兩台裝置：A 電腦、B 手機。**一次只給一步、只收一步的輸出**（曾經一次丟三步，其中一步貼錯 token 就繞了很久）。access token 要他整串複製，指令裡直接把他貼過的 token 填好，不要留 `<佔位符>`（曾經原樣送出 `<A的token>`、也曾只貼 `eyJhbGci` 八個字，都回 `401 Invalid or expired token`：那是 `get_current_user` 驗簽章失敗，進不到函式）。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | 登入兩次，分別存 `a.txt`、`b.txt`（`-c a.txt`、`-c b.txt`），把第一次回的 `access_token` 複製起來 | 兩個罐子裡的值不一樣 | 同一個帳號兩台裝置，各有自己的會員卡 |
-| 2 | 用 A 的 token 改密碼：`curl.exe -s -i localhost:8000/api/auth/change-password -b a.txt -c a.txt -H "Authorization: Bearer <A的token>" -H "Content-Type: application/json" -d '{\"current_password\":\"Passw0rd!x\",\"new_password\":\"Passw0rd!y\"}'` | `200`，有新的 `access_token` 和新的 `set-cookie` | 改密碼的人自己不被登出 |
-| 3 | `curl.exe -s -i -b b.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Invalid refresh token` | B 的會員卡被作廢了，重新整理就會掉登入。但 B 手上還沒過期的 access token 仍然能用 30 分鐘，這是設計上的取捨 |
-| 4 | 用舊密碼登入 → `401`；用新密碼登入 `-c b.txt` → `200` | | 改完要把密碼改回 `Passw0rd!x`，再跑一次步驟 2 |
-| 5 | 目前密碼故意打錯跑步驟 2 | `400`，不是 401 | 400 和 401 的分工：401 會讓前端攔截器以為 token 過期去 refresh |
-| 6 | `curl.exe -s -i -X POST localhost:8000/api/auth/logout-all -H "Authorization: Bearer <token>"` 後，兩個罐子都去 refresh | `204`，然後兩個都 `401` | 204 是「成功、沒內容」 |
+| 1 | 登入兩次：`curl.exe -s -c a.txt localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'`，再一次 `-c b.txt`，然後 `type a.txt`、`type b.txt` | 兩個 JSON 各一個 `access_token`；兩個罐子的 `refresh_token` 值不同 | 同一個帳號兩台裝置，各一張會員卡。把 A 的 access token 留著 |
+| 2 | Neon（`neondb`）：`SELECT count(*), count(*) FILTER (WHERE revoked) AS revoked FROM refreshtoken WHERE user_id = <id>;` | 不只 2（他之前每次登入、每次換票都各 INSERT 一列，蓋章的舊卡不刪） | 表會慢慢長大是正常的：蓋章的卡留著當證據，登入時的 DELETE 只清**過期**的。這關的兩個動作會讓它一次歸零 |
+| 3 | 用 A 改密碼：`curl.exe -s -i localhost:8000/api/auth/change-password -b a.txt -c a.txt -H "Authorization: Bearer <A 的 token 整串>" -H "Content-Type: application/json" -d '{\"current_password\":\"Passw0rd!x\",\"new_password\":\"Passw0rd!y\"}'`；再查一次步驟 2 的 SQL（先讓他猜 count） | `200`，新 `access_token`、新 `set-cookie`；count `1`、revoked `0` | `change_password` 五步：bcrypt 驗目前密碼（錯回 **400** 不是 401）→ 新舊相同 400 → 新密碼 bcrypt 存 → `revoke_all_refresh_tokens` 整排刪 → `issue_refresh_token` 立刻補發一張給自己。少了補發，改密碼的人也會被登出 |
+| 4 | B 換票：`curl.exe -s -i -b b.txt -X POST localhost:8000/api/auth/refresh`（先猜關卡 1 的哪句 401） | `401 Invalid refresh token` | B 的卡被整排刪掉，查不到。**但 B 手上的 access token 到 30 分鐘過期前還能用**：驗 access token 不查資料庫，「其他裝置登出」是下次換票時才發生。要立刻失效得加黑名單表、每個請求都查，就失去 access token 快的優點，設計上接受這個取捨（`logout_all` 的 docstring） |
+| 5 | 舊密碼登入 `-s -i`（`Passw0rd!x`）；新密碼登入 `-s -c b.txt`（`Passw0rd!y`） | `401 Incorrect email or password`；`200` | B 用新密碼重新登入，又多一列 |
+| 6 | 用 B 的新 token，目前密碼故意打 `wrong`，`new_password` 填 `Passw0rd!x` | `400`，`目前密碼錯誤` | 為什麼不能 401：先給攔截器四條規則（不是 401 或已 `_retry` → 丟出；401 第一次 → 標記、換票；換票失敗 → `clearSession`；成功 → 原請求重送一次），讓他推：改成 401 會變 `change-password 401 → refresh 200 → change-password 401`，多一次沒必要的換票與輪替、同樣的密碼多送一趟、等兩倍時間還是錯。狀態碼選錯程式不會壞，只會做多餘的事 |
+| 7 | 把密碼改回 `Passw0rd!x`（`current_password` 填 `Passw0rd!y`） | `200`，新 token | 留著下一步用 |
+| 8 | 登出所有裝置：`curl.exe -s -i -X POST localhost:8000/api/auth/logout-all -H "Authorization: Bearer <步驟 7 回的 token>"`，然後 B 再換票一次，再查 count | `204 No Content`，標頭 `set-cookie: refresh_token=""; Max-Age=0; Path=/api/auth`；B `401`；count `0` | 204 = 成功沒內容。刪 cookie 沒有指令，是「設一張同名、同 Path、立刻過期的」蓋掉；Path 不同瀏覽器當成另一張，舊的留著刪不掉，而且兩張都符合 `/api/auth` 時瀏覽器兩張都帶，`Cookie()` 取第一個可能取到舊的 → 重新登入後還是 401（故障演練第 6 條） |
 
-**收尾**：改密碼 = 自己換新票、別人全作廢 / 登出所有裝置 = 全作廢 / access token 的 30 分鐘是接受的風險。
-**動手玩**：`LEARNING.md` 關卡 3。
+**收尾一句話**：改密碼 = 整排刪 + 補發一張給自己；登出所有裝置 = 整排刪 + 清自己的 cookie；其他裝置要到下次換票才發現。
+**收尾要講到**：脈絡表（兩台裝置的一天 × 資料庫列數）/ 改密碼三個寫入在同一個交易（UPDATE user、DELETE refreshtoken、INSERT refreshtoken、COMMIT），一起成功或一起失敗 / `logout` 只刪 cookie 那一列、不用 access token（cookie 本身證明是你的，沒 cookie 也 204）；`logout_all` 要 user_id 所以要 access token 的 `sub` / 204 與 400（不是 401）兩個狀態碼補進關卡 0 的表。
+**題目**（一題一題問，答完一題對一題）：改密碼後自己為什麼不用重登、哪一行 / 手機什麼時候發現被登出、為什麼不是立刻 / 目前密碼錯改成 401 會怎樣（先給攔截器規則再讓他一步步推）/ `Path=/` 刪 cookie 會變幾張、後果 / `logout` 與 `logout_all` 的差別、為什麼一個不用 access token / 改密碼成功時資料庫的寫入順序。
+**動手玩**：`LEARNING.md` 關卡 3 的用兩個瀏覽器（一般 + 無痕）在畫面上再做一次。
 
 ### 關卡 4：自動化測試（pytest）
 
