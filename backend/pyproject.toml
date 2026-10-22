@@ -31,6 +31,7 @@ dependencies = [
     "alembic",
     "sentry-sdk[fastapi]",
     "slowapi>=0.1.10",
+    "prometheus-client>=0.26.0",
 ]
 
 # 開發時才需要的套件（對應原本的 requirements-dev.txt）。

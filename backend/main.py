@@ -15,6 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from config import settings
 from database import engine, get_session
 from logging_config import setup_logging
+from metrics import setup_metrics
 from rate_limit import get_client_ip, limiter
 from routes import auth, users
 
@@ -124,6 +125,10 @@ async def log_requests(request: Request, call_next):
         },
     )
     return response
+
+
+# 【關卡 22】指標：每個請求累計到 http_requests_total 與 http_request_duration_seconds，/metrics 給 Prometheus 抓（metrics.py）
+setup_metrics(app)
 
 
 # 【關卡 10】所有 API 統一掛在 /api 底下：/api/auth/login、/api/me、/api/ping
