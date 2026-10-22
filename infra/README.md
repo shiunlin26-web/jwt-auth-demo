@@ -9,6 +9,7 @@
 | `../frontend/e2e/`、`../frontend/playwright.config.ts` | 21 | Playwright E2E：真的瀏覽器走「註冊 → 登入 → 重新整理 → 登出」，後端用 compose 起 | `infra.yml` 的 `e2e` job（報告在 artifact `playwright-report`） |
 | `prometheus/`、`grafana/` | 22 | `--profile observability` 多起 Prometheus（抓 `backend:8000/metrics`）與 Grafana（資料來源、儀表板都從檔案載入） | `infra.yml` 的 `observability` job |
 | `otel/` | 22 | OpenTelemetry Collector：收後端送來的追蹤 span，印到 log（後端要設 `OTEL_EXPORTER_OTLP_ENDPOINT` 才會送） | 同上 job 的「追蹤」那步 |
+| `k8s/` | 23 | Kubernetes 清單：`base/`（ConfigMap、遷移 Job、Deployment 2 副本與探針、Service）、`overlays/ci/`（kind 用的 image tag）、`ci/postgres.yaml`（只給 CI 與本機 kind 的資料庫） | `infra.yml` 的 `k8s` job（kind 開叢集 → 載入 image → apply → smoke test） |
 
 本機（有 Docker 的那台）：
 
@@ -24,5 +25,17 @@ E2E（後端起來之後，在 `frontend/`）：`npm run test:e2e`，想一步�
 指標：`docker compose -f infra/compose.yaml --profile observability up -d --build --wait`，然後開 <http://localhost:9090>（Prometheus）和 <http://localhost:3000>（Grafana，不用登入）。
 
 追蹤：同一行前面加 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`，打幾個 API 後 `docker compose -f infra/compose.yaml --profile observability logs otel-collector` 看 span。
+
+Kubernetes（`brew install kind kubectl`，照 `infra.yml` 的 `k8s` job 一步一步做）：
+
+```bash
+docker build -t jwt-backend:ci ./backend
+kind create cluster --name jwt && kind load docker-image jwt-backend:ci --name jwt
+kubectl apply -f infra/k8s/base/namespace.yaml && kubectl -n jwt-auth-demo apply -f infra/k8s/ci/postgres.yaml
+kubectl -n jwt-auth-demo create secret generic backend-secret --from-literal=DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo --from-literal=JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+kubectl apply -k infra/k8s/overlays/ci && kubectl -n jwt-auth-demo rollout status deployment/backend
+kubectl -n jwt-auth-demo port-forward service/backend 8080:80   # 另一個視窗 curl http://localhost:8080/api/health
+kind delete cluster --name jwt                                    # 玩完整個叢集刪掉
+```
 
 沒有 Docker 的機器：開 Actions 分頁的 Infra workflow，看同名 job 的每一步 log。

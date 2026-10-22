@@ -1,0 +1,89 @@
+# 【關卡 23】Deployment：「我要 N 個一模一樣的後端在跑」，k8s 負責讓它一直是 N 個
+#
+# 對照 Render：Render 幫你做的事（起容器、掛了重啟、換版時先起新的再關舊的、health check）在這裡全部看得見：
+#   replicas        幾個副本
+#   strategy        換版怎麼換：maxUnavailable: 0 代表永遠至少有 N 個在服務（零停機）
+#   livenessProbe   活著嗎（/api/ping）：不過就重啟這個容器
+#   readinessProbe  能服務嗎（/api/health）：不過就暫時不把流量導過來，但不重啟（關卡 11 的 liveness vs readiness）
+#   resources       要多少 CPU / 記憶體：requests 是排程用的保證量，limits 是上限（記憶體超過會被 OOM 殺掉）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1 # 換版時最多多起 1 個新的
+      maxUnavailable: 0 # 舊的要等新的 Ready 才能關
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: backend
+          image: jwt-backend:latest # tag 由 overlay 的 images 決定。正式環境用 registry 的網址 + 版本號或 digest
+          imagePullPolicy: IfNotPresent # kind 把 image 直接載進節點，沒有 registry 可拉；正式環境通常是 Always
+          # 蓋掉 Dockerfile 的 CMD：遷移交給 migrate-job.yaml，這裡只跑伺服器
+          command:
+            - uvicorn
+            - main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --no-access-log
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secret
+          env:
+            - name: PORT
+              value: "8000"
+            # 和 Render 的 RENDER_GIT_COMMIT 同一個用途：/api/health 的 version 顯示現在跑哪一版（CI 用 kustomize 不會換這個，先寫 image tag）
+            - name: APP_VERSION
+              value: k8s
+          livenessProbe:
+            httpGet:
+              path: /api/ping
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 12 # 最多等 60 秒才算起不來（Python 匯入要幾秒）
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi # 不設 CPU limit：CPU 會被節流但不會被殺，讓它用閒置的 CPU 比較划算
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # 程式被攻破也寫不了 image 裡的檔案；要寫的地方只有 /tmp
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
