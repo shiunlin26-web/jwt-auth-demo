@@ -11,6 +11,7 @@ CORS 網址、cookie 的 secure 直接寫死在程式碼裡。
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -76,6 +77,9 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str | None = None
     # worker 沒事做時每隔幾秒再撿一次
     outbox_poll_seconds: float = 5
+    # 【關卡 24-C】worker 怎麼跑：off = 不在 web 程序裡跑（compose、k8s 用獨立的 worker 服務）；
+    # inline = 在 web 程序裡當背景 task 跑（Render 免費方案開不了第二個服務，render.yaml 設這個）
+    outbox_worker: Literal["off", "inline"] = "off"
 
     # 【關卡 17】登入與註冊的頻率限制（slowapi 的格式："10/minute"、"100/hour"）
     rate_limit_enabled: bool = True
