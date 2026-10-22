@@ -62,6 +62,10 @@
 | 18 | SQL 與資料庫（看 ORM 底下） | 索引、執行計畫、交易與鎖、N+1 | ✅ 完成 |
 | 19 | HTTP 與瀏覽器規則 | 狀態碼、標頭、cookie、CORS、快取 | ✅ 完成 |
 | 20 | 讀 log 與除錯（故障演練） | 分段確認、request id、用測試抓 bug | ✅ 完成 |
+| 21 | docker compose 與 Playwright E2E | 一個檔案起整套、healthcheck 與 depends_on、真瀏覽器走主路徑 | ✅ 完成 |
+| 22 | 指標與追蹤 | Prometheus 拉 /metrics、label 與 cardinality、p95、儀表板進 git、OpenTelemetry 與 collector、log ↔ trace | ✅ 完成 |
+| 23 | Kubernetes | Deployment 與探針、Service、遷移 Job、ConfigMap 與 Secret、零停機滾動更新、rollout undo、kustomize | ✅ 完成 |
+| 24 | 非同步訊息 | transactional outbox、at-least-once 與冪等、Kafka（Redpanda）、SKIP LOCKED、線上 inline worker | ✅ 完成 |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -3696,7 +3700,675 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 
 ---
 
+## 關卡 21：docker compose 與 Playwright E2E ✅
+
+**改動的檔案**：新增 `infra/compose.yaml`、`infra/README.md`、`.github/workflows/infra.yml`（`compose`、`e2e` 兩個 job）、`frontend/e2e/auth.spec.ts`、`frontend/playwright.config.ts`；改 `frontend/package.json`（`@playwright/test`、`test:e2e`）、`vitest.config.ts`（排除 `e2e/`）、`tsconfig.node.json`、`.gitignore`、`.prettierignore`。後端程式沒動。
+
+**一句話**：同一個 image 在本機用一個檔案起整套，並用真的瀏覽器走一遍登入主路徑；從這關起每一塊基礎設施都有一個 CI job 證明它會動。
+
+### 觀念 1：Dockerfile 描述一個 image，compose 描述一整套
+
+關卡 9 的 `ci.yml` 要跑起後端得自己寫 `docker run … -e DATABASE_URL=… --network host`，資料庫還是 GitHub 的 `services` 另外給的。這些「誰先誰後、誰連誰、環境變數給什麼」散在指令裡，換一台機器就要重打。compose 把它們寫成一個檔案：
+
+| 以前（ci.yml 的 docker run） | 現在（infra/compose.yaml） |
+| --- | --- |
+| `--network host`，後端用 `localhost:5432` 找資料庫 | compose 建內部網路，後端用**服務名** `postgres:5432` 找 |
+| 自己寫 30 秒的 curl 迴圈等後端起來 | `healthcheck` + `depends_on: condition: service_healthy` + `up --wait` |
+| 資料庫是 CI 的 service container，跑完就沒 | 資料放具名 volume `pgdata`，`down` 不加 `-v` 就留著 |
+
+它和關卡 23 的 Kubernetes 清單描述的是同一件事，只是 compose 管一台機器、k8s 管一群機器；image 都是 `backend/Dockerfile`，一個字沒改。
+
+### 觀念 2：「起來了」不等於「能服務了」
+
+`docker compose up -d` 立刻回來，但後端還在跑 `alembic upgrade head`，這時 curl 會 connection refused。`healthcheck` 定義「能服務」是什麼：Postgres 是 `pg_isready`，後端是打 `/api/ping` 回 200。`depends_on` 的 `condition: service_healthy` 讓後端等資料庫真的能接受連線才啟動，`--wait` 讓指令等到全部 healthy 才回來。這和關卡 11 的 liveness / readiness 是同一個觀念，k8s 的探針也是。
+
+後端的 healthcheck 用 Python 的 `urllib` 而不是 curl：image 是 `python:3.13-slim`，沒有 curl。`start_period: 20s` 是給遷移的時間，這段期間失敗不算數。
+
+### 觀念 3：Vitest 和 Playwright 各驗什麼
+
+| | 關卡 16 Vitest + MSW | 關卡 21 Playwright |
+| --- | --- | --- |
+| 跑什麼 | 一個元件，在 jsdom 裡 | 整個網站，在真的 Chromium 裡 |
+| 後端 | MSW 假的 | compose 起的真後端 + 真資料庫 |
+| 驗什麼 | 畫面在某個回應下對不對 | 「使用者這條路走得通」：cookie 真的帶上、重整真的還在 |
+| 速度 | 毫秒 | 秒 |
+| 條數 | 多 | 少，只走主路徑 |
+
+關卡 20 Q1 的原則：便宜的檢查寫成測試，貴的檢查路徑要少。E2E 貴，所以只有三條，而且每條都是 `RUNBOOK.md` 第 0 節「部署後檢查」本來要用手做的事。
+
+### 觀念 4：E2E 怎麼找元素
+
+用使用者看得到的東西：`getByPlaceholder("Email")`、`getByRole("button", { name: "登入" })`、`getByRole("heading", { name: "嗨，…" })`。不用 CSS class 或 id：改樣式測試不該壞，改文案才該壞（那本來就要重新確認）。每個測試註冊自己的帳號（email 帶時間戳），所以可以平行跑、重跑不會撞「已存在」。
+
+### 程式怎麼寫
+
+`infra/compose.yaml` 的核心三段：
+
+```yaml
+  postgres:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jwtdemo"]
+  backend:
+    build:
+      context: ../backend        # 同一個 Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo   # 主機名稱 = 服務名
+    depends_on:
+      postgres:
+        condition: service_healthy   # 等資料庫真的能連才起
+```
+
+`frontend/playwright.config.ts` 讓前端不用自己起：
+
+```ts
+webServer: {
+  command: "npm run dev",          // Vite，/api 代理到 localhost:8000（compose 的後端）
+  url: "http://localhost:5173",
+  reuseExistingServer: !process.env.CI,
+},
+```
+
+`frontend/e2e/auth.spec.ts` 的第二條，重整還在：
+
+```ts
+await loginViaUi(page, email);
+await page.reload();   // 記憶體裡的 access token 沒了，initializeAuth() 用 cookie 換新的
+await expect(page.getByRole("heading", { name: `嗨，${email}` })).toBeVisible();
+```
+
+CI 的 `e2e` job（`infra.yml`）：compose 起後端 → `npm ci` → `npx playwright install chromium --with-deps` → `npx playwright test` → HTML 報告上傳成 artifact，失敗的測試有每一步的截圖與 trace。
+
+### ⚠️ 開始前（Mac，一次性）
+
+- Docker 三選一都免費：Docker Desktop（個人使用免費）、OrbStack（個人免費）、`brew install colima docker && colima start`。裝好 `bash scripts/doctor.sh` 要說關卡 21 可以。
+- `cd frontend && npm ci && npx playwright install chromium`：下載 Chromium 約 150 MB。
+- 沒有 Docker 的機器不用裝任何東西，看 CI 的 log（`COACHING.md` 關卡 21 的 VM 路線）。
+
+### 驗證方式
+
+1. `docker compose -f infra/compose.yaml up -d --build --wait` 最後兩行是兩個 `Healthy`。
+2. `curl -s localhost:8000/api/health` 的 `migration` 是最新的遷移編號（現在 `0006`）。
+3. `docker compose -f infra/compose.yaml logs backend` 看得到 `Running upgrade … -> 0006` 與 `Application startup complete`。
+4. `npm run test:e2e`（在 `frontend/`）最後一行 `3 passed`。
+5. GitHub Actions 的 Infra workflow：`compose` job 的 Smoke test 有 `✅ compose 整套跑起來了`，`e2e` job 有 `3 passed`，run 頁面底部有 `playwright-report` artifact。
+
+### 動手玩
+
+1. **只等「起來」不等「能服務」**：`infra/compose.yaml` 把 backend 的 `depends_on` 底下 `condition: service_healthy` 改成 `condition: service_started`，`down -v` 再 `up -d --build --wait`。後端在 Postgres 還在 initdb 時就起了，`alembic upgrade head` 連不到 → 容器退出，`up` 報錯；`ps -a` 看到 backend 是 `Exited (1)`，`logs backend` 最後幾行是 `Connection refused`。改回來。
+2. **把 healthy 定義改錯**：backend 的 healthcheck 把 `/api/ping` 改成 `/api/nope`。`up --wait` 會等到 `retries` 用完，回 `unhealthy`、指令失敗。後端其實活著（curl 打得到），只是「能服務」的定義錯了。改回來。
+3. **改錯一個預期值**：`frontend/e2e/auth.spec.ts` 第一個測試最後一行把 `嗨，${email}` 改成 `你好，${email}`，`npm run test:e2e`：`1 failed`、`2 passed`，紅的那條有 `Timed out 5000ms waiting for expect(locator).toBeVisible()` 和 `getByRole('heading', { name: '你好，…' })`。`npx playwright show-report` 點那一條，trace 裡的截圖明明在首頁，只是標題文字不符：測試是對的，是預期值錯了。改回來。
+4. **重試會藏問題**：`playwright.config.ts` 的 `retries: 0` 改成 `2`，保留第 3 題的改壞，再跑一次：同一條會跑三次、輸出有 `retry #1`、`retry #2`，最後還是紅，但多等了三倍時間。這就是為什麼設 0：偶爾紅就該查原因。改回來：`git checkout -- infra frontend`。
+
+### 想一想
+
+<details>
+<summary>Q1：CI 已經有 ci.yml 的 Docker build + run + smoke test 了，為什麼還要 compose job？</summary>
+
+ci.yml 驗的是「這個 image 做得出來、跑得起來」，資料庫是 GitHub 給的。compose job 驗的是「我寫的那張開店清單是對的」：服務名、healthcheck、depends_on、volume。學習者在 Mac 上用的就是這張清單，CI 綠代表照著做一定起得來。兩個 job 驗的是兩個檔案。
+
+</details>
+
+<details>
+<summary>Q2：E2E 為什麼不直接用 MSW 假後端，跑起來快很多？</summary>
+
+因為要驗的就是真的那一段：refresh token cookie 在真瀏覽器裡會不會帶上、重整後 `initializeAuth()` 用 cookie 換到新票、登出後 cookie 真的被清。MSW 看不到瀏覽器的 cookie 規則（關卡 19），這段只有真瀏覽器 + 真後端能驗。
+
+</details>
+
+<details>
+<summary>Q3：為什麼 compose 裡後端的 DATABASE_URL 主機是 `postgres`，本機 `.env` 卻是 Neon 的網址？</summary>
+
+同一個 image、同一支程式，連哪個資料庫完全靠環境變數（關卡 2、10 的 12-factor）。compose 給它內部網路裡的服務名，Render 給它 Neon，CI 給它 `localhost:5432`。程式一行不改。
+
+</details>
+
+<details>
+<summary>Q4：`down` 和 `down -v` 差在哪，什麼時候該用哪個？</summary>
+
+`down` 刪容器和網路，保留 volume：資料還在，下次 `up` 不用重新註冊。`down -v` 連 volume 一起刪：全新的倉庫，遷移會從 0001 跑一遍。CI 用 `-v`（每次都要乾淨），本機學習時想保留帳號就不加。
+
+</details>
+
+---
+
+## 關卡 22：指標（Prometheus + Grafana）與追蹤（OpenTelemetry）✅
+
+**改動的檔案**：新增 `backend/metrics.py`、`backend/tracing.py`、`backend/tests/test_metrics.py`、`backend/tests/test_tracing.py`、`infra/prometheus/prometheus.yml`、`infra/grafana/provisioning/`（datasources、dashboards）、`infra/grafana/dashboards/backend.json`、`infra/otel/collector.yaml`；改 `backend/main.py`（掛上兩者、log 帶 trace_id）、`config.py`（`METRICS_ENABLED`、`OTEL_EXPORTER_OTLP_ENDPOINT`）、`pyproject.toml`（`prometheus-client`、`opentelemetry-*`）、`.env.example`、`infra/compose.yaml`（profile `observability`）、`infra.yml`（`observability` job）。
+
+**一句話**：除了錯誤（Sentry）和 log，還要有「數字」和「一個請求走了哪幾站」，而且儀表板進 git；兩個都是開關，預設關，線上行為不變。
+
+### 觀念 1：三種訊號各管一件事
+
+| | log（關卡 11） | 指標 metrics | 追蹤 tracing |
+| --- | --- | --- | --- |
+| 長什麼樣 | 一筆一筆的事件 | 累計的數字，定期取樣 | 一棵樹：請求與它底下的每一步 |
+| 回答什麼 | 「那個請求發生了什麼」 | 「這小時多快、錯誤率、趨勢」 | 「這 120 毫秒花在哪一步」 |
+| 成本 | 每個請求一行，量大 | 幾個數字，再多請求也不變大 | 每個請求一棵樹，通常抽樣 |
+| 拿來 | 查單一事件、除錯 | 儀表板、告警 | 找慢的那一句 SQL |
+
+三種要能互相找：log 帶 `request_id` 和 `trace_id`，span 帶 `X-Request-ID`。使用者回報一個 request id，三邊都查得到。
+
+### 觀念 2：指標是「拉」的，而且 label 的值要有限
+
+程式只負責把數字放在 `/metrics`（純文字，一行一個），Prometheus 每隔 `scrape_interval`（這裡 5 秒）主動來抓，存成時間序列。程式不知道 Prometheus 在哪、有幾個，這就是「拉」模式的好處。
+
+每一組不同的 label 值就是一條時間序列。所以 `route` 用**路由樣板**（`/api/auth/login`）而不是實際路徑：路徑裡有 id 的話（`/todos/123`）每個 id 都是一條新序列，Prometheus 會被撐爆（cardinality 爆炸）。沒對上任何路由的亂打路徑一律記 `unmatched`，同樣是不讓外人灌爆它。`user_id`、`email` 這種永遠不能當 label。
+
+### 觀念 3：耗時用直方圖，看 p95 不看平均
+
+平均 50 毫秒可能是「大家都 50」，也可能是「95% 的人 10 毫秒、5% 的人 800 毫秒」。後者才是要修的，平均看不出來。`http_request_duration_seconds` 是直方圖：把每個請求的耗時丟進「≤5ms、≤10ms、…、≤10s」的桶子各加一，Grafana 用 `histogram_quantile(0.95, …)` 算出「95% 的請求在幾毫秒內完成」。桶子的邊界是固定的，所以算出來是近似值，夠用。
+
+### 觀念 4：儀表板進 git
+
+Grafana 開起來就已經接好 Prometheus、已經有一張「JWT Auth Demo backend」：資料來源和儀表板都是從 `infra/grafana/` 的檔案載入的（provisioning）。和 `render.yaml`、關卡 23 的 k8s 清單是同一個概念：設定用檔案描述，進 git，改了有 diff，重開不會不見，別的專案直接複製。畫面上改了存不回檔案，所以設 `allowUiUpdates: false`，要改就改 json。
+
+### 觀念 5：OpenTelemetry：程式只產生 span，送去哪是設定
+
+追蹤用 OpenTelemetry（OTel），廠商中立的標準：程式產生 span、用 OTLP 協定送出去，收的那頭可以是本機的 collector（這關，只印到 log）、Grafana Cloud、Jaeger、Datadog……換廠商只改環境變數，程式一行不改。這就是不直接用某家 SDK 的理由。
+
+collector 是中繼站：收 → 處理 → 轉送。程式只送到它，要轉去哪在 `infra/otel/collector.yaml` 改。正式環境常用它做批次、抽樣、加標籤、同時送兩家。
+
+span 的來源有兩層：`FastAPIInstrumentor` 每個 HTTP 請求一個 span（名稱是路由樣板）、`AsyncPGInstrumentor` 每句 SQL 一個子 span（掛在驅動層，因為 OTel 的 SQLAlchemy 套件還不支援 2.1）。`/api/ping` 和 `/metrics` 不追蹤：平台每幾秒打一次，追了只是噪音。span 先攢著、每幾秒一批送（`BatchSpanProcessor`），不拖慢請求；collector 掛了也只是 export 失敗，請求照常回。
+
+### 觀念 6：兩個開關，預設都關
+
+`METRICS_ENABLED` 沒設 → `/metrics` 回 404；`OTEL_EXPORTER_OTLP_ENDPOINT` 沒設 → `setup_tracing` 什麼都不做。線上 Render 兩個都沒設，行為和關卡 21 之前一模一樣。而且 `/metrics` 刻意不放 `/api` 底下：Vercel 只轉發 `/api/*`，就算線上打開外面也打不到。同一個 image，compose 給它 `METRICS_ENABLED=true` 和 collector 的位址就全開：12-factor，和 `DATABASE_URL` 同一個道理。
+
+### 程式怎麼寫
+
+`backend/metrics.py` 的 middleware，二十行：
+
+```python
+REQUESTS = Counter("http_requests_total", "HTTP 請求數", ["method", "route", "status"])
+DURATION = Histogram("http_request_duration_seconds", "HTTP 請求耗時（秒）", ["method", "route"])
+
+@app.middleware("http")
+async def record_metrics(request, call_next):
+    if request.url.path == "/metrics":      # 抓指標的請求本身不算
+        return await call_next(request)
+    start = time.perf_counter()
+    status = "500"                          # 沒接住的例外也要算
+    try:
+        response = await call_next(request)
+        status = str(response.status_code)
+        return response
+    finally:
+        route = _route_template(request)    # 路由樣板或 unmatched
+        REQUESTS.labels(request.method, route, status).inc()
+        DURATION.labels(request.method, route).observe(time.perf_counter() - start)
+```
+
+`backend/tracing.py` 的開關與兩層 instrumentation：
+
+```python
+def setup_tracing(app, exporter=None):
+    if exporter is None:
+        if not settings.otel_exporter_otlp_endpoint:
+            return None                     # 沒設端點就完全不啟用
+        exporter = OTLPSpanExporter()       # 端點、header 由 SDK 讀 OTEL_* 環境變數
+    provider = TracerProvider(resource=Resource.create({SERVICE_NAME: "jwt-auth-demo-backend", ...}))
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    FastAPIInstrumentor.instrument_app(app, tracer_provider=provider,
+        excluded_urls="metrics,api/ping",
+        http_capture_headers_server_response=["x-request-id"])   # span 帶回應的 X-Request-ID
+    AsyncPGInstrumentor().instrument(tracer_provider=provider)   # 每句 SQL 一個子 span
+```
+
+`backend/main.py` 的 log middleware 多一行，log ↔ trace 互相找：
+
+```python
+trace_id = current_trace_id()   # 有在追蹤才有值
+if trace_id:
+    extra["trace_id"] = trace_id
+```
+
+`infra/prometheus/prometheus.yml` 抓誰：
+
+```yaml
+scrape_configs:
+  - job_name: backend
+    static_configs:
+      - targets: ["backend:8000"]   # compose 的服務名
+```
+
+`infra/otel/collector.yaml` 的管線：收 OTLP、印到 log。要接真的後端就把 `debug` 換成 `otlphttp` 填目的地：
+
+```yaml
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
+```
+
+### ⚠️ 開始前（Mac）
+
+同關卡 21：有 Docker、`bash scripts/doctor.sh` 說關卡 22 可以。這關多開三個 container（Prometheus、Grafana、collector），第一次會多拉約 500 MB 的 image。沒有 Docker 就看 CI 的 `observability` job（`COACHING.md` 關卡 22 的 VM 路線）。
+
+### ⚠️ 開始前（選配：把 Render 上的 trace 送到 Grafana Cloud）
+
+這段是 `PLAN-INFRA.md` 的 22-C。**全程免費、不用信用卡**；整關不做這段也算完成。你自己開帳號，AI 不替你開。
+
+| 項目 | 2026-10-22 查到的 | 注意 |
+| --- | --- | --- |
+| Grafana Cloud Free | 不用信用卡；10,000 個 metrics series、logs 與 traces 各 50 GB／月、14 天保留 | 額度會變，註冊前再看 grafana.com 的 pricing 頁；**畫面若要求信用卡就停下來** |
+| Render 改環境變數 | 免費方案可以改 | 存檔會自動重新部署一次 |
+
+1. 到 grafana.com 註冊免費帳號，建一個 stack（區域選離你近的）。
+2. stack 裡 **Connections → Add new connection**，搜 **OpenTelemetry (OTLP)**。它會產生一個 token（access policy token，`glc_` 開頭，勾 traces 的 write 權限），並顯示三個值：OTLP endpoint（`https://otlp-gateway-prod-<region>.grafana.net/otlp`）、**Instance ID**（用這張卡片上的數字，不是 stack 的其他 id）、token。token 只顯示一次，先存起來。
+3. 把 `instance id:token` 做成 base64，**不能有換行**（有換行 header 就壞了，會 401）：
+
+   ```bash
+   printf '%s' '<instance id>:<glc_token>' | base64 | tr -d '\n'
+   ```
+
+4. Render → 後端服務 → **Environment**，加兩個變數（Grafana 畫面會給第三個 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`，這個專案用不到：`tracing.py` 直接用 HTTP 的 exporter；設了也無妨）：
+
+   | 變數 | 值 |
+   | --- | --- |
+   | `OTEL_EXPORTER_OTLP_ENDPOINT` | 第 2 步的 endpoint（SDK 會自己接上 `/v1/traces`） |
+   | `OTEL_EXPORTER_OTLP_HEADERS` | `Authorization=Basic%20<第 3 步的 base64>`：空格要寫成 `%20`（OTLP 規範的 header 值要 URL 編碼） |
+
+5. 存檔，等 Render 部署完。Logs 搜 `OpenTelemetry 追蹤已啟用`。
+6. 開一次前端網址（或 `curl https://<你的 Render 網址>/api/health`），等 10 秒。Grafana Cloud → **Explore** → 資料來源選 `grafanacloud-<stack>-traces` → Search → Service Name 選 `jwt-auth-demo-backend` → 看到 `GET /api/health` 的 trace，點開底下有兩個 `SELECT`。這就是 Mac 路線步驟 8～9 的雲端版，差別只有環境變數。
+7. 401 的話：Instance ID 拿錯（要 OTLP 卡片上的）、base64 有換行、token 沒勾 traces write。看完想關掉就把兩個變數刪掉，再部署一次。
+
+### 驗證方式
+
+1. `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose -f infra/compose.yaml --profile observability up -d --build --wait` 五個 `Healthy`。
+2. 打幾次 `/api/ping` 後 `curl -s localhost:8000/metrics | grep '^http_requests_total'` 有 `route="/api/ping"` 的那行，數字會動。
+3. `localhost:9090/targets` 的 `backend` 是 UP；`localhost:3000` 的「JWT Auth Demo backend」五個面板有線。
+4. 打一次 `/api/health`，8 秒後 `logs otel-collector` 有 `Name : GET /api/health` 與 `Name : SELECT`；`logs backend` 同一筆有 `trace_id=`，和 collector 裡的 `Trace ID` 一樣。
+5. `uv run pytest -q`（在 `backend/`）：`test_metrics.py` 3 個、`test_tracing.py` 2 個都綠。
+6. GitHub Actions 的 Infra workflow：`observability` job 有 `✅ Prometheus：…`、`儀表板：JWT Auth Demo backend`、`✅ collector 收到 HTTP 的 span：`。
+
+### 動手玩
+
+1. **label 爆炸**：`backend/metrics.py` 的 `_route_template` 整個函式改成只有 `return request.url.path`，`up -d --build`，打 `/api/nope/1` 到 `/api/nope/5`，`/metrics` 多出五條 `route="/api/nope/N"`。想像 N 是使用者 id、有十萬個使用者。改回來。
+2. **把 /metrics 自己也算進去**：middleware 開頭那個 `if request.url.path == "/metrics"` 兩行拿掉，`up -d --build`，等 30 秒看 `/metrics`：多了 `route="/metrics"` 的 counter，每 5 秒 +1，是 Prometheus 自己打的。改回來。
+3. **同一個 image、少一個環境變數**：不帶 `OTEL_EXPORTER_OTLP_ENDPOINT=…` 重新 `up -d --force-recreate backend`，打 `/api/health`：`logs backend` 沒有 `OpenTelemetry 追蹤已啟用`、沒有 `trace_id=`；collector 的 log 沒有新的 span。程式一行沒改。
+4. **collector 掛了，請求還好嗎**：`docker compose -f infra/compose.yaml --profile observability stop otel-collector`，再打三次 `/api/health`：全部 200、一樣快；幾秒後 `logs backend` 多出 export 失敗的錯誤（有 `export` 字樣），是 exporter 自己在重試，沒有影響請求。`start otel-collector` 回來。
+5. **p95 看得出平均看不出的**：`backend/routes/users.py` 的 `/me` 加一行 `await asyncio.sleep(0.5)`（記得 `import asyncio`），`up -d --build`，登入後重新整理首頁十次、打 `/api/ping` 一百次。Grafana 的「每秒請求數」兩條線差不多，「p95 耗時」被 `/me` 拉到 0.5 秒。改回來：`git checkout -- backend`。
+
+### 想一想
+
+<details>
+<summary>Q1：Sentry（關卡 11）已經會告訴我錯誤了，為什麼還要指標？</summary>
+
+Sentry 抓的是「例外」：程式噴了什麼。指標抓的是「沒噴例外但不對勁」：p95 從 80 毫秒變 800、5xx 比例從 0 變 2%、請求數突然掉到 0。這些沒有 traceback，Sentry 不會響，儀表板和告警會。
+
+</details>
+
+<details>
+<summary>Q2：為什麼線上 Render 預設不開 /metrics、不開追蹤？</summary>
+
+三個理由：線上沒有 Prometheus 來抓，開了也沒人讀；Vercel 只轉發 `/api/*`，`/metrics` 外面本來就打不到；追蹤要有地方收，沒設端點 SDK 連 exporter 都不建。這關的重點是「同一個 image，靠環境變數決定開不開」，不是「線上一定要開」。要開就照「開始前」第二段接 Grafana Cloud。
+
+</details>
+
+<details>
+<summary>Q3：為什麼不直接從程式送到 Grafana Cloud，中間要有 collector？</summary>
+
+本機學習時 collector 只印 log，讓你看得到 span 長什麼樣，不用開帳號。正式環境它負責批次、抽樣、加標籤（環境、版本）、同時送兩家、換廠商時只改它的設定。程式永遠只送到「一個 OTLP 端點」，這就是標準的價值。這個專案線上直送 Grafana Cloud 也行（開始前第二段），因為只有一個服務、不需要中繼。
+
+</details>
+
+<details>
+<summary>Q4：`http_requests_total` 是 13，Prometheus 查出來是 3，哪個對？</summary>
+
+都對。`/metrics` 是「現在」的累計值；Prometheus 存的是「上次抓到時」的值，5 秒抓一次，抓到時 10 次 curl 還沒打。指標是取樣不是逐筆，所以看趨勢用指標、查單一事件用 log。
+
+</details>
+
+<details>
+<summary>Q5：為什麼 SQL 的 span 掛在 asyncpg 而不是 SQLAlchemy？</summary>
+
+做的時候 OTel 的 SQLAlchemy 套件只支援到 2.0，這個專案是 2.1。掛在驅動層反而更貼近真的送出去的 SQL（`db.statement` 就是 Postgres 收到的那句）。代價是看不到 SQLAlchemy 層的 ORM 名稱，對這個專案夠用。
+
+</details>
+
+---
+
+## 關卡 23：Kubernetes（kind、Deployment、滾動更新、退版）✅
+
+**改動的檔案**：新增 `infra/k8s/base/`（`namespace.yaml`、`configmap.yaml`、`secret.example.yaml`、`migrate-job.yaml`、`deployment.yaml`、`service.yaml`、`kustomization.yaml`）、`infra/k8s/overlays/ci/kustomization.yaml`、`infra/k8s/ci/`（CI 與本機學習用的 Postgres）；`.github/workflows/infra.yml` 加 `k8s` job；`docs/RUNBOOK.md` 第 2 節加 k8s 的退版。程式沒動，image 沒動。
+
+**一句話**：同一個 image 不靠 Render，交給 Kubernetes 排程：幾個副本、怎麼探活、怎麼滾動更新與退版。Render 幫你做的事，這關讓你親眼看見是誰在做。線上仍是 Render，這關不換平台。
+
+### 觀念 1：Render 幫你做的事，在 k8s 全部寫成字
+
+| Render 做的 | k8s 清單裡的 | 在哪 |
+| --- | --- | --- |
+| 起一個實例 | `replicas: 2` | `deployment.yaml` |
+| 掛了重啟 | `livenessProbe`（`/api/ping` 不過就重啟容器） | 同上 |
+| 起來了才給流量 | `readinessProbe`（`/api/health` 不過就不進 Service 名單） | 同上 |
+| 換版先起新的再關舊的 | `strategy.rollingUpdate`：`maxSurge: 1`、`maxUnavailable: 0` | 同上 |
+| 一鍵退版 | `kubectl rollout undo` | `RUNBOOK.md` 第 2 節 |
+| 環境變數 | `ConfigMap`（一般設定）+ `Secret`（密鑰） | `configmap.yaml`、`secret.example.yaml` |
+| 啟動時跑遷移 | 獨立的 `Job` | `migrate-job.yaml` |
+| 固定網址 | `Service`（叢集內的固定名字）；對外還要 Ingress，這關刻意不做 | `service.yaml` |
+
+清單是「我要的狀態」，k8s 的工作是一直讓現況等於它：pod 死了補一個、副本數不對就調、image 變了就換版。
+
+### 觀念 2：pod 會死，Service 給它們固定的名字
+
+pod 是一次性的：換版、掛掉、節點壞了都會換一個新的，IP 也換。Service 用 label（`app: backend`）找到現在活著的 pod，給它們一個固定的名字 `backend` 和 IP，流量平均分給 **Ready** 的那幾個。這和 compose 的服務名是同一個概念，只是多了「只分給 Ready 的」。
+
+`port-forward` 是開一條通道到「某一個 pod」，換版那個 pod 被關它就斷了；所以 CI 量零停機是在叢集裡開一個 curl pod 直接打 Service。
+
+### 觀念 3：遷移用 Job，不放在啟動指令裡
+
+Render 只有一個實例，Dockerfile 的 CMD「先 `alembic upgrade head` 再 uvicorn」沒問題。叢集有 2 個副本，每個 pod 啟動都跑遷移會互相打架。所以遷移獨立成 Job：跑一次、跑完就 `Completed`、失敗重試 `backoffLimit` 次，Deployment 的 `command` 蓋掉 CMD 只跑 uvicorn。Job 的 spec 建好就不能改，要重跑得先 `delete job`（正式環境常讓名字帶版本，或用 Helm hook）。
+
+### 觀念 4：零停機是三件事加起來
+
+1. `maxUnavailable: 0`：舊的要等新的 Ready 才能關，全程至少 N 個在服務。
+2. `readinessProbe`：「Ready」有定義（`/api/health` 回 200），不是容器起來就算。
+3. `preStop: sleep 5`：pod 要關的時候，「從 Service 名單移除」和「送 SIGTERM」是同時發的，名單更新要一兩秒才傳遍叢集，這一兩秒還有流量進來；先睡 5 秒再關，就不會有人打到正在關的 pod。`terminationGracePeriodSeconds: 30` 要大於 preStop 加程式收尾的時間，不然被 SIGKILL。
+
+CI 的 `k8s` job 把這件事數出來：換版期間每 0.5 秒打一次 Service，80 次全部 200。
+
+### 觀念 5：壞版本上不去，退版一個指令
+
+image 不存在、程式起不來、readiness 一直不過：新 pod 永遠不 Ready，`maxUnavailable: 0` 代表舊的不能關，流量永遠只到舊的。使用者沒感覺，`rollout status` 會逾時提醒你。`rollout undo` 退回上一個 revision（上一個 ReplicaSet），本身也是一次滾動更新。和 Render 的 Rollback 按鈕一樣：退版不退資料庫，退完記得修 main。
+
+### 觀念 6：設定與密鑰分開，密鑰不進 git
+
+`ConfigMap` 放一般設定（`LOG_JSON`、`COOKIE_SECURE`），`Secret` 放密鑰（`DATABASE_URL`、`JWT_SECRET`），和 `render.yaml` 的 `envVars`、compose 的 `environment` 同一組名字。`secret.example.yaml` 只是範本，刻意不列進 `kustomization.yaml`；CI 用 `kubectl create secret --from-literal` 建，正式環境由雲端 secret manager 同步、或 Sealed Secrets / SOPS 加密後才進 git。Secret 存的只是 base64 不是加密，叢集要另外開 encryption at rest。還有一個常見的坑：改了 ConfigMap 不會自動重啟 pod，要 `rollout restart`。
+
+### 觀念 7：kustomize：base 加 overlay，不複製貼上
+
+`base/` 是共同的清單，`overlays/ci/` 疊上這個環境的差異（image tag 用 `ci`、多一個 CI 用的 Postgres）。正式環境會有另一個 overlay：registry 的 image、`COOKIE_SECURE=true`、副本數、Ingress，資料庫用託管的不在叢集裡。`kubectl apply -k` 內建，不用裝東西。
+
+### 觀念 8：安全基線，從第一天就寫
+
+`runAsNonRoot`、`readOnlyRootFilesystem`（程式被攻破也寫不了 image 裡的檔案，要寫只有 `/tmp`）、`capabilities: drop ALL`、`allowPrivilegeEscalation: false`、`resources`（requests 是排程的保證量，memory limit 超過會被 OOM 殺掉；不設 CPU limit 因為 CPU 只會被節流不會被殺）。這些在 Dockerfile 的 `USER app` 之上再加一層，正式叢集的 admission policy 通常會要求。
+
+### 程式怎麼寫
+
+`deployment.yaml` 的核心，其他都是註解：
+
+```yaml
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }   # 先起新的、舊的等新的 Ready 才關
+  template:
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: backend
+          image: jwt-backend:latest        # tag 由 overlay 的 images 換
+          command: [uvicorn, main:app, --host, 0.0.0.0, --port, "8000", --no-access-log]  # 蓋掉 CMD，遷移交給 Job
+          envFrom:
+            - configMapRef: { name: backend-config }
+            - secretRef: { name: backend-secret }
+          livenessProbe:  { httpGet: { path: /api/ping,   port: http }, periodSeconds: 10 }
+          readinessProbe: { httpGet: { path: /api/health, port: http }, periodSeconds: 5, failureThreshold: 12 }
+          lifecycle:
+            preStop: { exec: { command: [sleep, "5"] } }  # 等 Service 名單更新完才關
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+```
+
+`migrate-job.yaml`：同一個 image、`command: ["alembic", "upgrade", "head"]`、`restartPolicy: Never`、`backoffLimit: 3`、`ttlSecondsAfterFinished: 600`。
+
+`overlays/ci/kustomization.yaml` 怎麼疊：
+
+```yaml
+resources: [../../base, ../../ci]
+images:
+  - name: jwt-backend
+    newTag: ci          # kind load 進去的那個 tag
+```
+
+CI 的 `k8s` job 一條龍：`docker build` → `kind create cluster` → `kind load docker-image` → namespace + CI 的 Postgres → `create secret` → `apply -k` → `wait job` → `rollout status` → `port-forward` + curl → 換版到 v2 同時 probe pod 打 80 次 → `rollout undo` → 壞 image → undo → `describe`。
+
+### ⚠️ 開始前（Mac，一次性）
+
+- `brew install kind kubectl`，都免費、開源。`bash scripts/doctor.sh` 要說關卡 23 可以。
+- Docker 要在跑（kind 的節點是一個 container）。第一次 `kind create cluster` 拉 `kindest/node` 約 1 GB。
+- 沒有 Docker 的機器看 CI 的 `k8s` job（`COACHING.md` 關卡 23 的 VM 路線）。
+- 這關**不**碰 Render、Neon、Vercel；不會產生任何費用。想在雲端跑真的叢集（GKE、EKS）會有費用，這關刻意不做。
+
+### 驗證方式
+
+1. `kubectl -n jwt-auth-demo get pods`：兩個 `backend-… 1/1 Running`、一個 `backend-migrate-… 0/1 Completed`。
+2. `port-forward` 後 `curl localhost:8080/api/health` 的 `migration` 是最新的（`0006`）、`version` 是 `k8s`。
+3. 換版期間 probe pod 的 80 次全部 `200`。
+4. `rollout undo` 後 image 回到 `jwt-backend:ci`；`rollout history` 多一個 revision。
+5. 壞 image 時 `get pods` 一個 `ErrImagePull`／`ImagePullBackOff`、兩個 `Running`，Service 仍回 `200`。
+6. GitHub Actions 的 Infra workflow：`k8s` job 有 `✅ 零停機：換版期間每一次請求都 200`、`✅ 退版成功`、`✅ 壞版本期間 Service 照常回 200`。
+
+### 動手玩
+
+（都在叢集還開著的時候做；`<pod>` 用 `get pods` 看到的 backend pod 名字）
+
+1. **pod 死了誰補**：`kubectl -n jwt-auth-demo delete pod <pod>`，馬上 `get pods`：被刪的在 `Terminating`，同時多一個 AGE 幾秒的新 pod，幾秒後還是兩個 `Running`。Deployment 的工作就是讓現況等於 `replicas: 2`。
+2. **副本數**：`kubectl -n jwt-auth-demo scale deployment/backend --replicas=3`，`get pods` 三個。再 `kubectl apply -k infra/k8s/overlays/ci`：變回兩個，因為清單說 2。改清單才是正途，指令改的會被下一次 apply 蓋掉。
+3. **程式掛了誰拉起來**：`kubectl -n jwt-auth-demo exec <pod> -- kill 1`（PID 1 就是 uvicorn），`get pods`：同一個 pod 名字、`RESTARTS` 變 1。對照第 1 題：容器掛了是原地重啟，pod 被刪是換新的。
+4. **改了 ConfigMap 不會自動生效**：`infra/k8s/base/configmap.yaml` 把 `LOG_JSON` 改成 `"false"`，`kubectl apply -k infra/k8s/overlays/ci` → `configmap/backend-config configured`，但 `get pods` 的 AGE 沒變、`logs <pod> --tail=3` 還是 JSON。`kubectl -n jwt-auth-demo rollout restart deployment/backend` 之後才換成新 pod、log 變一行文字。改回來，再 apply + rollout restart。
+5. **唯讀檔案系統**：`kubectl -n jwt-auth-demo exec <pod> -- touch /app/x` → `Read-only file system`；`-- touch /tmp/x` 成功。程式被攻破也改不了 image 裡的檔案。
+6. **把零停機弄壞（不保證看得到）**：`deployment.yaml` 的 `maxUnavailable` 改成 `1`、`preStop` 那三行拿掉，`apply -k`，再做一次 COACHING 步驟 9～11 的換版 + probe。可能看到幾次 `000`（連線被拒）：那就是舊 pod 關掉、名單還沒更新的那一兩秒。沒看到也沒關係，kind 單節點更新名單很快；正式叢集幾十個節點就會看到。改回來：`git checkout -- infra`。
+
+### 想一想
+
+<details>
+<summary>Q1：Render 的 Dockerfile CMD 先跑遷移再起伺服器，為什麼 k8s 要拆成 Job？</summary>
+
+Render 一個實例，遷移只會跑一次。k8s 兩個副本同時啟動、同時跑 `alembic upgrade head`，兩個都想建同一張表，一個會失敗、pod 重啟、再跑一次……Job 讓遷移只有一個執行者，Deployment 只負責跑伺服器。正式環境還會用 Helm hook 或 Argo CD 的 sync wave 保證 Job 一定在新版 pod 之前跑完。
+
+</details>
+
+<details>
+<summary>Q2：Secret 只是 base64，誰都解得開，為什麼還不能進 git？</summary>
+
+base64 不是加密，所以 Secret 進 git 等於明文進 git：歷史永遠留著，所有看得到 repo 的人都拿得到。Secret 的意義是「k8s 在存取控制上把它當密鑰」（RBAC 可以只讓某些人讀、可以開 encryption at rest、不會印在 describe 裡），不是「它自己加密了」。要進 git 得先用 Sealed Secrets 或 SOPS 加密。
+
+</details>
+
+<details>
+<summary>Q3：liveness 用 /api/ping、readiness 用 /api/health，反過來會怎樣？</summary>
+
+liveness 用 `/api/health`：資料庫短暫斷線時程式沒壞，但探針不過，k8s 不斷重啟它，反而更糟（關卡 11 的觀念）。readiness 用 `/api/ping`：程式起來了但連不到資料庫也會收流量，使用者看到 500。所以活著用輕的、能服務用重的。注意現在的 `/api/health` 資料庫壞了也回 200（`status` 是 `degraded`），所以 readiness 其實只擋「程式還沒起來」；要讓資料庫壞時真的不接流量，得讓它回 503，這是刻意留給你的作業（想一想代價：Neon 休眠喚醒的那幾秒，兩個 pod 會同時被移出名單）。
+
+</details>
+
+<details>
+<summary>Q4：CI 量零停機為什麼用叢集裡的 probe pod，不用 port-forward？</summary>
+
+port-forward 黏在一個 pod 上，那個 pod 換版被關它就斷了，量到的是「port-forward 斷了」不是「Service 有沒有中斷」。probe pod 在叢集裡直接打 Service 的名字，走的是真的負載平衡，每一次請求都可能到不同的 pod，這才是使用者的視角。
+
+</details>
+
+<details>
+<summary>Q5：所以要把線上從 Render 搬到 k8s 嗎？</summary>
+
+不用。一個服務、一個開發者、免費額度夠用，Render 幫你做的事就是這關寫出來的這些，它做得很好。k8s 的價值在很多服務、很多人、要自己控制網路與排程的時候；代價是這份清單和背後的叢集要有人養。這關的目的是「知道 Render 背後是什麼、換平台時知道要看哪些字」，不是搬家。面試被問「你用過 k8s 嗎」，答案是這個 job 和這份清單。
+
+</details>
+
+---
+
+## 關卡 24：非同步訊息（transactional outbox → Kafka、冪等）✅
+
+**改動的檔案**：`backend/models.py` 加 `OutboxEvent`、`ProcessedEvent`（遷移 `0005`、`0006`）；新增 `backend/outbox.py`、`worker.py`、`consumer.py`、`tests/test_outbox.py`、`tests/test_register_cap.py`；改 `routes/auth.py`（`register`：上限檢查、`flush` → `enqueue` → `commit` → `wake_worker`）、`main.py`（`lifespan` 的 inline 模式）、`config.py`（`KAFKA_BOOTSTRAP_SERVERS`、`OUTBOX_POLL_SECONDS`、`OUTBOX_WORKER`、`MAX_USERS`）、`pyproject.toml`（`aiokafka`）、`.env.example`、`render.yaml`（三個變數）；`infra/compose.yaml` 加 profile `messaging`（redpanda、redpanda-init、worker、consumer）；`infra.yml` 加 `messaging` job；`tests/conftest.py` 多清兩張表。
+
+**一句話**：註冊成功要通知別的系統時，不在請求裡做；先把「待送事件」和使用者寫進同一個交易，再由 worker 送出。Kafka 是送出的管道之一，重點是 outbox 和冪等。
+
+### 觀念 1：為什麼不在請求裡直接做
+
+| 做法 | 哪裡會壞 |
+| --- | --- |
+| 請求裡直接寄信 | 寄信服務掛了，使用者註冊失敗；寄信慢，註冊就慢 |
+| 先 commit 使用者，再送事件 | 送之前程式當掉，事件丟了：有使用者、沒通知 |
+| 先送事件，再 commit 使用者 | commit 失敗（email 重複），信已經寄了：有通知、沒使用者 |
+| **outbox**：事件和使用者同一個交易，worker 之後送 | 交易成功兩個都在，失敗兩個都不在；worker 掛了事件還在表裡等 |
+
+「資料庫和訊息系統要一致」沒有兩階段提交可用（Kafka 不參與資料庫的交易），outbox 是業界的標準解法。
+
+### 觀念 2：at-least-once，所以收的那邊要冪等
+
+worker 的順序是「送出去 → 標 `published_at` → commit」。送出去之後、標記之前當掉，重啟會再送一次：這叫 at-least-once（至少一次），比「最多一次」（可能丟）好，但代價是可能重複。所以 consumer 要**冪等**：同一筆事件來幾次，效果都和來一次一樣。
+
+做法：`ProcessedEvent` 的主鍵就是事件 id，先 INSERT，撞主鍵就是處理過了，整個交易回滾、記 `duplicate`。「用資料庫的唯一性做判斷」和註冊的 email unique 索引（關卡 13）是同一招。要做的事（寄信、統計）和這個 INSERT 要在同一個交易裡，或本身冪等，才不會「標記了卻沒做」。
+
+事件 id 用 uuid 不用流水號：它會被送到別的系統，那邊要用它判斷重複；它貫穿整條路：outbox 的 id = Kafka 訊息的 key = processedevent 的主鍵。
+
+### 觀念 3：Kafka 是什麼，和 HTTP 呼叫差在哪
+
+Kafka（本機用 Redpanda，Kafka 相容、一個 binary）是一條一條「主題」（topic）的日誌：生產者往後面寫，消費者各自記錄讀到哪（offset）。和直接 HTTP 呼叫對方的差別：
+
+- 寫的人不用等讀的人（註冊不等寄信）
+- 讀的人掛了訊息還在（consumer 停掉再回來，從上次 commit 的 offset 繼續）
+- 一筆訊息可以給好幾個系統各讀一次（寄信、統計各一個 consumer group）
+
+`key` 用事件 id：同一個 key 一定進同一個 partition，順序才有保證。`acks="all"`：所有副本都寫到才算成功，寧可慢也不丟。consumer `enable_auto_commit=False`：處理完才 commit offset，處理到一半當掉會再收到同一筆，靠冪等擋。topic 由 `redpanda-init` 用指令建，不靠程式自動建：partition 數、保留時間是基礎設施的一部分。
+
+### 觀念 4：worker 怎麼撿才不會撞
+
+`publish_pending` 用 `SELECT … FOR UPDATE SKIP LOCKED`（關卡 18 的鎖）：好幾個 worker 同時跑時各拿各的、不等對方，同一筆不會被送兩次。`published_at` 有索引：撿的條件是 `IS NULL`，表大了才不會每次輪詢全表掃描。
+
+沒事做時 worker 等「鈴」或等 `OUTBOX_POLL_SECONDS`：同一個程序裡（inline 模式）註冊 commit 後會按鈴（`wake_worker`），事件幾秒內送出；分開跑的 worker 聽不到鈴，靠輪詢。
+
+### 觀念 5：線上免費方案怎麼跑（24-C）
+
+Render 免費方案開不了第二個服務，所以 `OUTBOX_WORKER=inline`：web 程序啟動時在 `lifespan` 開一個背景 task 跑 `run_worker`，沒有 Kafka 就用 `LogPublisher` 印到 log。`OUTBOX_POLL_SECONDS=600`：worker 不會每 5 秒碰資料庫，Neon 閒置 5 分鐘才能休眠，免費方案的計算時數才省得下來；有人註冊會按鈴，不用等 10 分鐘。`MAX_USERS=1000`：公開的示範站怕人灌帳號把免費額度用光，到了註冊回 503。三個都是環境變數，同一個 image。
+
+### 觀念 6：這個範本刻意沒做的
+
+- consumer 只記一行 log，真實世界是寄信、更新統計，而且通常是**另一個服務、另一個資料庫**（這裡共用是為了看得到整條路）
+- 沒做死信（dead letter）：consumer 處理失敗會一直重試同一筆；正式環境會把失敗幾次的事件丟到另一個 topic 人工看
+- 沒做 schema registry、沒做事件版本；只有一種事件
+- 線上沒有 Kafka，事件只印到 log；要接真的（Upstash、Confluent 有免費方案但會碰到註冊與額度）設 `KAFKA_BOOTSTRAP_SERVERS` 就行
+
+### 程式怎麼寫
+
+`routes/auth.py` 的 `register`，三個重點在同一個交易裡：
+
+```python
+session.add(user)
+await session.flush()                                        # 先拿到 user.id，還沒 commit
+enqueue(session, "user.registered", {"user_id": user.id, "email": user.email})   # 只 add，不 commit
+await session.commit()                                       # 使用者和事件一起成功或一起失敗
+...
+wake_worker()                                                # commit 之後才按鈴
+```
+
+`outbox.py` 的 worker 核心：
+
+```python
+result = await session.exec(
+    select(OutboxEvent)
+    .where(col(OutboxEvent.published_at).is_(None))
+    .order_by(col(OutboxEvent.created_at))
+    .limit(limit)
+    .with_for_update(skip_locked=True)     # 多個 worker 各撿各的
+)
+for event in result.all():
+    await publisher.send(event.topic, str(event.id), serialize(event))
+    event.published_at = datetime.now(timezone.utc)
+await session.commit()
+```
+
+`outbox.py` 的冪等：
+
+```python
+session.add(ProcessedEvent(id=event_id, topic=topic))
+try:
+    await session.flush()                 # 撞主鍵 = 處理過了
+except IntegrityError:
+    await session.rollback()
+    logger.info("duplicate", ...)
+    return False
+# 真正要做的事放這裡，和上面的 INSERT 同一個交易
+await session.commit()
+```
+
+`main.py` 的 inline 模式：
+
+```python
+async def lifespan(_: FastAPI):
+    worker_task = None
+    if settings.outbox_worker == "inline":
+        worker_task = asyncio.create_task(run_worker(), name="outbox-worker")
+    yield
+    if worker_task is not None:
+        worker_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker_task
+```
+
+`infra/compose.yaml`：`worker` 和 `consumer` 都是 `image: jwt-auth-demo-backend:local`，只換 `command`，多一個 `KAFKA_BOOTSTRAP_SERVERS: redpanda:9092`。CI 的 `messaging` job：up → 註冊 → 等 consumer 的 log 出現那個 email → 查兩張表 → `rpk` 把 topic 裡那筆原封不動再送一次 → 等 `duplicate` → `processedevent` 還是 1 筆。
+
+### ⚠️ 開始前
+
+- Mac 路線同關卡 21（Docker）；Redpanda 的 image 約 200 MB。
+- 本機路線不用裝任何東西：`backend/.env` 暫時加 `OUTBOX_WORKER=inline`。
+- 線上已經是 inline 模式（`render.yaml`），**不用**在 Render 做任何事；Render Logs 搜 `published` 就看得到。
+- 不碰付費：Kafka 的雲端服務這關不接。
+
+### 驗證方式
+
+1. `uv run pytest -q`（在 `backend/`）：`test_outbox.py` 8 個、`test_register_cap.py` 2 個都綠。
+2. Mac：`--profile messaging up` 後註冊一筆，`logs worker` 有 `published … transport=kafka`、`logs consumer` 有 `consumed … email=<那個 email>`，`outboxevent.published` 是 `t`，`processedevent` 一列。
+3. Mac：`rpk` 重送同一筆後 `logs consumer` 有 `duplicate`，`processedevent` 仍 1 筆。
+4. 本機：`OUTBOX_WORKER=inline` 時註冊後 1 秒內 log 有 `published … transport=log`。
+5. 線上：Render Logs 搜 `published` 有紀錄；Neon 的 `outboxevent` 最新一列 `published_at` 不是空。
+6. GitHub Actions 的 Infra workflow：`messaging` job 有 `✅ 事件走完：outbox → Kafka → consumer`、`✅ 冪等：同一筆事件只處理一次`。
+
+### 動手玩
+
+（Mac 路線叢集開著時做；每題做完改回來、`down -v` 再 `up`）
+
+1. **把 enqueue 搬到 commit 之後**：`routes/auth.py` 把 `enqueue(...)` 那行移到 `await session.commit()` 之後，`up -d --build backend`，註冊：`outboxevent` 多了一筆但 `user` 也多了，看起來沒差？再用已存在的 email 註冊一次（會 400）：事件還是被 add 了但沒 commit 所以沒進表……看起來也沒差。重點是跑測試：`uv run pytest -q tests/test_outbox.py` 第二個測試 `註冊失敗就沒有事件_同一個交易` 會抓到嗎？想想哪種失敗它抓得到（commit 本身失敗）、哪種抓不到。這題的答案是「這就是為什麼要寫在同一個交易，而不是靠測試」。改回來。
+2. **worker 當掉事件不丟**：`stop worker`，註冊兩筆，`outboxevent` 兩列 `published` 都是 `f`；`start worker`，5 秒內變 `t`，consumer 收到兩筆。
+3. **worker 開兩個不會送兩次**：`docker compose -f infra/compose.yaml --profile messaging up -d --scale worker=2`，註冊五筆，`logs worker | grep -c published` 是 `5` 不是 `10`，`processedevent` 五列。`SKIP LOCKED` 在擋。
+4. **冪等拿掉會怎樣**：`outbox.py` 的 `handle_event` 把 `session.add(ProcessedEvent(...))` 到 `return False` 那段拿掉（直接 log `consumed`），`up -d --build consumer`，重做 COACHING 步驟 8：`consumed` 出現兩次、同一個 uuid。如果「做的事」是寄信，使用者就收到兩封。改回來。
+5. **鈴的差別**：本機路線 `OUTBOX_WORKER=inline`、`.env` 再加 `OUTBOX_POLL_SECONDS=600`，註冊：`published` 還是 1 秒內出現（鈴）。再把 `routes/auth.py` 的 `wake_worker()` 註解掉重啟，註冊：要等到 600 秒（或重啟）才會 `published`。這就是 Render 設 600 秒還能即時送的原因。改回來。
+
+### 想一想
+
+<details>
+<summary>Q1：既然有 Kafka，為什麼不讓 register 直接送 Kafka，還要先寫 outbox 表？</summary>
+
+因為 Kafka 不參與資料庫的交易。直接送有兩種壞法：送了但 commit 失敗（通知了不存在的使用者），或 commit 了但送之前當掉（使用者沒被通知）。outbox 把「要送」這件事變成資料庫裡的一列，跟使用者同生共死；真的送出去是 worker 的事，失敗了下次再撿。多一張表，換來一致性。
+
+</details>
+
+<details>
+<summary>Q2：at-least-once 會重複，為什麼不做 exactly-once？</summary>
+
+跨系統的 exactly-once 非常貴、而且邊界很多（Kafka 自己的 exactly-once 只管 Kafka 內部）。業界做法是 at-least-once 送 + 冪等收：重複送很便宜，收的那邊用一個主鍵擋掉就好。這個組合的效果就是「看起來像 exactly-once」。
+
+</details>
+
+<details>
+<summary>Q3：線上沒有 Kafka、事件只印到 log，那這關線上到底做了什麼？</summary>
+
+做了前半段：註冊時 outbox 多一筆（同一個交易）、worker 撿出來、標 `published_at`。只有「送到哪」不同（log 而不是 Kafka）。所以線上的資料庫和程式已經是「可以接 Kafka」的狀態，接的時候只設一個環境變數。免費方案的限制在管道，不在設計。
+
+</details>
+
+<details>
+<summary>Q4：為什麼 worker 要有 `OUTBOX_POLL_SECONDS=600` 這麼長的輪詢，又要有鈴？</summary>
+
+兩個需求衝突：想即時送（短輪詢）又想讓 Neon 休眠省免費額度（長輪詢）。鈴解決即時：同一個程序裡註冊 commit 後叫醒 worker；長輪詢當保底：萬一鈴沒響（例如多副本時事件是別的副本寫的），最多 10 分鐘也會送。compose 和 k8s 裡 worker 是分開的程序聽不到鈴，所以那邊用 5 秒。
+
+</details>
+
+<details>
+<summary>Q5：這個專案的 consumer 和後端共用資料庫，真實世界呢？</summary>
+
+真實世界 consumer 是另一個服務（寄信服務、統計服務），有自己的資料庫，`processedevent` 在它那邊。事件裡只放 id 和必要欄位（不放密碼雜湊），因為它會離開這個系統。共用資料庫在這裡是為了一個 repo 看得到整條路；搬去練習專案時，consumer 可以直接是另一個 repo。
+
+</details>
+
+---
+
 ## 之後還可以自己摸的（不排關卡）
+
+> 2026-10-22 註記：關卡 21～24 是後來加的基礎設施路線（`PLAN-INFRA.md`），下表的 docker compose 已做成關卡 21，Codespaces 在有了第二台有 Docker 的機器後不需要。
 
 範例專案的程式到關卡 17 凍結（關卡 19 只多了 `Cache-Control: no-store`）；18～20 是觀念關（SQL、HTTP、除錯），全部 21 關（0～20）已完成。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
 

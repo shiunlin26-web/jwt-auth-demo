@@ -116,3 +116,24 @@ async def test_off模式不開背景task():
     async with lifespan(app):
         names = {t.get_name() for t in asyncio.all_tasks()}
         assert "outbox-worker" not in names
+
+
+async def test_inline模式註冊後會立刻叫醒worker(client, db, monkeypatch):
+    # 【關卡 24-C】輪詢間隔設很長：事件送得出去只能靠「註冊 commit 之後按鈴」
+    monkeypatch.setattr(settings, "outbox_poll_seconds", 60)
+    task = asyncio.create_task(run_worker(test_engine))
+    try:
+        await asyncio.sleep(0.2)  # 讓 worker 查過一次、進入等待
+        await register(client, "a@test.com", "Passw0rd!x")
+        for _ in range(60):
+            await asyncio.sleep(0.05)
+            db.expire_all()
+            events = (await db.exec(select(OutboxEvent))).all()
+            if events and all(e.published_at is not None for e in events):
+                break
+        else:
+            raise AssertionError("註冊後 3 秒內 worker 沒被叫醒（輪詢是 60 秒）")
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

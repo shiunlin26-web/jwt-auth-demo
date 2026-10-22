@@ -34,6 +34,19 @@ from models import OutboxEvent, ProcessedEvent
 
 logger = logging.getLogger("app.outbox")
 
+# 【關卡 24-C】同一個程序裡的「叫醒鈴」：註冊 commit 之後按一下，inline 模式的 worker 立刻醒來送，不用等下一次輪詢。
+# 分開跑的 worker（compose、k8s）聽不到這個鈴，它們靠輪詢；所以輪詢間隔在那邊設短、在 Render 設長
+# 鈴由 run_worker 在自己的 event loop 裡建（asyncio 的 Event 會綁定第一次用它的 loop，測試每個測試一個 loop）；
+# worker 沒在跑時是 None，按鈴就是 no-op
+_wakeup: asyncio.Event | None = None
+
+
+def wake_worker() -> None:
+    """有新事件 commit 之後呼叫。一定要在 commit 之後：worker 醒來是去查資料庫，還沒 commit 它看不到"""
+    if _wakeup is not None:
+        _wakeup.set()
+
+
 # 這個範本只有一種事件；要加別的事件就多一個 topic 常數，consumer 的訂閱清單一起加
 TOPIC_USER_REGISTERED = "user.registered"
 TOPICS = [TOPIC_USER_REGISTERED]
@@ -138,15 +151,27 @@ async def run_worker(db_engine: AsyncEngine = engine) -> None:
 
     db_engine 參數是給測試用的（測試資料庫）；平常用 database.py 的 engine。
     """
+    global _wakeup
+    wakeup = asyncio.Event()
+    _wakeup = wakeup
     publisher = await make_publisher()
     try:
         while True:
+            # 先把鈴放下再去查：查的期間若有人註冊，鈴會再被按下，下面的等待就立刻醒
+            wakeup.clear()
             async with AsyncSession(db_engine) as session:
                 sent = await publish_pending(session, publisher)
-            # 有送到東西就立刻再撿（可能還有），沒有才睡
-            if sent == 0:
-                await asyncio.sleep(settings.outbox_poll_seconds)
+            if sent:
+                continue  # 可能還有，馬上再撿
+            # 沒事做：等鈴響，最多等 OUTBOX_POLL_SECONDS。
+            # Render 上設 600 秒：worker 不會每 5 秒碰資料庫，Neon 閒置 5 分鐘才能休眠，免費方案的計算時數才省得下來；
+            # 有人註冊會按鈴，不用等 10 分鐘
+            try:
+                await asyncio.wait_for(wakeup.wait(), timeout=settings.outbox_poll_seconds)
+            except asyncio.TimeoutError:
+                pass
     finally:
+        _wakeup = None
         await publisher.stop()
 
 
