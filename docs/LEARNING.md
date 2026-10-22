@@ -66,6 +66,7 @@
 | 22 | 指標與追蹤 | Prometheus 拉 /metrics、label 與 cardinality、p95、儀表板進 git、OpenTelemetry 與 collector、log ↔ trace | ✅ 完成 |
 | 23 | Kubernetes | Deployment 與探針、Service、遷移 Job、ConfigMap 與 Secret、零停機滾動更新、rollout undo、kustomize | ✅ 完成 |
 | 24 | 非同步訊息 | transactional outbox、at-least-once 與冪等、Kafka（Redpanda）、SKIP LOCKED、線上 inline worker | ✅ 完成 |
+| 25 | 地圖與交接 | ARCHITECTURE 四條路徑與怎麼證明、CHAIN 環 8～11、README、部署追蹤（選配） | ✅ 完成 |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -4361,6 +4362,107 @@ async def lifespan(_: FastAPI):
 <summary>Q5：這個專案的 consumer 和後端共用資料庫，真實世界呢？</summary>
 
 真實世界 consumer 是另一個服務（寄信服務、統計服務），有自己的資料庫，`processedevent` 在它那邊。事件裡只放 id 和必要欄位（不放密碼雜湊），因為它會離開這個系統。共用資料庫在這裡是為了一個 repo 看得到整條路；搬去練習專案時，consumer 可以直接是另一個 repo。
+
+</details>
+
+---
+
+## 關卡 25：地圖與交接（ARCHITECTURE、CHAIN v2、README、部署追蹤）✅
+
+**改動的檔案**：新增 `docs/ARCHITECTURE.md`（25-A）、`.github/workflows/deploy.yml`（25-D，選配）；改 `docs/CHAIN.md`（25-B：環 8～11）、`README.md`（25-C：架構圖與「這個專案展示了什麼」）、`docs/HANDOFF.md`、`docs/PLAN-INFRA.md` 進度表、`docs/TOUR.md`（16～18 站）、`docs/DEBUGGING.md`。程式沒動。
+
+**一句話**：把 0～24 畫成一張別人十分鐘看得懂的圖，每一塊附「怎麼證明、怎麼擴充、要多少錢、換技術棧對照」；這是交接用的那一頁，也是面試拿出來的那一頁。
+
+### 觀念 1：地圖用「路徑」講，不用「關卡」講
+
+關卡是學的順序，路徑是東西運作的順序。接手的人不在乎你第幾關學了 cookie，他在乎「使用者按下登入之後經過哪些東西」。所以 `ARCHITECTURE.md` 第 1 節是四條路徑：請求、部署、事件、觀測。每條路徑上的每一塊都在第 2 節有一列：在哪跑、怎麼證明、怎麼擴充、要多少錢、換棧對照。
+
+### 觀念 2：「證明」是一個 job 或一個網址
+
+「我測過」不是證明。這條鏈每一塊都對應一個看得到的東西：登入是 pytest 與 vitest、上線是線上 `/api/health`、compose 與 E2E 是 `Infra` workflow 的兩個 job、指標與追蹤是 `observability` job、Kubernetes 是 `k8s` job 的「80 次全部 200」、訊息是 `messaging` job 的 `duplicate`。面試被問「你怎麼知道它真的能跑」，答案是指著其中一個。
+
+### 觀念 3：文件寫給沒有記憶的人
+
+交接的對象可能是三個月後的自己、下一個人、或一個全新的 AI 對話。檢驗方法只有一個：把 `ARCHITECTURE.md` 丟給一個什麼都不知道的 AI，問它四條路徑，它說得出來才算寫好。`CHAIN.md` 環 8～11 用同一個標準寫：跟技術棧無關，任何 AI 看了就能在新專案重做一遍。
+
+### 觀念 4：部署也該是看得到的一步（25-D，選配）
+
+關卡 11 的部署是 Render 自己盯著 GitHub，部署了什麼只在 Render 的 Events 看得到。`deploy.yml` 把它變成 GitHub 上的一個 job：`CI` workflow 在 main 上成功 → POST Render 的 Deploy Hook → 每 10 秒打一次線上 `/api/health`，直到 `version` 變成這次的 commit、`db` 是 `ok` → 綠；10 分鐘等不到就紅。job 掛在 GitHub Environment `production` 底下，repo 的 Environments 分頁會列出每一次部署、commit、網址。RUNBOOK 第 0 節那三件事從「人去看」變成「CI 幫你看」。
+
+沒設 secret 時它只印一行跳過，所以合併它不改變任何現狀。
+
+### 程式怎麼寫
+
+`deploy.yml` 的三段：
+
+```yaml
+on:
+  workflow_run:
+    workflows: [CI]           # CI 這個 workflow 跑完才觸發
+    types: [completed]
+    branches: [main]          # 只看 main
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}   # CI 綠才部署
+    environment:
+      name: production        # Environments 分頁會記錄每一次
+      url: https://jwt-auth-demo-backend.onrender.com/api/health
+```
+
+```bash
+curl -fsS -X POST "$HOOK"                        # 叫 Render 部署（網址在 secret 裡）
+for i in $(seq 1 60); do                         # 最多 10 分鐘
+  v=$(curl -s "$HEALTH_URL" | jq -r '.version')  # Render 注入的 RENDER_GIT_COMMIT
+  [ "${v:0:7}" = "${SHA:0:7}" ] && exit 0        # 前 7 碼對上就是新版在服務了
+  sleep 10
+done; exit 1
+```
+
+### ⚠️ 開始前（25-D，選配；全部免費）
+
+1. Render → 後端服務 → **Settings → Build & Deploy**：**Auto-Deploy 改成 Off**。沒關就設 secret 會部署兩次（Render 一次、GitHub 一次），不會壞，只是浪費。
+2. 同一頁 **Deploy Hook** → 複製網址（裡面有密鑰，不要貼到任何文件或 PR）。
+3. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**：名稱 `RENDER_DEPLOY_HOOK`，值貼網址。
+4. 下一次合併到 main：Actions 分頁多一個 **Deploy** workflow；跑完 repo 的 **Environments** 分頁出現 `production`。
+5. 想收回：刪掉 secret、Render 的 Auto-Deploy 改回 **After CI Checks Pass**。`deploy.yml` 會自動變回「跳過」。
+
+GitHub Environments 在公開 repo 免費；Render 的 Deploy Hook 免費方案就有。
+
+### 驗證方式
+
+1. `ARCHITECTURE.md` 第 6 節八格都填了，每格三句。
+2. 交接演練：全新的 AI 對話只給 `ARCHITECTURE.md`，能說出四條路徑和每塊怎麼證明。
+3. `README.md` 開頭的表，每一列的「怎麼證明」都能在 Actions 或線上網址找到。
+4. （25-D）合併一個 PR 到 main 後，Deploy workflow 綠，最後一行 `✅ 線上版本已經是 <7 碼>`；Environments 分頁有紀錄；RUNBOOK 第 0 節的三件事和它說的一樣。
+5. （25-D 沒啟用時）Deploy workflow 也會出現，但只有一行 `RENDER_DEPLOY_HOOK 沒設，跳過`，綠的。
+
+### 動手玩
+
+1. **60 秒說法**：填 `ARCHITECTURE.md` 第 6 節，先填關卡 24 那格；隔一天不看筆記講一次，講不順的句子改掉。全部填完 commit。
+2. **交接演練**：開一個全新的 AI 對話，只貼 `ARCHITECTURE.md`，問「四條路徑各經過哪些東西？每一塊怎麼證明會動？要接託管 Kafka 要改哪裡？」。它答錯的地方回去改地圖。
+3. **弄壞部署追蹤**（25-D 啟用後）：`deploy.yml` 把 `${SHA:0:7}` 改成 `${SHA:0:6}x`，開 PR 合併：Deploy 等 10 分鐘後紅，最後一行 `❌ 10 分鐘內線上 version 沒變成 …`；但線上其實已經是新版（Render 照樣部署了）。改回來。這題證明「紅」的定義是「GitHub 沒等到它想看的東西」，不是「線上壞了」。
+4. **手動重跑**：Actions → Deploy → Run workflow：不經 CI 直接叫 Render 部署 main 現在的 commit，看它綠。什麼時候用：Render 那邊部署失敗想重來、或 Render 休眠太久想暖機。
+
+### 想一想
+
+<details>
+<summary>Q1：Render 本來就會「CI 綠才部署」，25-D 多了什麼？</summary>
+
+兩件事。一是**紀錄在 GitHub**：Environments 分頁列出每一次部署對應哪個 commit，不用登入 Render 找。二是**等到它真的在服務**：Render 說「Live」只代表容器起來了，這個 job 等的是線上 `/api/health` 的 `version` 對上而且 `db` 是 ok，等不到就紅，你會收到通知。這就是「部署」從一個動作變成一個可驗證的步驟。
+
+</details>
+
+<details>
+<summary>Q2：為什麼 Deploy Hook 的網址要放 secret，而 `/api/health` 的網址寫死在檔案裡？</summary>
+
+Deploy Hook 的網址帶著密鑰，誰拿到都能叫 Render 重新部署（公開 repo 等於全世界都能）。`/api/health` 是公開的唯讀網址，RUNBOOK 本來就寫著。規則和關卡 2 一樣：能讓別人「做事」的值是密鑰，只能「看」的不是。
+
+</details>
+
+<details>
+<summary>Q3：交接演練為什麼要用「全新的」AI 對話？</summary>
+
+舊的對話記得你們聊過什麼，答得出來不代表文件寫得好。全新的對話只有文件，答不出來就是文件的洞。這和「學習者說我沒看到你說的東西，相信他」是同一個原則：以沒有記憶的那一方為準。
 
 </details>
 

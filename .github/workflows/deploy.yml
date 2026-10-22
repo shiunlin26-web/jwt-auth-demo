@@ -1,0 +1,83 @@
+# 【關卡 25-D】部署追蹤（選配）：main 的 CI 綠了才叫 Render 部署，然後等線上 /api/health 的 version 變成這次的 commit
+#
+# 關卡 11 的做法是 Render 自己盯著 GitHub（Auto-Deploy: After CI Checks Pass），部署了什麼只在 Render 的 Events 看得到。
+# 這個 workflow 把「部署」也變成 GitHub 上的一個 job：
+#   1. 只在 CI workflow 在 main 上成功之後跑（workflow_run），所以還是「CI 綠才部署」
+#   2. POST Render 的 Deploy Hook（一個帶密鑰的網址，放在 repo 的 secret RENDER_DEPLOY_HOOK）
+#   3. 每 10 秒打一次線上 /api/health，直到 version 等於這次的 commit，最多等 10 分鐘；等不到就紅
+#   4. job 掛在 GitHub Environment「production」底下：repo 的 Environments 分頁會列出每一次部署、哪個 commit、網址
+#
+# 沒設 RENDER_DEPLOY_HOOK 時這個 workflow 什麼都不做（只印一行跳過），所以合併它不會改變現在的部署方式。
+# 要啟用（全部免費）：Render 服務 → Settings → Build & Deploy → Auto-Deploy 改 Off → 同頁 Deploy Hook 複製網址 →
+# GitHub repo → Settings → Secrets and variables → Actions → New repository secret：RENDER_DEPLOY_HOOK。
+# ⚠️ Auto-Deploy 沒關就設 secret 會部署兩次（Render 一次、這裡一次），不會壞，只是浪費。步驟見 LEARNING.md 關卡 25。
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # 手動跑：Actions → Deploy → Run workflow（例如 Render 那邊部署失敗想重來）
+  workflow_dispatch:
+
+# 同一時間只跑一個部署；新的排隊等，不取消正在跑的（取消了 Render 還是會部署完，但這裡就沒人等它）
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # workflow_run 不管 CI 成功失敗都會觸發，這裡只放行成功的；手動跑不檢查
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://jwt-auth-demo-backend.onrender.com/api/health
+    env:
+      HEALTH_URL: https://jwt-auth-demo-backend.onrender.com/api/health
+      # workflow_run 的 github.sha 是 main 當下的 commit，head_sha 才是觸發那次 CI 的 commit；手動跑時用 github.sha
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: 沒設 Deploy Hook 就跳過
+        id: hook
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "RENDER_DEPLOY_HOOK 沒設，跳過：Render 仍用自己的 Auto-Deploy（要啟用看這個檔案開頭的註解）"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 叫 Render 部署（POST Deploy Hook）
+        if: steps.hook.outputs.enabled == 'true'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          echo "要部署的 commit：$SHA"
+          curl -fsS -X POST "$HOOK" | tee hook.json; echo
+
+      # /api/health 的 version 來自 Render 注入的 RENDER_GIT_COMMIT（config.py），所以「version 對上」= 新版真的在服務了。
+      # 比前 7 碼就夠（RUNBOOK 第 0 節也是這樣看）
+      - name: 等線上 /api/health 的 version 變成這次的 commit（最多 10 分鐘）
+        if: steps.hook.outputs.enabled == 'true'
+        run: |
+          want="${SHA:0:7}"
+          for i in $(seq 1 60); do
+            body=$(curl -s --max-time 20 "$HEALTH_URL" || true)
+            v=$(echo "$body" | jq -r '.version // empty' 2>/dev/null || true)
+            if [ "${v:0:7}" = "$want" ]; then
+              echo "✅ 線上版本已經是 $want：$body"
+              echo "$body" | jq -e '.db == "ok"' > /dev/null || { echo "❌ 版本對了但 db 不是 ok"; exit 1; }
+              exit 0
+            fi
+            echo "第 $i 次（$(date -u +%H:%M:%S)）：線上 version=${v:-（沒回應）}，等 $want…"
+            sleep 10
+          done
+          echo "❌ 10 分鐘內線上 version 沒變成 $want：看 Render 的 Events（部署失敗或還在跑）"
+          exit 1
