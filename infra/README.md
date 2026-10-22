@@ -9,7 +9,7 @@
 | `../frontend/e2e/`、`../frontend/playwright.config.ts` | 21 | Playwright E2E：真的瀏覽器走「註冊 → 登入 → 重新整理 → 登出」，後端用 compose 起 | `infra.yml` 的 `e2e` job（報告在 artifact `playwright-report`） |
 | `prometheus/`、`grafana/` | 22 | `--profile observability` 多起 Prometheus（抓 `backend:8000/metrics`）與 Grafana（資料來源、儀表板都從檔案載入） | `infra.yml` 的 `observability` job |
 | `otel/` | 22 | OpenTelemetry Collector：收後端送來的追蹤 span，印到 log（後端要設 `OTEL_EXPORTER_OTLP_ENDPOINT` 才會送） | 同上 job 的「追蹤」那步 |
-| `k8s/` | 23 | Kubernetes 清單：`base/`（ConfigMap、遷移 Job、Deployment 2 副本與探針、Service）、`overlays/ci/`（kind 用的 image tag）、`ci/postgres.yaml`（只給 CI 與本機 kind 的資料庫） | `infra.yml` 的 `k8s` job（kind 開叢集 → 載入 image → apply → smoke test） |
+| `k8s/` | 23 | Kubernetes 清單：`base/`（ConfigMap、遷移 Job、Deployment 2 副本與探針、Service）、`overlays/ci/`（kind 用的 image tag）、`ci/postgres.yaml`（只給 CI 與本機 kind 的資料庫） | `infra.yml` 的 `k8s` job（kind 開叢集 → 載入 image → apply → smoke test → 滾動更新時連續打 Service 數失敗次數 → `rollout undo` → 壞 image 被擋住、舊 pod 繼續服務） |
 
 本機（有 Docker 的那台）：
 
@@ -35,6 +35,7 @@ kubectl apply -f infra/k8s/base/namespace.yaml && kubectl -n jwt-auth-demo apply
 kubectl -n jwt-auth-demo create secret generic backend-secret --from-literal=DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo --from-literal=JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
 kubectl apply -k infra/k8s/overlays/ci && kubectl -n jwt-auth-demo rollout status deployment/backend
 kubectl -n jwt-auth-demo port-forward service/backend 8080:80   # 另一個視窗 curl http://localhost:8080/api/health
+kubectl -n jwt-auth-demo set image deployment/backend backend=jwt-backend:v2   # 換版（先 docker tag + kind load）；rollout status / history / undo 看 infra.yml 的 k8s job
 kind delete cluster --name jwt                                    # 玩完整個叢集刪掉
 ```
 

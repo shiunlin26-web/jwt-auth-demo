@@ -241,6 +241,59 @@ jobs:
           grep -q "\"migration\": *\"$latest\"" health.json || { echo "❌ migration 不是最新的 $latest"; exit 1; }
           echo "✅ 兩個 pod 在服務，遷移是 $latest，version 是 $(grep -o '"version": *"[^"]*"' health.json)"
 
+      # ---------- 【關卡 23-B】滾動更新：換版時服務不中斷 ----------
+      # 同一個 image 打上 v2 的 tag 當「新版」。換版期間在叢集裡開一個 curl pod 每 0.5 秒打一次 Service，
+      # 結束後數有幾次不是 200：maxUnavailable: 0 + readiness 探針的意思就是「一次都不該失敗」。
+      # 為什麼不用 port-forward 量？port-forward 黏在一個 pod 上，那個 pod 被換掉它就斷了，不是走 Service 的負載平衡
+      - name: 滾動更新到 v2（換版期間持續打 Service，數失敗次數）
+        run: |
+          docker tag jwt-backend:ci jwt-backend:v2
+          kind load docker-image jwt-backend:v2 --name jwt
+          kubectl -n $NS run probe --image=curlimages/curl:8.12.1 --restart=Never -- \
+            sh -c 'for i in $(seq 1 80); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 2 http://backend/api/ping; sleep 0.5; done'
+          kubectl -n $NS wait --for=condition=Ready pod/probe --timeout=60s
+          kubectl -n $NS set image deployment/backend backend=jwt-backend:v2
+          kubectl -n $NS rollout status deployment/backend --timeout=180s
+          echo "--- rollout history：每次換版一個 revision，undo 就是退回上一個 ---"
+          kubectl -n $NS rollout history deployment/backend
+          kubectl -n $NS get pods -o wide
+          kubectl -n $NS wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe --timeout=120s
+          total=$(kubectl -n $NS logs probe | wc -l)
+          bad=$(kubectl -n $NS logs probe | grep -vc '^200$' || true)
+          echo "換版期間打了 $total 次，不是 200 的有 $bad 次"
+          [ "$bad" = "0" ] || { echo "❌ 換版期間有請求失敗，零停機沒做到"; exit 1; }
+          echo "✅ 零停機：換版期間每一次請求都 200"
+          kubectl -n $NS delete pod probe
+
+      # ---------- 【關卡 23-B】退版：rollout undo 回到上一個 revision（對照 RUNBOOK 第 2 節 Render 的 Rollback）----------
+      - name: 退版（rollout undo）
+        run: |
+          kubectl -n $NS rollout undo deployment/backend
+          kubectl -n $NS rollout status deployment/backend --timeout=180s
+          image=$(kubectl -n $NS get deployment/backend -o jsonpath='{.spec.template.spec.containers[0].image}')
+          echo "退版後的 image：$image"
+          [ "$image" = "jwt-backend:ci" ] || { echo "❌ 沒退回 ci"; exit 1; }
+          kubectl -n $NS rollout history deployment/backend
+          echo "✅ 退版成功，revision 多一筆（undo 也是一次換版）"
+
+      # ---------- 【關卡 23-B】壞版本上不去：image 不存在，新 pod 起不來，舊 pod 繼續服務 ----------
+      # 這就是 readiness + maxUnavailable: 0 的保險：新版起不來，流量永遠不會切過去。rollout status 等 30 秒會逾時（預期）
+      - name: 壞版本被擋住（image 不存在 → 舊 pod 繼續服務 → undo）
+        run: |
+          kubectl -n $NS set image deployment/backend backend=jwt-backend:does-not-exist
+          kubectl -n $NS rollout status deployment/backend --timeout=30s && { echo "❌ 壞版本竟然 rollout 成功"; exit 1; } || echo "rollout 逾時，這是預期的"
+          echo "--- pod 狀態：新的一個 ImagePullBackOff / ErrImagePull，舊的兩個仍 Running ---"
+          kubectl -n $NS get pods -o wide
+          ready=$(kubectl -n $NS get pods -l app=backend --no-headers | grep -c ' 1/1 ' || true)
+          [ "$ready" -ge 2 ] || { echo "❌ 舊 pod 不到兩個 Ready（$ready）"; exit 1; }
+          echo "✅ 兩個舊 pod 仍 Ready（$ready）"
+          kubectl -n $NS run probe2 --image=curlimages/curl:8.12.1 --restart=Never --rm -i -- curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 http://backend/api/ping | tee code.txt
+          grep -q '^200$' code.txt || { echo "❌ 壞版本期間 Service 打不通"; exit 1; }
+          echo "✅ 壞版本期間 Service 照常回 200"
+          kubectl -n $NS rollout undo deployment/backend
+          kubectl -n $NS rollout status deployment/backend --timeout=180s
+          echo "✅ undo 之後恢復，image：$(kubectl -n $NS get deployment/backend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+
       # 學習用：看 k8s 眼中的狀態。壞掉時先看 describe 的 Events 和 pod 的 log
       - name: kubectl get / describe / logs
         if: always()
