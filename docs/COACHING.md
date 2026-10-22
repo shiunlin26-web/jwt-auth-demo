@@ -27,6 +27,7 @@
 - **他說「我沒看到你說的東西」**：相信他，是你記錯了。改成用指令、數字或檔案內容驗證，不要再描述畫面。
 - **每個實驗結束一句話「這證明了什麼」**。一關結束用「你看到的 → 對應的觀念」表格收尾，**收尾之後要問「哪一步要我再講一次？」**，他說沒有再進下一關（2026-10-20 的回饋：關卡 19 收尾講太快）。
 - **一關的收尾有三段，缺一不可，而且不要催**（2026-10-20 關卡 0 的回饋：「不要一直催我往下，先把關卡 0 整理好」）：(1) 用一個情境把整關脈絡從頭講一遍（一個請求走幾站、每站誰在做、出錯回什麼）；(2) 出 5～7 題讓他用自己的話答，題目要蓋到這關的每個觀念；(3) 逐題對答案，對一半的說清楚缺哪一半，錯的用情境重講，再補一輪只問錯的。最後給一份「整理」：一句話、脈絡表、狀態碼表、規則、他誤解過的地方。**他說「下一關」才開下一關**，不要在收尾訊息的結尾就塞下一關的第一步。
+- **出題只問他打得開的程式**（2026-10-22：問「關卡 2 之前的 `os.getenv` 寫法會怎樣」，那段程式已經不在 repo 裡，他沒地方看）。要問歷史版本，先給 `git show <commit>~1:<檔案>` 讓他看到再問。
 - **需要他改程式的步驟**（動手玩）：給檔案路徑、改前一行、改後一行，最後一定寫「改回來：`git checkout -- <檔案>`」。
 - **會碰到付費門檻的步驟先說**（`AGENTS.md`）。
 - **一關帶完更新 `HANDOFF.md` 第 2 節的「觀念關的帶做進度」**，寫到哪一關、哪一步。
@@ -122,20 +123,26 @@
 
 ### 關卡 2：設定管理
 
-**搭配看的程式**：`backend/config.py` 的 `Settings`；`backend/database.py`；`backend/.env.example`；`backend/main.py` 的 `CORSMiddleware`；`frontend/vite.config.ts` 的 `proxy`
+**搭配看的程式**：`backend/config.py` 的 `Settings`（21～82，每個欄位一個設定；27 行 `env_file`、29 行 `extra="ignore"`、74 行 `cors_origin_list`、82 行 `settings = Settings()`）；`backend/.env.example`；`backend/routes/auth.py:36`（`max_age` 用設定算）；`backend/security.py:71`（`refresh_token_expiry` 用同一個設定）；`backend/main.py` 的 `CORSMiddleware`；`frontend/vite.config.ts:32` 的 `proxy`
 
-**前置**：後端能跑。這關每一步都要重啟後端。
+**前置**：後端能跑。**每一步改完 `.env` 都要 `Ctrl+C` 手動重啟**，`--reload` 只監看 `.py`，不看 `.env`（2026-10-22 學習者改了 `.env` 以為沒效果，其實沒重啟）。
+
+**先講名詞**：設定（會因機器而不同的值）、環境變數（作業系統給程式的「名字 = 值」）、`.env`（環境變數寫成檔案，永遠不進 git，Render 上沒有這個檔改用平台的環境變數頁）、fail fast（缺了啟動就死，不等人登入才 500）。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `backend\.env` 把 `JWT_SECRET=` 那行前面加 `#`，啟動後端 | 起不來，terminal 最後幾行有 `jwt_secret` 和 `Field required` | fail fast：設定缺了就不要跑。`config.py` 的 `Settings`。改回來 |
-| 2 | `.env` 加 `DB_ECHO=true`，重啟，用 curl 登入一次 | terminal 多出 `SELECT ...`、`INSERT ...`、`UPDATE ...` 好幾行 | 這是 ORM 真的送去資料庫的 SQL，對照 `login` 的每一步。看完刪掉 |
-| 3 | `.env` 加 `REFRESH_TOKEN_EXPIRE_DAYS=1`，重啟，`curl.exe -s -i` 登入 | `set-cookie` 裡 `Max-Age=86400` | 86400 = 1 天的秒數。設定值一路傳到 cookie。刪掉 |
-| 4 | `curl.exe -s -i localhost:8000/api/health -H "Origin: http://evil.com"` | `200`，但**沒有** `access-control-allow-origin` | `CORS_ORIGINS` 預設只有 `localhost:5173`。CORS 的細節留到關卡 19 |
-| 5 | `uv run python -c "from config import settings; print(settings.jwt_expire_minutes, settings.cors_origin_list)"`（在 `backend`） | `30 ['http://localhost:5173']` | 設定是一個物件，程式各處都從它讀，不散落 |
+| 1 | `backend\.env` 的 `JWT_SECRET=` 那行**行首**加 `#`，存檔，`Ctrl+C`，`uv run uvicorn main:app --reload --port 8000` | 起不來，最後三行 `ValidationError: 1 validation error for Settings` / `jwt_secret` / `Field required [type=missing, ...]` | fail fast：錯在 import 那一刻（traceback 裡 `main.py:15` → `config.py:82`），伺服器沒開始聽 8000。**`#` 加在 `=` 後面不算註解**，會變成密鑰的一部分照樣合法（學習者撞過）。順便教 traceback：從最後一行往上，只看「專案路徑且沒有 `.venv`」的那幾組，`.venv\Lib\site-packages\` 是裝在專案裡的套件、`AppData\...\python` 是 Python 本身、`<frozen importlib>` 是 import 機制，全部跳過；啟動錯誤的 traceback 特別長（疊了 uvicorn 子程序和 import 鏈），平常請求出錯大約 10 行。`input_value={...}` 會印出其他設定的一部分，正式環境 log 不能隨便貼 |
+| 2 | 拿掉 `#`，加 `DB_ECHO=true`，重啟，另一個視窗 curl 登入一次 | uvicorn 視窗：啟動時三句 `select pg_catalog.version()`、`current_schema()`、`show standard_conforming_strings`（SQLAlchemy 第一次連線問版本，跳過）；登入那下 `BEGIN` → `SELECT "user"... WHERE email = $1` → `UPDATE "user" SET last_login_at` → `DELETE FROM refreshtoken WHERE ... expires_at <` → `INSERT INTO refreshtoken (token_hash, ...)` → `COMMIT` | 一句 SQL 對一行 `login`：SELECT = 126 行找人；bcrypt 和簽章沒有 SQL（Python 裡做）；UPDATE = 146 行改屬性 ORM 自動變 UPDATE；DELETE = 149 行清過期；INSERT = 152 行存雜湊；COMMIT = 153 行才真的寫。INSERT 參數裡印出 64 字 token 雜湊 → 這就是 `DB_ECHO` 只能本機開的理由（另一個理由：正式環境每個請求幾行 SQL 會灌爆 log）。`$1::VARCHAR` 是參數化，SQL injection 擋在這。第一次登入 `duration_ms` 幾千是 Neon 冷啟動，再打一次會掉到 100 多 |
+| 3 | 加 `REFRESH_TOKEN_EXPIRE_DAYS=1`，重啟，`curl.exe -s -i` 登入 | `set-cookie` 的 `Max-Age=86400`（原本 604800） | 數字走的路：`.env` 字串 `"1"` → `config.py:38` 轉 int 蓋掉預設 7 → `routes/auth.py:36` 算 `max_age` → 同一個設定 `security.py:71` 算資料庫 `expires_at`。一個設定、一處定義、兩處用 |
+| 4 | 不重啟，在 `backend`：`uv run python -c "from config import settings; print(settings.refresh_token_expire_days, type(settings.refresh_token_expire_days)); print(settings.db_echo, type(settings.db_echo)); print(settings.cors_origin_list)"` | `1 <class 'int'>` / `True <class 'bool'>` / `['http://localhost:5173']` | `.env` 全是字串，欄位的型別標註決定轉成什麼；`cors_origin_list` 是 74 行的 property 把 `"a,b"` 切成 list。**這個指令是「改了設定沒生效」的萬用檢查**：印的是 `Settings` 真的讀到的值，沒重啟、改錯檔、名字打錯（`extra="ignore"` 會安靜忽略）、系統環境變數蓋掉（優先於 `.env`、最陰因為不在任何檔案裡）四種原因都抓得到 |
+| 5 | 刪掉 `REFRESH_TOKEN_EXPIRE_DAYS=1` 和 `DB_ECHO=true`，重啟 | `.env` 回原狀 | |
+| 6 | 整個 `.env` 改名（`Rename-Item .env .env.bak`），重啟，看完改回來 | `2 validation errors`：`database_url`、`jwt_secret` | 必填的一次全列出來（不同欄位各報一個，和關卡 0 的規則一樣）。可以當題目讓他先猜幾個 |
 
-**收尾**：設定缺了立刻死 / 設定值改了行為就改 / 密鑰只在 `.env` 和平台的環境變數。
-**動手玩**：`LEARNING.md` 關卡 2 的 1、3。
+**收尾一句話**：會因機器而不同的值集中在 `config.py` 一個 class，從 `.env` 或系統環境變數讀，自動轉型別，缺了就起不來。
+**收尾要講到**：一個設定值走的路（`.env` → `Settings` 欄位 → `settings` 物件 → 用的地方）/ 關卡 2 之前 `os.getenv` 找不到回 `None` 不報錯，後端照常起來，第一個人登入 `jwt.encode(payload, None)` 才 500，這關把錯誤提前到啟動 / `.env` 的 `#` 只有行首才是註解 / `--reload` 不看 `.env` / 正式環境沒有 `.env`，Render 環境變數填同樣名字程式不改 / traceback 讀法。
+**出題注意**：只問他打得開的程式。「`os.getenv` 的舊寫法會怎樣」這種題他沒地方看（2026-10-22 被罵），要問就先給 `git show <關卡 2 的 commit>~1:backend/security.py` 讓他看到再問。
+**他誤解過的地方（2026-10-22）**：「舊寫法 `.env` 沒填後端起不來」（反了，起得來，登入才 500）；「改了 `AUTH_RATE_LIMIT` 沒 429 是標頭的問題」（是沒重啟 / 沒讀到，先跑萬用檢查）。
+**動手玩**：`LEARNING.md` 關卡 2 的 3（自己加一個設定，很短）。
 
 ### 關卡 3：登出所有裝置、改密碼
 
