@@ -111,6 +111,9 @@ jobs:
   # 【關卡 22】observability：多起 Prometheus 與 Grafana，製造流量，驗證「程式 → /metrics → Prometheus → Grafana」整條都通
   observability:
     runs-on: ubuntu-latest
+    # 【關卡 22-B】給了端點後端才會送 span；compose 的 backend 環境變數會讀這個（infra/compose.yaml）
+    env:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     steps:
       - uses: actions/checkout@v7
 
@@ -153,6 +156,20 @@ jobs:
             | jq -r '.results.A.frames[0].data.values[1][0]')
           echo "✅ Grafana → Prometheus：sum(http_requests_total) = $value"
           [ -n "$value" ] && [ "$value" != "null" ]
+
+      # 【關卡 22-B】追蹤：打一次 /api/health（會查資料庫），等 BatchSpanProcessor 送出（預設每 5 秒一批），
+      # collector 的 log 要有 HTTP 的 span、底下 SQL 的子 span、span 上的 request id；後端的 log 要有 trace_id
+      - name: 追蹤：collector 收到 span、log 帶 trace_id
+        run: |
+          curl -fsS -D headers.txt -o /dev/null http://localhost:8000/api/health
+          grep -i x-request-id headers.txt
+          sleep 8
+          docker compose -f infra/compose.yaml --profile observability logs --no-color otel-collector > collector.log
+          grep -E 'Name\s*:\s*GET /api/health' collector.log > /dev/null || { echo "❌ collector 沒收到 GET /api/health 的 span"; tail -n 60 collector.log; exit 1; }
+          echo "✅ collector 收到 HTTP 的 span："; grep -E 'Name\s*:\s*GET /api/health' collector.log | head -n 1
+          grep -E 'Name\s*:\s*SELECT' collector.log > /dev/null && { echo "✅ 底下有 SQL 的子 span："; grep -E 'Name\s*:\s*SELECT' collector.log | head -n 2; }
+          grep -E 'x_request_id' collector.log > /dev/null && { echo "✅ span 帶 request id："; grep -E 'x_request_id' collector.log | head -n 1; }
+          docker compose -f infra/compose.yaml --profile observability logs --no-color backend | grep -m 1 'trace_id=' || { echo "❌ 後端 log 沒有 trace_id"; exit 1; }
 
       - name: compose logs
         if: failure()

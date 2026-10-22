@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # 是否開放 /metrics 給 Prometheus 抓。預設關；compose 裡打開（infra/compose.yaml）。
     # /metrics 不在 /api 底下，Vercel 不會轉發，線上就算打開外面也打不到
     metrics_enabled: bool = False
+    # 追蹤要送去哪（OTLP/HTTP 端點，例如 http://otel-collector:4318）。沒設就不啟用追蹤（tracing.py）。
+    # 名字刻意和 OpenTelemetry SDK 讀的環境變數一樣，SDK 自己也會讀它
+    otel_exporter_otlp_endpoint: str | None = None
 
     # 【關卡 17】登入與註冊的頻率限制（slowapi 的格式："10/minute"、"100/hour"）
     rate_limit_enabled: bool = True

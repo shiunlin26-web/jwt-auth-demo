@@ -17,6 +17,9 @@
 #   docker compose -f infra/compose.yaml --profile observability up -d --build --wait
 #   http://localhost:9090  Prometheus（Status → Targets 看有沒有抓到 backend）
 #   http://localhost:3000  Grafana（不用登入，儀表板「JWT Auth Demo backend」已經在）
+# 追蹤（22-B）要多給一個環境變數，後端才會把 span 送到 collector；沒給就不追蹤：
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose -f infra/compose.yaml --profile observability up -d --build --wait
+#   docker compose -f infra/compose.yaml --profile observability logs otel-collector   # 看每個請求的 span 與底下的 SQL
 #
 # 這裡的 postgres 只給本機和 CI 用。線上的資料庫是 Neon，不在 compose 裡。
 
@@ -57,6 +60,9 @@ services:
       PORT: "8000"
       # 【關卡 22】開 /metrics 給 Prometheus 抓（backend/metrics.py）。線上不設，Vercel 也不會轉發 /metrics
       METRICS_ENABLED: "true"
+      # 【關卡 22】追蹤要送去哪。預設空字串 = 不追蹤；要追蹤就在 shell 先設這個變數再 up（見檔案開頭）。
+      # 同一個 image 靠環境變數決定要不要送、送去哪，換成 Grafana Cloud 也是只改這裡
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports:
       - "8000:8000"
     # 等 postgres 的 healthcheck 過了才起 backend，不然啟動時的 alembic upgrade 會因為連不到資料庫而退出
@@ -89,6 +95,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # 【關卡 22】收 span 的中繼站；設定在 otel/collector.yaml（只印到 log）。image 是 distroless，沒有 shell 所以沒 healthcheck
+  otel-collector:
+    image: otel/opentelemetry-collector:0.163.2
+    profiles: ["observability"]
+    volumes:
+      - ./otel/collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:4318:4318"
 
   grafana:
     image: grafana/grafana:13.2.4
