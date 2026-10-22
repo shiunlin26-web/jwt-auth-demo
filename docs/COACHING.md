@@ -9,7 +9,7 @@
 ### 一步的固定格式
 
 1. **給一個可以直接貼的指令**（最多兩個，第二個不能依賴第一個的結果）。學習者是 Windows PowerShell：`curl.exe` 不是 `curl`、JSON 的引號寫 `\"`、路徑用反斜線、迴圈用 `1..11 | ForEach-Object { ... }`。
-2. **說「預期看到什麼」，用數字或字串**：`401`、`"Refresh token reused"`、`52 passed`、`Max-Age=604800`。**不要描述畫面長相**（「會轉圈圈」「右下角有個按鈕」），畫面會記錯；2026-10-20 帶關卡 18 時猜錯 Neon 的畫面，學習者跑了好幾次才發現是帶的人記錯。
+2. **說「預期看到什麼」，用數字或字串**：`401`、`"Refresh token reused"`、`67 passed`、`Max-Age=604800`。**不要描述畫面長相**（「會轉圈圈」「右下角有個按鈕」），畫面會記錯；2026-10-20 帶關卡 18 時猜錯 Neon 的畫面，學習者跑了好幾次才發現是帶的人記錯。
 3. **說「看哪裡」**：輸出的哪一行、哪個欄位、`>` 還是 `<` 開頭。
 4. **等他貼輸出**。不要先講下一步。
 5. **從他貼的輸出講**：引用他貼的實際值（「你這串 `zfGh9...` 和登入那次的 `i5cvGY...` 不一樣」），一行一行說這行是什麼、對應程式哪一個檔案第幾行。沒出現在他輸出裡的東西不要講。
@@ -66,7 +66,7 @@
 
 ### 關卡 0：密碼規則
 
-**搭配看的程式**：`backend/schemas.py` 第 10～45 行（`PRINTABLE_ASCII`、`check_password_chars`、`UserCreate`、`UserLogin`）；`backend/routes/auth.py` 第 79～119 行（`register`；關卡 24 在裡面多了 flush 與 outbox 那幾行）；`backend/security.py` 的 `hash_password`、`verify_password`；`frontend/src/schemas/auth.ts` 的 `passwordSchema`
+**搭配看的程式**：`backend/schemas.py` 第 10～45 行（`PRINTABLE_ASCII`、`check_password_chars`、`UserCreate`、`UserLogin`）；`backend/routes/auth.py` 第 79～130 行（`register`；關卡 24 在裡面多了上限檢查、flush、outbox、叫醒 worker 這幾段）；`backend/security.py` 的 `hash_password`、`verify_password`；`frontend/src/schemas/auth.ts` 的 `passwordSchema`
 
 **前置**：後端跑起來。
 
@@ -163,7 +163,7 @@
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `uv run pytest -q`（在 `backend`） | 最後一行 `52 passed`（數字以輸出為準） | 這 52 個就是關卡 0～3 你用 curl 做過的事，機器代勞 |
+| 1 | `uv run pytest -q`（在 `backend`） | 最後一行 `67 passed`（數字以輸出為準；關卡 21 起又加了十幾個） | 這些測試就是關卡 0～3 你用 curl 做過的事，機器代勞 |
 | 2 | `uv run pytest -q --collect-only -q \| Select-Object -First 25` | 一行一個測試名稱，中文的 | 名稱就是規格：`test_舊的refresh_token再被使用會撤銷全部` 對應關卡 1 步驟 3、4 |
 | 3 | `uv run pytest -q -k 撤銷全部 -v` | `1 passed`，名稱印出來 | `-k` 挑名字裡有這個字的測試 |
 | 4 | `backend\routes\auth.py` 找到 `rt.revoked = True`（refresh 裡那行），前面加 `#`，`uv run pytest -q -x` | 第一個紅的就停（`-x`），名稱和「撤銷」「換發」有關；最後幾行有 `assert` 和實際值 | 從最後一行往上讀：期望什麼、實際拿到什麼。改回來：`git checkout -- backend/routes/auth.py` |
@@ -174,17 +174,17 @@
 
 ### 關卡 5：資料庫遷移（Alembic）
 
-**搭配看的程式**：`backend/models.py`；`backend/migrations/env.py`、`migrations/versions/0001～0004`；`backend/alembic.ini`；`backend/Dockerfile` 第 67 行的 CMD（啟動時先 `alembic upgrade head`）
+**搭配看的程式**：`backend/models.py`；`backend/migrations/env.py`、`migrations/versions/0001～0006`；`backend/alembic.ini`；`backend/Dockerfile` 第 67 行的 CMD（啟動時先 `alembic upgrade head`）
 
 **前置**：後端能連到 Neon。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `uv run alembic current` | `0004 (head)` | 資料庫現在的「施工進度」。Neon 的 `alembic_version` 表只有這一筆 |
-| 2 | `uv run alembic history` | 0001 → 0002 → 0003 → 0004 四行 | 每一行是一張施工單，`backend/migrations/versions/` 一檔一張 |
+| 1 | `uv run alembic current` | `0006 (head)` | 資料庫現在的「施工進度」。Neon 的 `alembic_version` 表只有這一筆 |
+| 2 | `uv run alembic history` | 0001 → 0002 → … → 0006 六行（0005、0006 是關卡 24 加的） | 每一行是一張施工單，`backend/migrations/versions/` 一檔一張 |
 | 3 | `uv run alembic check` | `No new upgrade operations detected.` | 程式的 `models.py` 和資料庫一致 |
 | 4 | `backend\models.py` 的 `User` 加一行 `nickname: str \| None = None`，再 `uv run alembic check` | `New upgrade operations detected`，提到 `add_column` 和 `nickname` | 改了 models 沒開施工單，CI 就是用這個抓。改回來：`git checkout -- backend/models.py` |
-| 5 | Neon：`SELECT version_num FROM alembic_version;` | `0004` | 和步驟 1 對上 |
+| 5 | Neon：`SELECT version_num FROM alembic_version;` | `0006` | 和步驟 1 對上 |
 | 6 | 打開 `backend/migrations/versions/0002_*.py` | 看到 `upgrade()` 加欄位、`downgrade()` 刪欄位 | 每張施工單都有「做」和「拆」 |
 
 **收尾**：資料庫結構用施工單管 / 改 models 一定開單 / `alembic check` 是守門員。
@@ -251,7 +251,7 @@
 | 1 | `uv run ruff check .` 和 `uv run ruff format --check .`（在 `backend`） | `All checks passed!`、`N files already formatted` | CI 第一步就是這兩個，本機先跑就不會紅 |
 | 2 | 打開 `.github/workflows/ci.yml`，數 `backend` job 有幾個 `- name:` | 和 Actions 頁面左邊的步驟一一對應 | CI 就是把你本機跑的指令排成一列 |
 | 3 | GitHub → Actions → 最新一列 → 點 `backend` → 展開 `Docker build` | 找到 `CACHED` 字樣 | 層快取：沒變的層不重做。`backend/Dockerfile` 先 COPY 套件清單再 COPY 程式，就是為了這個 |
-| 4 | 同一頁展開 `Smoke test` 和 `Docker logs` | `{"status":"ok"...}`、`Running upgrade ... -> 0004`、`Uvicorn running on http://0.0.0.0:8000` | 容器啟動時先跑遷移再起伺服器，和 Render 上一模一樣 |
+| 4 | 同一頁展開 `Smoke test` 和 `Docker logs` | `{"status":"ok"...}`、`Running upgrade ... -> 0006`、`Uvicorn running on http://0.0.0.0:8000` | 容器啟動時先跑遷移再起伺服器，和 Render 上一模一樣 |
 | 5 | 打開 `backend/Dockerfile`，找 `--host 0.0.0.0` | 一行 | 容器裡要聽 `0.0.0.0` 外面才連得到，`127.0.0.1` 會「顯示成功但 502」 |
 
 **收尾**：CI = 本機指令排成一列 / Docker = 把啟動步驟寫死 / 紅了點進去看是哪一步。
@@ -265,7 +265,7 @@
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `curl.exe -s https://<前端網址>/api/health` | `{"status":"ok","db":"ok","migration":"0004","version":"<commit 前幾碼>"}` | 打的是 Vercel 的網址，回的是 Render 的內容：Vercel 代打了（`frontend/vercel.json` 的 rewrite） |
+| 1 | `curl.exe -s https://<前端網址>/api/health` | `{"status":"ok","db":"ok","migration":"0006","version":"<commit 前幾碼>"}` | 打的是 Vercel 的網址，回的是 Render 的內容：Vercel 代打了（`frontend/vercel.json` 的 rewrite） |
 | 2 | `curl.exe -s -i https://<前端網址>/api/health \| Select-String "server\|x-request-id"` | `server:` 那行不是 `uvicorn`；`x-request-id` 有值 | 本機直打後端 `server` 是 `uvicorn`，這裡被代理層換掉了：瀏覽器從頭到尾只看到 Vercel，這就是「同站」 |
 | 3 | 瀏覽器開前端登入，DevTools → Network 點 `login` → Response Headers 的 `set-cookie` | `Path=/api/auth; Secure; HttpOnly; SameSite=lax` | 正式環境多了 `Secure`（關卡 2 的 `COOKIE_SECURE`） |
 | 4 | Network 過濾 `api` | 所有網址都是 `<前端網址>/api/...`，沒有 `onrender.com` | 代理在工作 |
@@ -283,7 +283,7 @@
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `curl.exe -s https://<前端網址>/api/health` | `db: ok`、`migration: 0004`、`version` 和 GitHub main 最新 commit 前幾碼一樣 | 一個網址回答三個問題：活著嗎、資料庫通嗎、跑的是哪一版 |
+| 1 | `curl.exe -s https://<前端網址>/api/health` | `db: ok`、`migration: 0006`、`version` 和 GitHub main 最新 commit 前幾碼一樣 | 一個網址回答三個問題：活著嗎、資料庫通嗎、跑的是哪一版 |
 | 2 | `backend\.env` 加 `LOG_JSON=true`，重啟，`curl.exe -s localhost:8000/api/ping` | terminal 一行 JSON：`"message": "request"`、`"path": "/api/ping"`、`"status": 200`、`"duration_ms"`、`"request_id"` | 正式環境就是這個格式，欄位可以搜。刪掉那行 |
 | 3 | Render → Logs，搜 `"status": 401` | 找到幾筆登入失敗或 refresh 失敗 | 看 `path` 分布就知道是誰在敲門 |
 | 4 | `uv run alembic check` | `No new upgrade operations detected.` | CI 的「遷移檢查」就是它 |
