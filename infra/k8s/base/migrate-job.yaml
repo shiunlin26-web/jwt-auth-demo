@@ -1,0 +1,40 @@
+# 【關卡 23】遷移用 Job 跑，不放在 Deployment 的啟動指令裡
+#
+# Render 只有一個實例，所以 Dockerfile 的 CMD「先 alembic upgrade head 再 uvicorn」沒問題。
+# 叢集有 2 個以上的副本：每個 pod 啟動時都跑一次遷移會互相打架。
+# 所以遷移獨立成一個 Job：跑一次、跑完就結束、失敗會重試 backoffLimit 次。Deployment 只負責跑 uvicorn。
+# （正式環境常見的進階做法：Helm 的 pre-upgrade hook、Argo CD 的 sync wave，讓 Job 一定在新版 pod 之前跑完）
+#
+# 注意：Job 的 spec 建好就不能改，同名再 apply 新 image 會被拒絕。要重跑就先 kubectl delete job，或名字帶版本。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backend-migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600 # 跑完 10 分鐘自動清掉，不然完成的 Job 會一直留著
+  template:
+    metadata:
+      labels:
+        app: backend-migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000 # Dockerfile 建的 app 使用者
+      containers:
+        - name: migrate
+          image: jwt-backend:latest # tag 由 overlay 的 images 決定（CI 是 ci）
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi

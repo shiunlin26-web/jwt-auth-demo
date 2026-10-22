@@ -178,3 +178,75 @@ jobs:
       - name: compose down
         if: always()
         run: docker compose -f infra/compose.yaml --profile observability down -v
+
+  # ==================================================================
+  # 【關卡 23】k8s：在 runner 上用 kind 開一個真的 Kubernetes 叢集，把同一個 image 部署上去
+  # kind = Kubernetes in Docker：整個叢集是一個 container，幾十秒起來，跑完就丟。本機 Mac 一樣能跑（brew install kind）
+  k8s:
+    runs-on: ubuntu-latest
+    env:
+      NS: jwt-auth-demo
+    steps:
+      - uses: actions/checkout@v7
+
+      # 同一個 Dockerfile、同一個 image，和 ci.yml、compose、Render 用的都一樣
+      - name: Docker build
+        run: docker build -t jwt-backend:ci ./backend
+
+      # 裝 kind 與 kubectl 並開叢集。kubeconfig 會自動設好，之後的 kubectl 都指向它
+      - name: 開一個 kind 叢集
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: jwt
+
+      # 叢集的節點（一個 container）看不到 runner 的 docker image，要把 image 搬進去；
+      # 正式環境是 push 到 registry（GHCR、ECR），節點自己去拉
+      - name: 把 image 載進 kind
+        run: kind load docker-image jwt-backend:ci --name jwt
+
+      # 先起 CI 用的 Postgres（infra/k8s/ci/postgres.yaml），等它 Ready
+      - name: 命名空間與 CI 用的 Postgres
+        run: |
+          kubectl apply -f infra/k8s/base/namespace.yaml
+          kubectl -n $NS apply -f infra/k8s/ci/postgres.yaml
+          kubectl -n $NS rollout status deployment/postgres --timeout=120s
+
+      # 密鑰不在 git 裡（base/secret.example.yaml 只是範本），這裡用指令建；主機名稱 postgres 就是上面的 Service
+      - name: 建 Secret
+        run: |
+          kubectl -n $NS create secret generic backend-secret \
+            --from-literal=DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo \
+            --from-literal=JWT_SECRET=ci-only-secret-not-for-production-0123456789abcdef
+
+      # 一次套用 ConfigMap、遷移 Job、Deployment、Service（kustomize overlay 把 image tag 換成 ci）。
+      # 先等 Job 跑完（遷移），再等 Deployment 的兩個 pod 都 Ready
+      - name: kubectl apply -k，等遷移 Job 與 Deployment
+        run: |
+          kubectl apply -k infra/k8s/overlays/ci
+          kubectl -n $NS wait --for=condition=complete job/backend-migrate --timeout=120s
+          echo "--- 遷移 Job 的 log ---"
+          kubectl -n $NS logs job/backend-migrate
+          kubectl -n $NS rollout status deployment/backend --timeout=180s
+          kubectl -n $NS get pods -o wide
+
+      # port-forward：在 runner 上開一個通道到叢集裡的 Service，curl localhost 就打到 pod（Service 會輪流分給兩個 pod）
+      - name: Smoke test（port-forward → Service → pod）
+        run: |
+          kubectl -n $NS port-forward service/backend 8080:80 > /dev/null 2>&1 &
+          sleep 3
+          curl -fsS http://localhost:8080/api/ping; echo
+          curl -fsS http://localhost:8080/api/health | tee health.json; echo
+          latest=$(ls backend/migrations/versions/*.py | sort | tail -n 1 | xargs -n 1 basename | cut -d_ -f1)
+          grep -q '"db": *"ok"' health.json || { echo "❌ /api/health 說資料庫連不上"; exit 1; }
+          grep -q "\"migration\": *\"$latest\"" health.json || { echo "❌ migration 不是最新的 $latest"; exit 1; }
+          echo "✅ 兩個 pod 在服務，遷移是 $latest，version 是 $(grep -o '"version": *"[^"]*"' health.json)"
+
+      # 學習用：看 k8s 眼中的狀態。壞掉時先看 describe 的 Events 和 pod 的 log
+      - name: kubectl get / describe / logs
+        if: always()
+        run: |
+          kubectl -n $NS get all
+          echo "--- describe deployment/backend（看 Events）---"
+          kubectl -n $NS describe deployment/backend | tail -n 25
+          echo "--- backend pod 的 log（每個 pod 最後 15 行）---"
+          kubectl -n $NS logs -l app=backend --tail=15 --prefix=true || true

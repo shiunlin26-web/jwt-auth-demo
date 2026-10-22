@@ -1,0 +1,6 @@
+# 【關卡 23】kustomize 的安全規則：overlay 只能引用自己底下的檔案，或另一個「有 kustomization.yaml 的資料夾」。
+# 所以這個資料夾也要有一份，overlays/ci 才能用 ../../ci 把它疊進來
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - postgres.yaml

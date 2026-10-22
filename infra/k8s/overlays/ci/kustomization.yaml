@@ -1,0 +1,11 @@
+# 【關卡 23】CI（kind）這個環境的差異：image tag 用 ci（kind load 進去的那個）、多一個給測試用的 Postgres
+# 正式環境會有另一個 overlay：registry 的 image、COOKIE_SECURE=true、副本數、Ingress，資料庫用託管的（Neon、RDS）不在叢集裡
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: jwt-auth-demo
+resources:
+  - ../../base
+  - ../../ci
+images:
+  - name: jwt-backend
+    newTag: ci

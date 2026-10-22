@@ -1,0 +1,11 @@
+# 【關卡 23】ConfigMap：不是密鑰的設定。對照 render.yaml 的 envVars、compose.yaml 的 environment，同一組名字
+# 改了 ConfigMap 不會自動重啟 pod（這是 k8s 的常見坑），要 kubectl rollout restart deployment/backend
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+data:
+  LOG_JSON: "true" # 叢集裡的 log 會被收集器（例如 Loki、CloudWatch）撿走，JSON 一行一筆最好處理
+  COOKIE_SECURE: "false" # kind 裡沒有 HTTPS。正式叢集前面有 Ingress 做 TLS 時改成 "true"
+  TRUSTED_PROXY_HOPS: "0" # kind 裡沒有代理。正式叢集看 Ingress 幾層，說明見 rate_limit.py
+  METRICS_ENABLED: "true" # 叢集裡通常有 Prometheus 用 service discovery 來抓，不用手寫目標
