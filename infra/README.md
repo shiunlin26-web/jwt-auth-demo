@@ -6,6 +6,7 @@
 | 檔案 | 關卡 | 做什麼 | CI 的證明 |
 | --- | --- | --- | --- |
 | `compose.yaml` | 21 | 一個指令起 Postgres + 後端（本機要有 Docker） | `.github/workflows/infra.yml` 的 `compose` job |
+| `../frontend/e2e/`、`../frontend/playwright.config.ts` | 21 | Playwright E2E：真的瀏覽器走「註冊 → 登入 → 重新整理 → 登出」，後端用 compose 起 | `infra.yml` 的 `e2e` job（報告在 artifact `playwright-report`） |
 
 本機（有 Docker 的那台）：
 
@@ -15,5 +16,7 @@ curl http://localhost:8000/api/health
 docker compose -f infra/compose.yaml logs backend
 docker compose -f infra/compose.yaml down -v
 ```
+
+E2E（後端起來之後，在 `frontend/`）：`npm run test:e2e`，想一步一步看瀏覽器就 `npx playwright test --ui`。
 
 沒有 Docker 的機器：開 Actions 分頁的 Infra workflow，看同名 job 的每一步 log。
