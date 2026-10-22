@@ -62,6 +62,7 @@
 | 18 | SQL 與資料庫（看 ORM 底下） | 索引、執行計畫、交易與鎖、N+1 | ✅ 完成 |
 | 19 | HTTP 與瀏覽器規則 | 狀態碼、標頭、cookie、CORS、快取 | ✅ 完成 |
 | 20 | 讀 log 與除錯（故障演練） | 分段確認、request id、用測試抓 bug | ✅ 完成 |
+| 21 | docker compose 與 Playwright E2E | 一個檔案起整套、healthcheck 與 depends_on、真瀏覽器走主路徑 | ✅ 完成 |
 
 > 關卡 9～11 是「部署這條鏈」，整體規畫見 [`PLAN.md`](PLAN.md)。
 
@@ -3696,7 +3697,141 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 
 ---
 
+## 關卡 21：docker compose 與 Playwright E2E ✅
+
+**改動的檔案**：新增 `infra/compose.yaml`、`infra/README.md`、`.github/workflows/infra.yml`（`compose`、`e2e` 兩個 job）、`frontend/e2e/auth.spec.ts`、`frontend/playwright.config.ts`；改 `frontend/package.json`（`@playwright/test`、`test:e2e`）、`vitest.config.ts`（排除 `e2e/`）、`tsconfig.node.json`、`.gitignore`、`.prettierignore`。後端程式沒動。
+
+**一句話**：同一個 image 在本機用一個檔案起整套，並用真的瀏覽器走一遍登入主路徑；從這關起每一塊基礎設施都有一個 CI job 證明它會動。
+
+### 觀念 1：Dockerfile 描述一個 image，compose 描述一整套
+
+關卡 9 的 `ci.yml` 要跑起後端得自己寫 `docker run … -e DATABASE_URL=… --network host`，資料庫還是 GitHub 的 `services` 另外給的。這些「誰先誰後、誰連誰、環境變數給什麼」散在指令裡，換一台機器就要重打。compose 把它們寫成一個檔案：
+
+| 以前（ci.yml 的 docker run） | 現在（infra/compose.yaml） |
+| --- | --- |
+| `--network host`，後端用 `localhost:5432` 找資料庫 | compose 建內部網路，後端用**服務名** `postgres:5432` 找 |
+| 自己寫 30 秒的 curl 迴圈等後端起來 | `healthcheck` + `depends_on: condition: service_healthy` + `up --wait` |
+| 資料庫是 CI 的 service container，跑完就沒 | 資料放具名 volume `pgdata`，`down` 不加 `-v` 就留著 |
+
+它和關卡 23 的 Kubernetes 清單描述的是同一件事，只是 compose 管一台機器、k8s 管一群機器；image 都是 `backend/Dockerfile`，一個字沒改。
+
+### 觀念 2：「起來了」不等於「能服務了」
+
+`docker compose up -d` 立刻回來，但後端還在跑 `alembic upgrade head`，這時 curl 會 connection refused。`healthcheck` 定義「能服務」是什麼：Postgres 是 `pg_isready`，後端是打 `/api/ping` 回 200。`depends_on` 的 `condition: service_healthy` 讓後端等資料庫真的能接受連線才啟動，`--wait` 讓指令等到全部 healthy 才回來。這和關卡 11 的 liveness / readiness 是同一個觀念，k8s 的探針也是。
+
+後端的 healthcheck 用 Python 的 `urllib` 而不是 curl：image 是 `python:3.13-slim`，沒有 curl。`start_period: 20s` 是給遷移的時間，這段期間失敗不算數。
+
+### 觀念 3：Vitest 和 Playwright 各驗什麼
+
+| | 關卡 16 Vitest + MSW | 關卡 21 Playwright |
+| --- | --- | --- |
+| 跑什麼 | 一個元件，在 jsdom 裡 | 整個網站，在真的 Chromium 裡 |
+| 後端 | MSW 假的 | compose 起的真後端 + 真資料庫 |
+| 驗什麼 | 畫面在某個回應下對不對 | 「使用者這條路走得通」：cookie 真的帶上、重整真的還在 |
+| 速度 | 毫秒 | 秒 |
+| 條數 | 多 | 少，只走主路徑 |
+
+關卡 20 Q1 的原則：便宜的檢查寫成測試，貴的檢查路徑要少。E2E 貴，所以只有三條，而且每條都是 `RUNBOOK.md` 第 0 節「部署後檢查」本來要用手做的事。
+
+### 觀念 4：E2E 怎麼找元素
+
+用使用者看得到的東西：`getByPlaceholder("Email")`、`getByRole("button", { name: "登入" })`、`getByRole("heading", { name: "嗨，…" })`。不用 CSS class 或 id：改樣式測試不該壞，改文案才該壞（那本來就要重新確認）。每個測試註冊自己的帳號（email 帶時間戳），所以可以平行跑、重跑不會撞「已存在」。
+
+### 程式怎麼寫
+
+`infra/compose.yaml` 的核心三段：
+
+```yaml
+  postgres:
+    image: postgres:16
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jwtdemo"]
+  backend:
+    build:
+      context: ../backend        # 同一個 Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo   # 主機名稱 = 服務名
+    depends_on:
+      postgres:
+        condition: service_healthy   # 等資料庫真的能連才起
+```
+
+`frontend/playwright.config.ts` 讓前端不用自己起：
+
+```ts
+webServer: {
+  command: "npm run dev",          // Vite，/api 代理到 localhost:8000（compose 的後端）
+  url: "http://localhost:5173",
+  reuseExistingServer: !process.env.CI,
+},
+```
+
+`frontend/e2e/auth.spec.ts` 的第二條，重整還在：
+
+```ts
+await loginViaUi(page, email);
+await page.reload();   // 記憶體裡的 access token 沒了，initializeAuth() 用 cookie 換新的
+await expect(page.getByRole("heading", { name: `嗨，${email}` })).toBeVisible();
+```
+
+CI 的 `e2e` job（`infra.yml`）：compose 起後端 → `npm ci` → `npx playwright install chromium --with-deps` → `npx playwright test` → HTML 報告上傳成 artifact，失敗的測試有每一步的截圖與 trace。
+
+### ⚠️ 開始前（Mac，一次性）
+
+- Docker 三選一都免費：Docker Desktop（個人使用免費）、OrbStack（個人免費）、`brew install colima docker && colima start`。裝好 `bash scripts/doctor.sh` 要說關卡 21 可以。
+- `cd frontend && npm ci && npx playwright install chromium`：下載 Chromium 約 150 MB。
+- 沒有 Docker 的機器不用裝任何東西，看 CI 的 log（`COACHING.md` 關卡 21 的 VM 路線）。
+
+### 驗證方式
+
+1. `docker compose -f infra/compose.yaml up -d --build --wait` 最後兩行是兩個 `Healthy`。
+2. `curl -s localhost:8000/api/health` 的 `migration` 是最新的遷移編號（現在 `0006`）。
+3. `docker compose -f infra/compose.yaml logs backend` 看得到 `Running upgrade … -> 0006` 與 `Application startup complete`。
+4. `npm run test:e2e`（在 `frontend/`）最後一行 `3 passed`。
+5. GitHub Actions 的 Infra workflow：`compose` job 的 Smoke test 有 `✅ compose 整套跑起來了`，`e2e` job 有 `3 passed`，run 頁面底部有 `playwright-report` artifact。
+
+### 動手玩
+
+1. **只等「起來」不等「能服務」**：`infra/compose.yaml` 把 backend 的 `depends_on` 底下 `condition: service_healthy` 改成 `condition: service_started`，`down -v` 再 `up -d --build --wait`。後端在 Postgres 還在 initdb 時就起了，`alembic upgrade head` 連不到 → 容器退出，`up` 報錯；`ps -a` 看到 backend 是 `Exited (1)`，`logs backend` 最後幾行是 `Connection refused`。改回來。
+2. **把 healthy 定義改錯**：backend 的 healthcheck 把 `/api/ping` 改成 `/api/nope`。`up --wait` 會等到 `retries` 用完，回 `unhealthy`、指令失敗。後端其實活著（curl 打得到），只是「能服務」的定義錯了。改回來。
+3. **改錯一個預期值**：`frontend/e2e/auth.spec.ts` 第一個測試最後一行把 `嗨，${email}` 改成 `你好，${email}`，`npm run test:e2e`：`1 failed`、`2 passed`，紅的那條有 `Timed out 5000ms waiting for expect(locator).toBeVisible()` 和 `getByRole('heading', { name: '你好，…' })`。`npx playwright show-report` 點那一條，trace 裡的截圖明明在首頁，只是標題文字不符：測試是對的，是預期值錯了。改回來。
+4. **重試會藏問題**：`playwright.config.ts` 的 `retries: 0` 改成 `2`，保留第 3 題的改壞，再跑一次：同一條會跑三次、輸出有 `retry #1`、`retry #2`，最後還是紅，但多等了三倍時間。這就是為什麼設 0：偶爾紅就該查原因。改回來：`git checkout -- infra frontend`。
+
+### 想一想
+
+<details>
+<summary>Q1：CI 已經有 ci.yml 的 Docker build + run + smoke test 了，為什麼還要 compose job？</summary>
+
+ci.yml 驗的是「這個 image 做得出來、跑得起來」，資料庫是 GitHub 給的。compose job 驗的是「我寫的那張開店清單是對的」：服務名、healthcheck、depends_on、volume。學習者在 Mac 上用的就是這張清單，CI 綠代表照著做一定起得來。兩個 job 驗的是兩個檔案。
+
+</details>
+
+<details>
+<summary>Q2：E2E 為什麼不直接用 MSW 假後端，跑起來快很多？</summary>
+
+因為要驗的就是真的那一段：refresh token cookie 在真瀏覽器裡會不會帶上、重整後 `initializeAuth()` 用 cookie 換到新票、登出後 cookie 真的被清。MSW 看不到瀏覽器的 cookie 規則（關卡 19），這段只有真瀏覽器 + 真後端能驗。
+
+</details>
+
+<details>
+<summary>Q3：為什麼 compose 裡後端的 DATABASE_URL 主機是 `postgres`，本機 `.env` 卻是 Neon 的網址？</summary>
+
+同一個 image、同一支程式，連哪個資料庫完全靠環境變數（關卡 2、10 的 12-factor）。compose 給它內部網路裡的服務名，Render 給它 Neon，CI 給它 `localhost:5432`。程式一行不改。
+
+</details>
+
+<details>
+<summary>Q4：`down` 和 `down -v` 差在哪，什麼時候該用哪個？</summary>
+
+`down` 刪容器和網路，保留 volume：資料還在，下次 `up` 不用重新註冊。`down -v` 連 volume 一起刪：全新的倉庫，遷移會從 0001 跑一遍。CI 用 `-v`（每次都要乾淨），本機學習時想保留帳號就不加。
+
+</details>
+
+---
+
 ## 之後還可以自己摸的（不排關卡）
+
+> 2026-10-22 註記：關卡 21～24 是後來加的基礎設施路線（`PLAN-INFRA.md`），下表的 docker compose 已做成關卡 21，Codespaces 在有了第二台有 Docker 的機器後不需要。
 
 範例專案的程式到關卡 17 凍結（關卡 19 只多了 `Cache-Control: no-store`）；18～20 是觀念關（SQL、HTTP、除錯），全部 21 關（0～20）已完成。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
 
