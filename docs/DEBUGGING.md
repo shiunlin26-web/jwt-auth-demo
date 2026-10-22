@@ -84,6 +84,31 @@
 | 登入回 429「請求太頻繁」，但只試了一兩次 | 頻率限制把所有人算成同一個 IP：`TRUSTED_PROXY_HOPS` 比實際代理層數少（正式環境要 2） | 開 `ENABLE_DEBUG_ENDPOINTS` 看 `/api/_ip` 的 `x_forwarded_for` 有幾段，據此設 hops | 17 |
 | 後端啟動或第一次登入就 500：`parameter \`response\` must be an instance of starlette.responses.Response` | 被 `@limiter.limit` 裝飾的端點少了 `response: Response` 參數 | 加上參數（slowapi 要用它塞標頭） | 17 |
 
+## 基礎設施（關卡 21～24）
+
+| 症狀 | 原因 | 修法 | 關卡 |
+| --- | --- | --- | --- |
+| compose 的 `backend` 一直 `unhealthy` | image 是 `python:3.13-slim`，沒有 curl，healthcheck 用 curl 永遠失敗 | healthcheck 用 image 裡有的工具（Python 的 `urllib`，見 `infra/compose.yaml`） | 21 |
+| `up --wait` 等很久才說 backend unhealthy | 啟動要先跑遷移，healthcheck 在那之前就開始算 | `start_period` 給遷移的時間；`logs backend` 看 alembic 那段有沒有錯 | 21 |
+| Playwright 說找不到瀏覽器 | 瀏覽器不在 npm 套件裡 | `npx playwright install chromium`（CI 加 `--with-deps`） | 21 |
+| E2E 三條全部 timeout | 後端沒起（compose 沒 `up`）或 Vite 代理的 8000 沒人聽；`webServer` 只起前端 | 先 `curl localhost:8000/api/ping` | 21 |
+| prettier 檢查紅在 `test-results/.last-run.json` | Playwright 跑過留下的檔 | 進 `.prettierignore` 與 `.gitignore` | 21 |
+| `docker compose down` 後 Prometheus、Redpanda 還在跑 | 沒帶 `--profile`，profile 裡的服務不會被關 | `down` 也要帶同一個 `--profile` | 22、24 |
+| Grafana 開起來沒有儀表板 | provisioning 的目錄沒掛進容器，或 json 壞掉 | `docker compose logs grafana` 搜 `provisioning`；`curl localhost:3000/api/dashboards/uid/jwt-backend` | 22 |
+| collector 的 log 沒有 span | 後端沒拿到 `OTEL_EXPORTER_OTLP_ENDPOINT`（要寫在 `up` 指令前面）；或才剛打、還沒到每 5 秒一批 | `logs backend` 找 `OpenTelemetry 追蹤已啟用`；等 8 秒再看 | 22 |
+| Prometheus 查到的數字比 `/metrics` 小 | 取樣：5 秒抓一次，抓的時候請求還沒打完 | 預期行為，等下一次抓 | 22 |
+| OTel 的 SQLAlchemy instrumentation 裝不上 | 只支援到 SQLAlchemy 2.0，專案是 2.1 | 掛在 asyncpg 驅動層（`tracing.py`） | 22 |
+| Grafana Cloud 回 401 | Instance ID 拿錯（要 OTLP 卡片上的）、base64 有換行、token 沒 write 權限、header 的空格沒寫成 `%20` | 重做 LEARNING 關卡 22「開始前」第二段的第 2～4 步 | 22 |
+| `kubectl apply -k` 說檔案在 overlay 目錄外 | kustomize 不讓 overlay 直接引用上層的單一檔案 | 給那個目錄自己的 `kustomization.yaml`，用目錄引用（`infra/k8s/ci/`） | 23 |
+| `kind load` 之後 pod 仍 `ErrImagePull` | tag 對不上（overlay 的 `newTag` 和 load 的 tag 不同），或 `imagePullPolicy: Always` 想去 registry 拉 | 對齊 tag；`IfNotPresent` | 23 |
+| 壞 image 時 `rollout status` 逾時 | 預期行為：新 pod 永遠不 Ready，`maxUnavailable: 0` 不讓舊的關 | `get pods` 看舊 pod 仍 Running、Service 仍 200，`rollout undo` | 23 |
+| Job `backend-migrate` 第二次 apply 被拒 | Job 的 spec 建好不能改 | `kubectl delete job backend-migrate` 再 apply，或名字帶版本 | 23 |
+| 改了 ConfigMap 沒生效 | pod 不會因此自動重啟 | `kubectl rollout restart deployment/backend` | 23 |
+| consumer 的 log 一直沒有 `consumed` | topic 不存在（`redpanda-init` 沒跑完）、或 `KAFKA_BOOTSTRAP_SERVERS` 用了 localhost | `rpk topic list`；compose 內用服務名 `redpanda:9092` | 24 |
+| 本機 `OUTBOX_WORKER=inline` 沒看到 `published` | 改了 `.env` 沒重啟（`--reload` 不看 `.env`） | Ctrl+C 重啟 | 24 |
+| pytest 裡 `asyncio.Event` 報 attached to a different loop | 模組層建的 Event 綁在第一個測試的 loop | 在 `run_worker` 裡建 Event，存進模組變數（`outbox.py`） | 24 |
+| Neon 的免費計算時數被 worker 吃掉 | worker 每 5 秒輪詢，資料庫永遠不休眠 | Render 設 `OUTBOX_POLL_SECONDS=600`，靠鈴即時 | 24 |
+
 ## 登入邏輯（本機就會遇到）
 
 | 症狀 | 原因 | 修法 | 關卡 |

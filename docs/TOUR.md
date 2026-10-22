@@ -1,4 +1,4 @@
-# 專案導覽：從零讀懂整個專案（到關卡 20）
+# 專案導覽：從零讀懂整個專案（到關卡 24）
 
 給**剛接手這個專案的人**，也給**複習用**。
 
@@ -9,7 +9,7 @@
 
 ## 怎麼用這份文件
 
-- 分成 **15 站**，一站讀 1～3 個檔案，大約 15～30 分鐘
+- 分成 **18 站**，一站讀 1～3 個檔案，大約 15～30 分鐘；16～18 站是基礎設施（關卡 21～24），沒有 Docker 的機器可以只讀不跑
 - 每站的格式都一樣：
   - **讀哪些檔案**（照順序讀）
   - **一句話**：這站在做什麼
@@ -42,8 +42,12 @@
 | 14 | 畫面 | `pages/`、`components/`、`schemas/` | ⭐ |
 | **總複習** | | | |
 | 15 | 前後端串起來走一遍 + 踩過的坑 | — | ⭐⭐⭐ |
+| **基礎設施（關卡 21～24）** | | | |
+| 16 | 請求的旁路：指標與追蹤 | `metrics.py`、`tracing.py`、`main.py`（log middleware） | ⭐⭐ |
+| 17 | 註冊之後：outbox → worker → consumer | `outbox.py`、`routes/auth.py`（register）、`models.py`、`worker.py`、`consumer.py` | ⭐⭐⭐ |
+| 18 | 同一個 image 的三種跑法 | `backend/Dockerfile`、`infra/compose.yaml`、`infra/k8s/`、`.github/workflows/infra.yml` | ⭐⭐ |
 
-**時間不夠的話**：先走 0 → 4 → 5 → 6 → 7 → 12 → 13 → 15，這幾站就是 JWT 登入的核心。
+**時間不夠的話**：先走 0 → 4 → 5 → 6 → 7 → 12 → 13 → 15，這幾站就是 JWT 登入的核心。基礎設施只看 17。
 
 ---
 
@@ -111,6 +115,8 @@
 - `CORSMiddleware`：允許 `localhost:5173`（前端）呼叫 `localhost:8000`（後端）。網址不同，瀏覽器預設會擋
 - `allow_credentials=True`：允許帶 cookie，refresh token 才送得過來
 - `include_router`：把 `routes/auth.py`、`routes/users.py` 的 API 掛上來
+- 【關卡 22】`setup_metrics(app)`、`setup_tracing(app)`：指標與追蹤，兩個開關預設關（第 16 站）
+- 【關卡 24】`lifespan`：`OUTBOX_WORKER=inline` 時在同一個程序開一個背景 task 跑 outbox worker（第 17 站）
 
 **⭐ `database.py`**
 - `engine`：資料庫連線池，整個程式共用一個
@@ -241,7 +247,8 @@ user                              refreshtoken
 ```
 收到 email + 密碼（已經過 UserCreate 檢查）
 → 查 email 有沒有人用過（有 → 400）
-→ 密碼雜湊後存進 user 表
+→ 密碼雜湊後存進 user 表（【關卡 24】帳號數到 MAX_USERS 就 503；先 flush 拿 id）
+→ 【關卡 24】同一個交易再寫一筆 outbox 事件「有人註冊了」，commit 後叫醒 worker（第 17 站）
 → 回傳 UserRead（201）
 ```
 
@@ -654,6 +661,127 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 
 ---
 
+## 第 16 站：請求的旁路：指標與追蹤
+
+**讀**：`metrics.py` → `tracing.py` → `main.py` 的 log middleware（`trace_id` 那三行）
+
+### 一句話
+
+每個請求除了回應，還順手留下三種痕跡：一行 log（關卡 11）、幾個累計的數字（指標）、一棵「走了哪幾站」的樹（追蹤）。後兩個都是開關，預設關，線上 Render 沒開。
+
+### 比喻
+
+店門口的計數器（進來幾個人、平均等多久）和每位客人身上的追蹤器（在哪個櫃台停了多久）。計數器老闆每 5 秒抄一次（Prometheus 來拉），追蹤器的紀錄送到一個集中站（collector）。
+
+### 重點
+
+**⭐⭐ `metrics.py`**（詳見 LEARNING.md 關卡 22）
+- middleware 數 `http_requests_total{method, route, status}` 和耗時直方圖 `http_request_duration_seconds`
+- `route` 用**路由樣板**（`/api/auth/login`），沒對上的記 `unmatched`：label 的值要有限，不然每個 id 一條時間序列
+- `GET /metrics` 刻意不在 `/api` 底下（Vercel 不轉發），而且 `METRICS_ENABLED` 才開；抓 `/metrics` 本身不算進去
+
+**⭐⭐ `tracing.py`**
+- `OTEL_EXPORTER_OTLP_ENDPOINT` 沒設就 `return None`，什麼都不掛
+- 設了：FastAPI 每個請求一個 span、asyncpg 每句 SQL 一個子 span；span 帶回應的 `X-Request-ID`；`/api/ping`、`/metrics` 不追蹤
+- 送去哪由環境變數決定（本機 collector、Grafana Cloud），程式不動
+
+**⭐ `main.py`**：log 的 `extra` 多一個 `trace_id`。從 log 的一行找得到 trace，從 trace 的 request id 找得到 log。
+
+### 自我檢查
+
+- [ ] 為什麼 `route` 不能用 `/todos/123` 這種實際路徑？
+- [ ] 線上沒設這兩個變數，請求會變慢嗎？多了什麼程式在跑？
+- [ ] 一個 `/api/health` 的 trace 裡會有幾個 SQL 子 span？（看 `main.py` 的 `health`）
+
+---
+
+## 第 17 站：註冊之後：outbox → worker → consumer
+
+**讀**：`routes/auth.py` 的 `register`（`flush` → `enqueue` → `commit` → `wake_worker`）→ `outbox.py`（開頭註解，然後 `enqueue`、`publish_pending`、`run_worker`、`handle_event`、`run_consumer`）→ `models.py` 的 `OutboxEvent`、`ProcessedEvent` → `worker.py`、`consumer.py` → `main.py` 的 `lifespan`
+
+### 一句話
+
+「有人註冊了」這件事和使用者寫進**同一個交易**，之後由 worker 撿出來送到 Kafka（沒有 Kafka 就印到 log），consumer 收到才做事，而且同一筆只做一次。
+
+### 比喻
+
+櫃台辦完入會，不是當場打電話通知各部門（電話不通客人就辦不了），而是在同一本帳上多記一行「待通知」；跑腿的定時來撿待通知的去送；收件部門登記單號，同一張單來兩次只處理一次。
+
+### ⭐⭐⭐ 流程
+
+```
+POST /api/auth/register
+→ 查 email（有 → 400）；帳號數到 MAX_USERS → 503
+→ session.add(user)、flush 拿到 user.id
+→ enqueue：同一個 session 再 add 一筆 OutboxEvent（topic=user.registered）
+→ commit：使用者和事件一起成功、或一起失敗
+→ wake_worker()：按鈴，同一個程序裡的 worker 立刻醒（分開跑的 worker 靠輪詢）
+
+worker（run_worker）
+→ 撿 published_at IS NULL 的事件（FOR UPDATE SKIP LOCKED，多個 worker 各撿各的）
+→ publisher.send：有 KAFKA_BOOTSTRAP_SERVERS 送 Kafka，沒有就印 log
+→ 標 published_at → commit
+
+consumer（run_consumer）
+→ 讀 topic → handle_event：INSERT processedevent（主鍵 = 事件 id），撞到 → duplicate、跳過
+→ 做事（這裡只記 log）→ commit → 才 commit offset
+```
+
+### 重點
+
+**⭐⭐⭐ 為什麼不在請求裡直接送**（詳見 LEARNING.md 關卡 24 觀念 1）：先 commit 再送，送之前當掉事件就丟了；先送再 commit，commit 失敗信已經寄了。outbox 讓「要送」變成資料庫裡的一列，和使用者同生共死。
+
+**⭐⭐ at-least-once + 冪等**：worker 送完才標記，標記前當掉會再送一次；所以 consumer 用 `processedevent` 的主鍵擋第二次。事件 id 用 uuid，貫穿 outbox、Kafka 的 key、processedevent。
+
+**⭐⭐ 同一個 image、三種跑法**：compose 的 `worker`、`consumer` 服務只是換 `command`；線上 Render 免費方案開不了第二個服務，`OUTBOX_WORKER=inline` 讓 `lifespan` 在 web 程序裡開一個背景 task，`LogPublisher` 印到 log。
+
+**⭐ 鈴與輪詢**：`OUTBOX_POLL_SECONDS` 是保底（Render 設 600 秒讓 Neon 能休眠），鈴負責即時。
+
+### 自我檢查
+
+- [ ] `enqueue` 搬到 `commit` 之後會壞在哪一種情況？
+- [ ] consumer 收到同一筆兩次，是哪張表擋住了第二次？
+- [ ] 線上沒有 Kafka，註冊事件去了哪裡？在哪裡看得到？
+
+---
+
+## 第 18 站：同一個 image 的三種跑法
+
+**讀**：`backend/Dockerfile` → `infra/compose.yaml`（開頭註解、`postgres`、`backend` 兩個服務）→ `infra/k8s/base/deployment.yaml`、`migrate-job.yaml` → `.github/workflows/infra.yml`（每個 job、每個 step 的 `name` 就是一句話）
+
+### 一句話
+
+Dockerfile 做出一個 image；Render、compose、Kubernetes 都跑同一個 image，差別只在「誰先誰後、連哪個資料庫、幾個副本、怎麼換版」這些描述檔。
+
+### 比喻
+
+同一張光碟，放在家裡的播放器（compose）、出租店（Render）、電影院的放映系統（Kubernetes）。光碟不變，變的是機器和規矩。
+
+### 重點
+
+| | Render（線上） | compose（本機） | Kubernetes（kind） |
+|---|---|---|---|
+| 誰起 | 平台 | `docker compose up` | Deployment 保證 N 個副本 |
+| 遷移 | Dockerfile 的 CMD 先跑 | 同左 | 獨立的 Job（多副本不能各跑一次） |
+| 資料庫 | Neon | 容器 `postgres`，主機名就是服務名 | CI 用的 Postgres；正式用託管 |
+| 副本 | 1 | 1 | 2，`maxUnavailable: 0` |
+| 活著／能服務 | `healthCheckPath: /api/ping` | `healthcheck` + `depends_on: service_healthy` | liveness `/api/ping`、readiness `/api/health` |
+| 設定 | 環境變數頁 | `environment` | ConfigMap + Secret（真值不進 git） |
+| 退版 | Rollback 按鈕 | 換 tag 再 up | `rollout undo` |
+| 證明它會動 | 線上 `/api/health` | `infra.yml` 的 `compose`、`e2e` job | `k8s` job |
+
+**⭐⭐ CI 就是證明**：`infra.yml` 五個 job（compose、e2e、observability、k8s、messaging）各證明一塊，只在 PR 跑、依路徑過濾。沒有 Docker 的機器看這些 job 的 log 就等於跑過一遍（`COACHING.md` 關卡 21～24 的 VM 路線）。
+
+**⭐ 零停機是數出來的**：`k8s` job 換版期間在叢集裡每 0.5 秒打一次 Service，80 次全部 200；靠的是 `maxUnavailable: 0`、readiness、`preStop` 三件事。
+
+### 自我檢查
+
+- [ ] 為什麼 Kubernetes 的遷移不能放在 Dockerfile 的 CMD 裡，Render 卻可以？
+- [ ] compose 裡後端的 `DATABASE_URL` 主機為什麼是 `postgres` 不是 `localhost`？
+- [ ] 換版期間「80 次全部 200」靠哪三個設定？少一個會怎樣？
+
+---
+
 ## 踩過的坑（一次整理）
 
 | 症狀 | 原因 | 學到什麼 | 關卡 |
@@ -665,6 +793,11 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 | `ModuleNotFoundError` | 沒用 `uv run` 執行，或還沒 `uv sync` | 指令前加 `uv run`；在 `backend` 跑 `uv sync` | 9 |
 | Alembic `UnicodeDecodeError` | Windows 讀 `alembic.ini` 的中文註解 | 設定檔保持 ASCII | 5 |
 | `greenlet` 找不到 | SQLAlchemy 2.1 不再自動安裝 | 用 `sqlalchemy[asyncio]` | 8 |
+| compose 的 backend 一直 unhealthy | slim image 沒有 curl | healthcheck 用 image 裡有的工具 | 21 |
+| OTel 的 SQLAlchemy 套件裝不上 | 只支援到 2.0 | 掛在 asyncpg 驅動層 | 22 |
+| `kubectl apply -k` 拒絕 overlay 外的檔案 | kustomize 的安全限制 | 那個目錄自己一份 kustomization | 23 |
+| pytest 的 `asyncio.Event` 綁錯 loop | 模組層建的 Event | 在 worker 迴圈裡建 | 24 |
+| Neon 計算時數被 worker 吃掉 | 每 5 秒輪詢，資料庫不休眠 | 線上輪詢 600 秒 + 註冊時按鈴 | 24 |
 
 ---
 
@@ -673,4 +806,4 @@ refresh → 後端說會員卡過期（401）→ `initializeAuth` 換不到 → 
 - 每一站的「自我檢查」都答得出來，就代表你讀懂這個專案了
 - 想知道某一關**為什麼**這樣設計 → `LEARNING.md` 對應的關卡
 - 要把登入功能**搬到別的專案** → `CHAIN.md` 附錄 A 的搬家清單（`LEARNING.md` 關卡 6 那段是當時的舊版）
-- 下一步 → 關卡 0～20 全部完成了。要開練習專案 → `CHAIN.md`；想再加教學關卡 → `LEARNING.md` 末尾「之後還可以自己摸的」；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`
+- 下一步 → 關卡 0～24 全部完成了。要開練習專案 → `CHAIN.md`；基礎設施想親手跑 → `infra/README.md`、`COACHING.md` 關卡 21～24；整條鏈一頁看完 → `ARCHITECTURE.md`；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`
