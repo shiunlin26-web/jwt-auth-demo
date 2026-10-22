@@ -24,6 +24,7 @@ from typing import Any, Protocol
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -132,12 +133,15 @@ async def publish_pending(session: AsyncSession, publisher: Publisher, limit: in
     return len(events)
 
 
-async def run_worker() -> None:
-    """一直跑：每隔 OUTBOX_POLL_SECONDS 撿一次。worker.py 單獨跑它，關卡 24-C 在 web 程序裡當背景 task 跑它"""
+async def run_worker(db_engine: AsyncEngine = engine) -> None:
+    """一直跑：每隔 OUTBOX_POLL_SECONDS 撿一次。worker.py 單獨跑它，關卡 24-C 在 web 程序裡當背景 task 跑它
+
+    db_engine 參數是給測試用的（測試資料庫）；平常用 database.py 的 engine。
+    """
     publisher = await make_publisher()
     try:
         while True:
-            async with AsyncSession(engine) as session:
+            async with AsyncSession(db_engine) as session:
                 sent = await publish_pending(session, publisher)
             # 有送到東西就立刻再撿（可能還有），沒有才睡
             if sent == 0:
