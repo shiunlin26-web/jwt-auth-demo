@@ -60,7 +60,7 @@
 | **仔細走** | 0、1、2、3、4、5、8、12、17、18、19、20 | 1～2 小時 | 第 3 節的腳本全部做完，收尾表、問「哪一步再講一次」、至少一個動手玩 |
 | **快速走** | 6、7、9、10、11、13、14、15、16 | 20～30 分鐘 | 讀 `PLAIN.md` 那段，只做腳本的前兩步親眼看一次就過。9、10、11 只看 log，不改平台設定 |
 
-順序照編號。每天約 4 小時，預計 5～7 天。走到哪記在 `HANDOFF.md` 第 2 節。仔細走的關如果他說「這個我已經懂了」，抽腳本中間一步讓他講預期值，講得出就跳過。
+順序照編號。每天約 4 小時，預計 5～7 天。走到哪記在 `HANDOFF.md` 第 2 節。關卡 21～24（基礎設施，`PLAN-INFRA.md`）等重帶走完再開始，一週一關：有 Docker 的機器走「Mac 路線」仔細做，沒有的走「VM 路線」看 CI 的 log，兩條路線的預期值一樣。仔細走的關如果他說「這個我已經懂了」，抽腳本中間一步讓他講預期值，講得出就跳過。
 
 ## 3. 每一關的帶做腳本
 
@@ -454,3 +454,38 @@
 
 **收尾**：先問哪段壞再問為什麼 / 看錯誤最後幾行 / 哪個工具抓哪種錯 / 全綠不等於沒壞。
 **動手玩**：`LEARNING.md` 關卡 20 的 4（讓測試抓第 2 題）。
+
+### 關卡 21：docker compose 與 Playwright E2E
+
+**搭配看的程式**：`infra/compose.yaml`（整個檔案，註解就是講義）；`frontend/e2e/auth.spec.ts`；`frontend/playwright.config.ts` 的 `webServer`；`.github/workflows/infra.yml` 的 `compose`、`e2e` 兩個 job
+
+**前置**：關卡 21 起有兩條路線，預期值一樣。**Mac 路線**要先 `bash scripts/setup.sh --skip-tests` 和 `bash scripts/doctor.sh`，doctor 要印出「關卡 21、22、24…：可以，走 Mac 路線」；沒有就先裝 Docker（Docker Desktop 個人免費、OrbStack 個人免費、`brew install colima docker` 三選一）。**VM 路線**只要能開 GitHub 的 Actions 分頁。指令都在 repo 根目錄下。
+
+**Mac 路線**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `docker compose -f infra/compose.yaml up -d --build --wait` | 第一次約 1～2 分鐘；最後兩行 `Container jwt-auth-demo-postgres-1  Healthy`、`Container jwt-auth-demo-backend-1  Healthy`（前面打勾） | `--build` 照 `backend/Dockerfile` 做 image（關卡 9 那份，一個字沒改）；`--wait` 等到**兩個都 healthy** 才回來，不是「起來了」就回來。healthy 的定義在 compose.yaml 的 `healthcheck` |
+| 2 | `docker compose -f infra/compose.yaml ps` | 兩列，STATUS 都是 `Up … (healthy)` | 名字是「專案名-服務名-編號」，專案名來自檔案開頭的 `name:` |
+| 3 | `curl -s localhost:8000/api/health` | `{"status":"ok","db":"ok","migration":"0006","version":null}` | 和 Render 上一樣的回答。`version` 是 null 因為 compose 沒給 APP_VERSION；`db: ok` 代表容器裡的後端連到了另一個容器的 Postgres |
+| 4 | `docker compose -f infra/compose.yaml logs backend` 找 `Running upgrade` | `-> 0001` 一路到 `-> 0006`，然後 `Application startup complete` | 容器啟動指令先跑遷移再起 uvicorn（Dockerfile 的 CMD）。倉庫是全新的，所以六張施工單全部跑一遍 |
+| 5 | `docker compose -f infra/compose.yaml exec postgres psql -U postgres -d jwtdemo -c "\dt"` | 五張表：`alembic_version`、`outboxevent`、`processedevent`、`refreshtoken`、`user` | `exec` 是「進到那個容器裡下指令」。倉庫在容器裡，資料放在具名 volume `pgdata`，`down` 不加 `-v` 資料會留著 |
+| 6 | `grep -n "postgres:5432" infra/compose.yaml` | `DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo` | 主機名稱是**服務名** `postgres`，不是 localhost：compose 幫兩個容器建了一個內部網路，用名字互相找。localhost 在容器裡是它自己 |
+| 7 | `cd frontend && npm ci && npx playwright install chromium`（第一次；下載約 150 MB） | 最後沒有紅字 | Playwright 的瀏覽器不在 npm 套件裡，要另外下載。CI 的 `e2e` job 每次都做這步 |
+| 8 | `npm run test:e2e` | 三行 `✓  1 [chromium] › e2e/auth.spec.ts:…`，最後 `3 passed (5.2s)`（秒數會不同） | 它自己起了 Vite（`playwright.config.ts` 的 `webServer`），瀏覽器打 `localhost:5173`，`/api` 由 Vite 代理到步驟 1 的後端。三條路：註冊→登入、重整還在、登出被擋 |
+| 9 | `npx playwright test --ui`，點第二個測試 | 視窗左邊列出三個測試名；右邊一步一步重播，每一步旁邊有當時的網址 | 看「重新整理」那一步：網址沒變、標題還在。這就是 refresh cookie 在真瀏覽器裡真的被帶上了（關卡 16 的 MSW 假後端測不到這段） |
+| 10 | `cd .. && docker compose -f infra/compose.yaml down -v` | `Removed` 幾行 | `-v` 連 volume 一起刪，下次 up 是全新的倉庫；不加就保留 |
+
+**VM 路線**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | GitHub → Actions → 左邊 **Infra** → 最新的一個 run | 五個 job：`compose`、`e2e`、`observability`、`k8s`、`messaging`，全綠 | 這個 workflow 只在 PR 和手動觸發跑（`infra.yml` 的 `on`），不想等的話右上 **Run workflow** 自己跑一次，公開 repo 不計分鐘 |
+| 2 | 點 `compose` job，展開「compose up」 | `Container jwt-auth-demo-postgres-1  Healthy`、`Container jwt-auth-demo-backend-1  Healthy` | 和 Mac 路線步驟 1 一模一樣的輸出，只是在 GitHub 的機器上 |
+| 3 | 展開「Smoke test」 | `"migration":"0006"`、`✅ compose 整套跑起來了` | 同 Mac 步驟 3；多檢查「遷移是不是最新的」，用 `ls migrations/versions` 算出來的 |
+| 4 | 展開「compose logs」 | `backend-1   \| INFO  [alembic.runtime.migration] Running upgrade 0005 -> 0006`、`Application startup complete` | 同 Mac 步驟 4 |
+| 5 | 回上一頁點 `e2e` job，展開「E2E（Playwright）」 | 三行 `✓`，最後 `3 passed (4.9s)` | 同 Mac 步驟 8；再往上看「安裝 Chromium」那步，就是 Mac 步驟 7 |
+| 6 | run 頁面最下面 **Artifacts** → `playwright-report`，下載解壓開 `index.html` | 三個測試各一列，點進去每一步有時間 | 這就是 Mac 步驟 9 的 UI 模式，CI 把它留成檔案 |
+
+**收尾**（你看到的 → 對應的觀念）：`--wait` 等 healthy → 「起來了」和「能服務了」不一樣，和關卡 11 的 ping / health 同一件事 / 服務名當主機名 → compose 的內部網路 / `down -v` → 資料在 volume 不在容器 / `3 passed` → 真瀏覽器驗的是 cookie 真的帶上，元件測試驗的是畫面對不對 / artifact → CI 把證據留下來。收尾後問「哪一步要再講一次」。
+**動手玩**：`LEARNING.md` 關卡 21 的 1（把 service_healthy 改成 service_started）、3（改錯一個預期值看報告）。
