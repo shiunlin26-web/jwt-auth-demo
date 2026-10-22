@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 import time
 import uuid
@@ -15,8 +17,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from config import settings
 from database import engine, get_session
 from logging_config import setup_logging
+from metrics import setup_metrics
+from outbox import run_worker
 from rate_limit import get_client_ip, limiter
 from routes import auth, users
+from tracing import current_trace_id, setup_tracing
 
 # 【關卡 11】log 設定要在最前面做，之後所有 logger 都會用同一個格式
 setup_logging(level=settings.log_level, json_output=settings.log_json)
@@ -47,9 +52,22 @@ if settings.sentry_dsn:
 # 【關卡 13】lifespan 回來了，但只做一件事：關機時把連線池的連線好好關掉。
 # 沒有這段，部署換版（平台送 SIGTERM）時連線會被硬切，資料庫端留下一堆「對方消失」的連線，
 # 免費方案的連線數上限很小，累積幾次就連不上。yield 之前是啟動、之後是關機。
+#
+# 【關卡 24-C】OUTBOX_WORKER=inline 時，啟動時在同一個程序裡開一個背景 task 跑 outbox worker（outbox.py 的 run_worker）。
+# 正式做法是獨立的 worker 服務（compose 的 worker、k8s 另一個 Deployment），但 Render 免費方案只能有一個 web service，
+# 所以線上用這個模式：事件照樣從 outbox 撿出來、印到 log（沒有 Kafka）。多個副本同時跑也沒關係，SKIP LOCKED 會各撿各的。
+# 關機時先取消這個 task、等它把 publisher 關好，再關連線池。
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    worker_task: asyncio.Task[None] | None = None
+    if settings.outbox_worker == "inline":
+        worker_task = asyncio.create_task(run_worker(), name="outbox-worker")
+        logger.info("outbox worker 在 web 程序裡當背景 task 跑")
     yield
+    if worker_task is not None:
+        worker_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker_task
     await engine.dispose()
 
 
@@ -113,17 +131,25 @@ async def log_requests(request: Request, call_next):
     # /api/me 被存起來就會把 A 的資料給 B（同一台共用電腦、同一個 proxy 後面）。
     # no-store 是「連存都不要存」，比 no-cache（存了但每次要問）更嚴。登入相關的 API 一律 no-store 是業界慣例
     response.headers.setdefault("Cache-Control", "no-store")
-    logger.info(
-        "request",
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-            "duration_ms": round((time.perf_counter() - start) * 1000, 1),
-        },
-    )
+    extra = {
+        "request_id": request_id,
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+    }
+    # 【關卡 22】有在追蹤時把 trace_id 也記進 log：從 log 的一行能找到 trace，從 trace 的 request id 能找到 log
+    trace_id = current_trace_id()
+    if trace_id:
+        extra["trace_id"] = trace_id
+    logger.info("request", extra=extra)
     return response
+
+
+# 【關卡 22】指標：每個請求累計到 http_requests_total 與 http_request_duration_seconds，/metrics 給 Prometheus 抓（metrics.py）
+setup_metrics(app)
+# 【關卡 22】追蹤：設了 OTEL_EXPORTER_OTLP_ENDPOINT 才啟用，每個請求一個 span、每句 SQL 一個子 span（tracing.py）
+setup_tracing(app)
 
 
 # 【關卡 10】所有 API 統一掛在 /api 底下：/api/auth/login、/api/me、/api/ping

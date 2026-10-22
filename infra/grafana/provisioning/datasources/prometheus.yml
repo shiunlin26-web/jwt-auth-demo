@@ -1,0 +1,11 @@
+# 【關卡 22】Grafana 的資料來源：開起來就已經接好 Prometheus，不用在畫面上手動加
+# （provisioning = 用檔案描述設定，和 render.yaml、k8s 清單是同一個概念：設定進 git，不靠點按）
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus # dashboards/backend.json 用這個 uid 指到它
+    access: proxy # 由 Grafana 伺服器去查，瀏覽器不直接連 Prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

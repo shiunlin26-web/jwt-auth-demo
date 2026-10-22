@@ -11,6 +11,7 @@ CORS 網址、cookie 的 secure 直接寫死在程式碼裡。
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -62,6 +63,25 @@ class Settings(BaseSettings):
     )
     # 是否開放除錯用的端點（例如故意丟例外測 Sentry）。正式環境平常關閉，要演練時再暫時打開
     enable_debug_endpoints: bool = False
+
+    # ---- 【關卡 22】可觀測性 ----
+    # 是否開放 /metrics 給 Prometheus 抓。預設關；compose 裡打開（infra/compose.yaml）。
+    # /metrics 不在 /api 底下，Vercel 不會轉發，線上就算打開外面也打不到
+    metrics_enabled: bool = False
+    # 追蹤要送去哪（OTLP/HTTP 端點，例如 http://otel-collector:4318）。沒設就不啟用追蹤（tracing.py）。
+    # 名字刻意和 OpenTelemetry SDK 讀的環境變數一樣，SDK 自己也會讀它
+    otel_exporter_otlp_endpoint: str | None = None
+
+    # ---- 【關卡 24】outbox 與訊息 ----
+    # Kafka（或 Redpanda）的位址，例如 redpanda:9092。沒設就不用 Kafka：worker 把事件印到 log（outbox.py）
+    kafka_bootstrap_servers: str | None = None
+    # worker 沒事做時每隔幾秒再撿一次
+    outbox_poll_seconds: float = 5
+    # 【關卡 24-C】worker 怎麼跑：off = 不在 web 程序裡跑（compose、k8s 用獨立的 worker 服務）；
+    # inline = 在 web 程序裡當背景 task 跑（Render 免費方案開不了第二個服務，render.yaml 設這個）
+    outbox_worker: Literal["off", "inline"] = "off"
+    # 【關卡 24-C】示範站的帳號數上限：到了註冊回 503，沒設就不限制。公開的示範站怕人灌帳號把免費方案的儲存用光
+    max_users: int | None = None
 
     # 【關卡 17】登入與註冊的頻率限制（slowapi 的格式："10/minute"、"100/hour"）
     rate_limit_enabled: bool = True

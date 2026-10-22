@@ -1,5 +1,8 @@
+import uuid
 from datetime import datetime, timezone
+from typing import Any
 
+from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
 
@@ -23,3 +26,31 @@ class RefreshToken(SQLModel, table=True):
     revoked: bool = Field(default=False)
     expires_at: datetime
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class OutboxEvent(SQLModel, table=True):
+    """【關卡 24】待送出的事件（transactional outbox，說明見 outbox.py）
+
+    和業務資料寫在同一個交易裡；worker 撿 published_at IS NULL 的送出去，送完填上時間。
+    id 用 uuid 不用流水號：事件會被送到別的系統，那邊要能用這個 id 判斷「同一筆是不是已經處理過」（冪等）
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    topic: str = Field(index=True)
+    # JSON 欄位：payload 的欄位隨 topic 不同，不另外開表
+    payload: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # worker 的查詢條件是 published_at IS NULL，要有索引，不然表大了每次輪詢都全表掃描（關卡 18）
+    published_at: datetime | None = Field(default=None, index=True)
+
+
+class ProcessedEvent(SQLModel, table=True):
+    """【關卡 24】消費端處理過的事件 id（冪等用，說明見 outbox.py 的 handle_event）
+
+    主鍵就是事件 id：同一筆事件第二次 INSERT 會撞主鍵，這就是「處理過了」的判斷。
+    真實世界這張表在消費端自己的資料庫裡；這裡共用同一個資料庫是為了簡單。
+    """
+
+    id: uuid.UUID = Field(primary_key=True)
+    topic: str
+    processed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

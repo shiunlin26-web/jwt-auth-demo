@@ -52,7 +52,11 @@ async def clean_database():
             await conn.run_sync(SQLModel.metadata.create_all)
             _tables_ready = True
         # TRUNCATE：清空資料；RESTART IDENTITY：id 從 1 重新算；CASCADE：連帶清掉有關聯的資料
-        await conn.execute(text('TRUNCATE TABLE refreshtoken, "user" RESTART IDENTITY CASCADE'))
+        await conn.execute(
+            text(
+                'TRUNCATE TABLE processedevent, outboxevent, refreshtoken, "user" RESTART IDENTITY CASCADE'
+            )
+        )
     yield  # yield 之前是「測試前」要做的事，之後是「測試後」（這裡不用做什麼）
 
 
@@ -93,3 +97,10 @@ async def make_client():
     # yield 之後是「測試結束後」：把開過的 client 都關掉
     for c in clients:
         await c.aclose()
+
+
+@pytest.fixture
+async def db():
+    """【關卡 24】直接看測試資料庫的內容（例如 outbox 表有沒有那一筆），和 API 走同一個資料庫"""
+    async with AsyncSession(test_engine) as session:
+        yield session

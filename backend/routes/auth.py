@@ -3,13 +3,14 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from config import settings
 from database import get_session
 from dependencies import get_current_user
 from models import RefreshToken, User
+from outbox import enqueue, wake_worker
 from rate_limit import limiter
 from schemas import ChangePasswordRequest, Token, UserCreate, UserLogin, UserRead
 from security import (
@@ -92,6 +93,15 @@ async def register(
             detail="Email already registered",
         )
 
+    # 【關卡 24-C】示範站的保險：帳號數到上限就不收（503）。先查再寫有空窗，多收幾筆無所謂，不值得為此加鎖
+    if settings.max_users is not None:
+        total = (await session.exec(select(func.count()).select_from(User))).one()
+        if total >= settings.max_users:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="註冊已額滿（這是示範站）",
+            )
+
     # 建立新用戶
     user = User(
         email=data.email,
@@ -99,6 +109,11 @@ async def register(
     )
     session.add(user)
     try:
+        # flush：先把 INSERT 送到資料庫拿到 user.id，但還不 commit；email 重複的 IntegrityError 也在這裡發生
+        await session.flush()
+        # 【關卡 24】「有人註冊了」這個事件和使用者寫進同一個交易（outbox.py）：
+        # commit 成功兩個都在，失敗兩個都不在。寄信、統計之類的事交給 worker，不在這個請求裡做
+        enqueue(session, "user.registered", {"user_id": user.id, "email": user.email})
         await session.commit()
     except IntegrityError:
         # 【關卡 13】競態（race condition）：上面查過「不存在」，但在 commit 前另一個請求剛好註冊了同一個 email。
@@ -110,6 +125,8 @@ async def register(
             detail="Email already registered",
         ) from None
     await session.refresh(user)
+    # 【關卡 24-C】commit 之後叫醒同一個程序裡的 worker（inline 模式），事件幾秒內就送出，不用等下一次輪詢
+    wake_worker()
     return user
 
 

@@ -1,0 +1,356 @@
+# 【關卡 21】基礎設施的 CI：和 ci.yml 分開
+#
+# ci.yml 是每次 push 都跑的「程式對不對」；這個檔案是「基礎設施能不能跑起來」：compose（21）、指標與追蹤（22）、
+# Kubernetes（23）、訊息（24）各一個 job。分開的原因：
+# 1. 這些 job 比較慢（要 build image、拉好幾個 image），不想改一行文件也跑
+# 2. 只在 PR 和手動觸發跑，而且只有 infra/、backend/、前端 E2E 或這個檔案本身有改動才跑（docs/PLAN-INFRA.md 第 2 節第 1 條）
+# 3. 壞了一眼看得出是「程式壞」還是「基礎設施壞」
+#
+# 沒有 Docker 的機器就是看這裡的 log：每一步印什麼、對應 infra/ 的哪一行。
+
+name: Infra
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - "backend/**"
+      - "frontend/e2e/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+
+# 同一個分支連推兩次，前一次還在跑就取消，省 runner 時間
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==================================================================
+  # 【關卡 21】compose：整套起來、打 /api/health、印 log、關掉
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # --build：照 backend/Dockerfile 建 image；--wait：等所有有 healthcheck 的服務都 healthy 才回來，
+      # 有任何一個變 unhealthy 就直接失敗。不用自己寫 sleep 迴圈（對照 ci.yml 的 Smoke test）
+      - name: compose up（build backend、起 postgres、等兩個都 healthy）
+        run: docker compose -f infra/compose.yaml up -d --build --wait --wait-timeout 120
+
+      # 和 ci.yml 一樣的檢查，但多一個：migration 要等於 backend/migrations/versions/ 裡最新的編號，
+      # 證明容器啟動時真的跑了 alembic upgrade head（Dockerfile 的 CMD）
+      - name: Smoke test（/api/ping、/api/health、遷移版本）
+        run: |
+          curl -fsS http://localhost:8000/api/ping; echo
+          curl -fsS http://localhost:8000/api/health | tee health.json; echo
+          latest=$(ls backend/migrations/versions/*.py | sort | tail -n 1 | xargs -n 1 basename | cut -d_ -f1)
+          echo "最新的遷移編號：$latest"
+          grep -q '"db": *"ok"' health.json || { echo "❌ /api/health 說資料庫連不上"; exit 1; }
+          grep -q "\"migration\": *\"$latest\"" health.json || { echo "❌ migration 不是最新的 $latest"; exit 1; }
+          echo "✅ compose 整套跑起來了"
+
+      # 看兩個 container 的 log：postgres 的啟動、backend 的 alembic「Running upgrade」和 uvicorn「Application startup complete」
+      - name: compose logs
+        if: always()
+        run: docker compose -f infra/compose.yaml logs --no-color
+
+      - name: compose down
+        if: always()
+        run: docker compose -f infra/compose.yaml down -v
+
+  # ==================================================================
+  # 【關卡 21】e2e：真的瀏覽器走一遍「註冊 → 登入 → 重新整理 → 登出」（frontend/e2e/）
+  # 後端用上面同一份 compose 起（job 之間不共用機器，所以要再起一次）；前端由 Playwright 自己跑 npm run dev，
+  # Vite 把 /api 代理到 compose 的後端（vite.config.ts），瀏覽器看到的是同一個網站，cookie 行為和正式環境一樣
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: compose up（後端整套）
+        run: docker compose -f infra/compose.yaml up -d --build --wait --wait-timeout 120
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安裝套件
+        working-directory: frontend
+        run: npm ci
+
+      # Playwright 的瀏覽器不在 npm 套件裡，要另外下載；--with-deps 順便裝 Chromium 需要的系統函式庫
+      - name: 安裝 Chromium
+        working-directory: frontend
+        run: npx playwright install chromium --with-deps
+
+      # playwright.config.ts 的 webServer 會自己起 Vite dev server；CI=true 時不重用、不重試、留下 HTML 報告
+      - name: E2E（Playwright）
+        working-directory: frontend
+        run: npx playwright test
+
+      # 報告上傳成 artifact：在 run 頁面最下面下載，解開後開 index.html，失敗的測試有每一步的截圖和 trace
+      - name: 上傳 Playwright 報告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+      - name: compose logs
+        if: failure()
+        run: docker compose -f infra/compose.yaml logs --no-color
+
+      - name: compose down
+        if: always()
+        run: docker compose -f infra/compose.yaml down -v
+
+  # ==================================================================
+  # 【關卡 22】observability：多起 Prometheus 與 Grafana，製造流量，驗證「程式 → /metrics → Prometheus → Grafana」整條都通
+  observability:
+    runs-on: ubuntu-latest
+    # 【關卡 22-B】給了端點後端才會送 span；compose 的 backend 環境變數會讀這個（infra/compose.yaml）
+    env:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: compose up（--profile observability 多起 prometheus 與 grafana）
+        run: docker compose -f infra/compose.yaml --profile observability up -d --build --wait --wait-timeout 180
+
+      # 打十次 /api/ping 和一次亂打的路徑，然後直接看 /metrics 的原始文字：這就是 Prometheus 每 5 秒抓的東西
+      - name: 製造流量，看 /metrics
+        run: |
+          for i in $(seq 1 10); do curl -fsS http://localhost:8000/api/ping > /dev/null; done
+          curl -s -o /dev/null http://localhost:8000/no-such-path
+          echo "--- /metrics 裡和 /api/ping、unmatched 有關的行 ---"
+          curl -fsS http://localhost:8000/metrics | grep -E 'route="(/api/ping|unmatched)"'
+
+      # Prometheus 的查詢 API：和 Grafana 畫圖用的是同一個 API。scrape_interval 是 5 秒，最多等 30 秒
+      - name: Prometheus 抓到了嗎
+        run: |
+          for i in $(seq 1 30); do
+            value=$(curl -fsS http://localhost:9090/api/v1/query --data-urlencode 'query=sum(http_requests_total{route="/api/ping"})' | jq -r '.data.result[0].value[1] // empty')
+            if [ -n "$value" ] && [ "$value" != "0" ]; then
+              echo "✅ Prometheus：sum(http_requests_total{route=\"/api/ping\"}) = $value"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "❌ Prometheus 30 秒內沒抓到 /api/ping 的指標；targets 狀態："
+          curl -s http://localhost:9090/api/v1/targets | jq .
+          exit 1
+
+      # Grafana：健康、儀表板有被 provisioning 載入、透過它查 Prometheus 查得到數字（代表資料來源接對了）
+      - name: Grafana 的儀表板與資料來源
+        run: |
+          curl -fsS http://localhost:3000/api/health | tee health.json; echo
+          jq -e '.database == "ok"' health.json > /dev/null
+          title=$(curl -fsS http://localhost:3000/api/dashboards/uid/jwt-backend | jq -r '.dashboard.title')
+          echo "儀表板：$title"
+          [ "$title" = "JWT Auth Demo backend" ] || { echo "❌ 儀表板沒被載入（看 grafana 的 log）"; exit 1; }
+          value=$(curl -fsS -X POST http://localhost:3000/api/ds/query -H 'Content-Type: application/json' \
+            -d '{"from":"now-5m","to":"now","queries":[{"refId":"A","datasource":{"uid":"prometheus"},"expr":"sum(http_requests_total)","instant":true}]}' \
+            | jq -r '.results.A.frames[0].data.values[1][0]')
+          echo "✅ Grafana → Prometheus：sum(http_requests_total) = $value"
+          [ -n "$value" ] && [ "$value" != "null" ]
+
+      # 【關卡 22-B】追蹤：打一次 /api/health（會查資料庫），等 BatchSpanProcessor 送出（預設每 5 秒一批），
+      # collector 的 log 要有 HTTP 的 span、底下 SQL 的子 span、span 上的 request id；後端的 log 要有 trace_id
+      - name: 追蹤：collector 收到 span、log 帶 trace_id
+        run: |
+          curl -fsS -D headers.txt -o /dev/null http://localhost:8000/api/health
+          grep -i x-request-id headers.txt
+          sleep 8
+          docker compose -f infra/compose.yaml --profile observability logs --no-color otel-collector > collector.log
+          grep -E 'Name\s*:\s*GET /api/health' collector.log > /dev/null || { echo "❌ collector 沒收到 GET /api/health 的 span"; tail -n 60 collector.log; exit 1; }
+          echo "✅ collector 收到 HTTP 的 span："; grep -E 'Name\s*:\s*GET /api/health' collector.log | head -n 1
+          grep -E 'Name\s*:\s*SELECT' collector.log > /dev/null && { echo "✅ 底下有 SQL 的子 span："; grep -E 'Name\s*:\s*SELECT' collector.log | head -n 2; }
+          grep -E 'x_request_id' collector.log > /dev/null && { echo "✅ span 帶 request id："; grep -E 'x_request_id' collector.log | head -n 1; }
+          docker compose -f infra/compose.yaml --profile observability logs --no-color backend | grep -m 1 'trace_id=' || { echo "❌ 後端 log 沒有 trace_id"; exit 1; }
+
+      - name: compose logs
+        if: failure()
+        run: docker compose -f infra/compose.yaml --profile observability logs --no-color
+
+      - name: compose down
+        if: always()
+        run: docker compose -f infra/compose.yaml --profile observability down -v
+
+  # ==================================================================
+  # 【關卡 23】k8s：在 runner 上用 kind 開一個真的 Kubernetes 叢集，把同一個 image 部署上去
+  # kind = Kubernetes in Docker：整個叢集是一個 container，幾十秒起來，跑完就丟。本機 Mac 一樣能跑（brew install kind）
+  k8s:
+    runs-on: ubuntu-latest
+    env:
+      NS: jwt-auth-demo
+    steps:
+      - uses: actions/checkout@v7
+
+      # 同一個 Dockerfile、同一個 image，和 ci.yml、compose、Render 用的都一樣
+      - name: Docker build
+        run: docker build -t jwt-backend:ci ./backend
+
+      # 裝 kind 與 kubectl 並開叢集。kubeconfig 會自動設好，之後的 kubectl 都指向它
+      - name: 開一個 kind 叢集
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: jwt
+
+      # 叢集的節點（一個 container）看不到 runner 的 docker image，要把 image 搬進去；
+      # 正式環境是 push 到 registry（GHCR、ECR），節點自己去拉
+      - name: 把 image 載進 kind
+        run: kind load docker-image jwt-backend:ci --name jwt
+
+      # 先起 CI 用的 Postgres（infra/k8s/ci/postgres.yaml），等它 Ready
+      - name: 命名空間與 CI 用的 Postgres
+        run: |
+          kubectl apply -f infra/k8s/base/namespace.yaml
+          kubectl -n $NS apply -f infra/k8s/ci/postgres.yaml
+          kubectl -n $NS rollout status deployment/postgres --timeout=120s
+
+      # 密鑰不在 git 裡（base/secret.example.yaml 只是範本），這裡用指令建；主機名稱 postgres 就是上面的 Service
+      - name: 建 Secret
+        run: |
+          kubectl -n $NS create secret generic backend-secret \
+            --from-literal=DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo \
+            --from-literal=JWT_SECRET=ci-only-secret-not-for-production-0123456789abcdef
+
+      # 一次套用 ConfigMap、遷移 Job、Deployment、Service（kustomize overlay 把 image tag 換成 ci）。
+      # 先等 Job 跑完（遷移），再等 Deployment 的兩個 pod 都 Ready
+      - name: kubectl apply -k，等遷移 Job 與 Deployment
+        run: |
+          kubectl apply -k infra/k8s/overlays/ci
+          kubectl -n $NS wait --for=condition=complete job/backend-migrate --timeout=120s
+          echo "--- 遷移 Job 的 log ---"
+          kubectl -n $NS logs job/backend-migrate
+          kubectl -n $NS rollout status deployment/backend --timeout=180s
+          kubectl -n $NS get pods -o wide
+
+      # port-forward：在 runner 上開一個通道到叢集裡的 Service，curl localhost 就打到 pod（Service 會輪流分給兩個 pod）
+      - name: Smoke test（port-forward → Service → pod）
+        run: |
+          kubectl -n $NS port-forward service/backend 8080:80 > /dev/null 2>&1 &
+          sleep 3
+          curl -fsS http://localhost:8080/api/ping; echo
+          curl -fsS http://localhost:8080/api/health | tee health.json; echo
+          latest=$(ls backend/migrations/versions/*.py | sort | tail -n 1 | xargs -n 1 basename | cut -d_ -f1)
+          grep -q '"db": *"ok"' health.json || { echo "❌ /api/health 說資料庫連不上"; exit 1; }
+          grep -q "\"migration\": *\"$latest\"" health.json || { echo "❌ migration 不是最新的 $latest"; exit 1; }
+          echo "✅ 兩個 pod 在服務，遷移是 $latest，version 是 $(grep -o '"version": *"[^"]*"' health.json)"
+
+      # ---------- 【關卡 23-B】滾動更新：換版時服務不中斷 ----------
+      # 同一個 image 打上 v2 的 tag 當「新版」。換版期間在叢集裡開一個 curl pod 每 0.5 秒打一次 Service，
+      # 結束後數有幾次不是 200：maxUnavailable: 0 + readiness 探針的意思就是「一次都不該失敗」。
+      # 為什麼不用 port-forward 量？port-forward 黏在一個 pod 上，那個 pod 被換掉它就斷了，不是走 Service 的負載平衡
+      - name: 滾動更新到 v2（換版期間持續打 Service，數失敗次數）
+        run: |
+          docker tag jwt-backend:ci jwt-backend:v2
+          kind load docker-image jwt-backend:v2 --name jwt
+          kubectl -n $NS run probe --image=curlimages/curl:8.12.1 --restart=Never -- \
+            sh -c 'for i in $(seq 1 80); do curl -s -o /dev/null -w "%{http_code}\n" --max-time 2 http://backend/api/ping; sleep 0.5; done'
+          kubectl -n $NS wait --for=condition=Ready pod/probe --timeout=60s
+          kubectl -n $NS set image deployment/backend backend=jwt-backend:v2
+          kubectl -n $NS rollout status deployment/backend --timeout=180s
+          echo "--- rollout history：每次換版一個 revision，undo 就是退回上一個 ---"
+          kubectl -n $NS rollout history deployment/backend
+          kubectl -n $NS get pods -o wide
+          kubectl -n $NS wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe --timeout=120s
+          total=$(kubectl -n $NS logs probe | wc -l)
+          bad=$(kubectl -n $NS logs probe | grep -vc '^200$' || true)
+          echo "換版期間打了 $total 次，不是 200 的有 $bad 次"
+          [ "$bad" = "0" ] || { echo "❌ 換版期間有請求失敗，零停機沒做到"; exit 1; }
+          echo "✅ 零停機：換版期間每一次請求都 200"
+          kubectl -n $NS delete pod probe
+
+      # ---------- 【關卡 23-B】退版：rollout undo 回到上一個 revision（對照 RUNBOOK 第 2 節 Render 的 Rollback）----------
+      - name: 退版（rollout undo）
+        run: |
+          kubectl -n $NS rollout undo deployment/backend
+          kubectl -n $NS rollout status deployment/backend --timeout=180s
+          image=$(kubectl -n $NS get deployment/backend -o jsonpath='{.spec.template.spec.containers[0].image}')
+          echo "退版後的 image：$image"
+          [ "$image" = "jwt-backend:ci" ] || { echo "❌ 沒退回 ci"; exit 1; }
+          kubectl -n $NS rollout history deployment/backend
+          echo "✅ 退版成功，revision 多一筆（undo 也是一次換版）"
+
+      # ---------- 【關卡 23-B】壞版本上不去：image 不存在，新 pod 起不來，舊 pod 繼續服務 ----------
+      # 這就是 readiness + maxUnavailable: 0 的保險：新版起不來，流量永遠不會切過去。rollout status 等 30 秒會逾時（預期）
+      - name: 壞版本被擋住（image 不存在 → 舊 pod 繼續服務 → undo）
+        run: |
+          kubectl -n $NS set image deployment/backend backend=jwt-backend:does-not-exist
+          kubectl -n $NS rollout status deployment/backend --timeout=30s && { echo "❌ 壞版本竟然 rollout 成功"; exit 1; } || echo "rollout 逾時，這是預期的"
+          echo "--- pod 狀態：新的一個 ImagePullBackOff / ErrImagePull，舊的兩個仍 Running ---"
+          kubectl -n $NS get pods -o wide
+          ready=$(kubectl -n $NS get pods -l app=backend --no-headers | grep -c ' 1/1 ' || true)
+          [ "$ready" -ge 2 ] || { echo "❌ 舊 pod 不到兩個 Ready（$ready）"; exit 1; }
+          echo "✅ 兩個舊 pod 仍 Ready（$ready）"
+          kubectl -n $NS run probe2 --image=curlimages/curl:8.12.1 --restart=Never --rm -i -- curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 http://backend/api/ping | tee code.txt
+          grep -q '^200$' code.txt || { echo "❌ 壞版本期間 Service 打不通"; exit 1; }
+          echo "✅ 壞版本期間 Service 照常回 200"
+          kubectl -n $NS rollout undo deployment/backend
+          kubectl -n $NS rollout status deployment/backend --timeout=180s
+          echo "✅ undo 之後恢復，image：$(kubectl -n $NS get deployment/backend -o jsonpath='{.spec.template.spec.containers[0].image}')"
+
+      # 學習用：看 k8s 眼中的狀態。壞掉時先看 describe 的 Events 和 pod 的 log
+      - name: kubectl get / describe / logs
+        if: always()
+        run: |
+          kubectl -n $NS get all
+          echo "--- describe deployment/backend（看 Events）---"
+          kubectl -n $NS describe deployment/backend | tail -n 25
+          echo "--- backend pod 的 log（每個 pod 最後 15 行）---"
+          kubectl -n $NS logs -l app=backend --tail=15 --prefix=true || true
+
+  # ==================================================================
+  # 【關卡 24】messaging：Redpanda + outbox worker + consumer，驗證「註冊 → outbox 表 → worker 送 Kafka → consumer 收到 → 同一筆再送只處理一次」
+  messaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: compose up（--profile messaging 多起 redpanda、worker、consumer）
+        run: docker compose -f infra/compose.yaml --profile messaging up -d --build --wait --wait-timeout 240
+
+      # 註冊一個帳號 → outbox 多一筆 → worker 最多 5 秒內送出 → consumer 收到。用 email 在 log 裡找
+      - name: 註冊 → worker published → consumer consumed
+        run: |
+          email="ci-$(date +%s)@example.com"
+          curl -fsS -X POST http://localhost:8000/api/auth/register -H 'Content-Type: application/json' \
+            -d "{\"email\":\"$email\",\"password\":\"Passw0rd!x\"}" | tee register.json; echo
+          for i in $(seq 1 30); do
+            if docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -q "consumed .*email=$email"; then break; fi
+            sleep 1
+          done
+          echo "--- worker ---"; docker compose -f infra/compose.yaml --profile messaging logs --no-color worker | grep -E "published|Kafka" | tail -n 3
+          echo "--- consumer ---"; docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -E "consumed|開始讀" | tail -n 3
+          docker compose -f infra/compose.yaml --profile messaging logs --no-color worker | grep -q "published .*transport=kafka" || { echo "❌ worker 沒有送到 Kafka"; exit 1; }
+          docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -q "consumed .*email=$email" || { echo "❌ consumer 30 秒內沒收到"; exit 1; }
+          echo "✅ 事件走完：outbox → Kafka → consumer"
+          echo "--- 資料庫裡的 outbox 與 processed ---"
+          docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo -c "SELECT id, topic, published_at IS NOT NULL AS published FROM outboxevent;" -c "SELECT id, topic FROM processedevent;"
+
+      # 冪等：把 Kafka 裡那一筆原封不動再送一次（rpk 讀出來再寫回去），consumer 要認出 duplicate、processedevent 不多一筆
+      - name: 同一筆再送一次 → duplicate
+        run: |
+          docker compose -f infra/compose.yaml --profile messaging exec -T redpanda sh -c \
+            "rpk topic consume user.registered -n 1 -o start -f '%v\\n' --brokers redpanda:9092 | rpk topic produce user.registered --brokers redpanda:9092"
+          for i in $(seq 1 30); do
+            if docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -q "duplicate"; then break; fi
+            sleep 1
+          done
+          docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer | grep -E "duplicate" | tail -n 1 || { echo "❌ consumer 沒認出重複的事件"; exit 1; }
+          count=$(docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo -tAc "SELECT count(*) FROM processedevent;")
+          echo "processedevent 筆數：$count"
+          [ "$count" = "1" ] || { echo "❌ 重複的事件被處理了第二次"; exit 1; }
+          echo "✅ 冪等：同一筆事件只處理一次"
+
+      - name: compose logs
+        if: failure()
+        run: docker compose -f infra/compose.yaml --profile messaging logs --no-color
+
+      - name: compose down
+        if: always()
+        run: docker compose -f infra/compose.yaml --profile messaging down -v

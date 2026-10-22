@@ -1,0 +1,15 @@
+# 【關卡 23】Service：pod 會死會換 IP，Service 給它們一個固定的名字和 IP，流量平均分給 Ready 的 pod
+# 叢集裡其他程式用 http://backend（同 namespace）或 http://backend.jwt-auth-demo 就連得到。
+# 對外（瀏覽器）要再加 Ingress 或 Gateway 做網址與 TLS，這關刻意不做（線上仍是 Render）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -1,0 +1,209 @@
+# 【關卡 21】docker compose：一個檔案把「資料庫 + 後端」整套在本機起來
+#
+# 關卡 9 的 Dockerfile 只描述「後端這一個 image 怎麼做」。真的要跑，還得有 Postgres、要把連線字串塞給後端、
+# 要等資料庫起來後端才能起。這些「誰先誰後、誰連誰、環境變數給什麼」原本散在 CI 的 docker run 指令裡（ci.yml），
+# compose 把它們寫成一個檔案：docker compose up 就是整套。
+#
+# 它和 Kubernetes（關卡 23）描述的是同一件事，只是 compose 管一台機器、k8s 管一群機器。
+# 兩邊的 image 都是 backend/Dockerfile，不另寫第二份（docs/PLAN-INFRA.md 第 2 節第 2 條）。
+#
+# 用法（在 repo 根目錄；要有 Docker，沒有 Docker 的機器就看 CI 的 compose job）：
+#   docker compose -f infra/compose.yaml up -d --build --wait   # 建 image、起 postgres 和 backend、等兩個都 healthy
+#   curl http://localhost:8000/api/health                        # "db": "ok"、"migration": 最新的遷移編號
+#   docker compose -f infra/compose.yaml logs backend            # 看 alembic 遷移和 uvicorn 啟動的 log
+#   docker compose -f infra/compose.yaml down -v                 # 全部關掉並刪掉資料（不加 -v 就保留資料庫）
+#
+# 【關卡 22】多起 Prometheus 和 Grafana（profile：平常 up 不會起它們，要看指標時才加）：
+#   docker compose -f infra/compose.yaml --profile observability up -d --build --wait
+#   http://localhost:9090  Prometheus（Status → Targets 看有沒有抓到 backend）
+#   http://localhost:3000  Grafana（不用登入，儀表板「JWT Auth Demo backend」已經在）
+# 追蹤（22-B）要多給一個環境變數，後端才會把 span 送到 collector；沒給就不追蹤：
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose -f infra/compose.yaml --profile observability up -d --build --wait
+#   docker compose -f infra/compose.yaml --profile observability logs otel-collector   # 看每個請求的 span 與底下的 SQL
+#
+# 【關卡 24】訊息（profile messaging）：多起 Redpanda（Kafka 相容）、outbox worker、consumer：
+#   docker compose -f infra/compose.yaml --profile messaging up -d --build --wait
+#   註冊一個帳號之後：docker compose -f infra/compose.yaml --profile messaging logs worker consumer   # published → consumed
+#
+# 這裡的 postgres 只給本機和 CI 用。線上的資料庫是 Neon，不在 compose 裡。
+
+name: jwt-auth-demo
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: jwtdemo
+    # 只綁 127.0.0.1：本機的 psql 連得到，同一個網路的其他機器連不到。本機已經有 Postgres 占著 5432 的話改左邊的數字
+    ports:
+      - "127.0.0.1:5432:5432"
+    # healthcheck 讓下面 depends_on 的 condition: service_healthy 有意義：
+    # 「資料庫真的能接受連線」才算好，不是「container 起來了」就算（對照 ci.yml 的 services.postgres.options）
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jwtdemo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # 資料放在具名 volume：down 之後資料還在，下次 up 不用重新註冊；down -v 才會清掉
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    # 同一個 Dockerfile，和 CI、Render 用的一模一樣；context 相對於這個檔案所在的資料夾。
+    # image 取名是為了 worker、consumer 共用同一個 image，不用各 build 一次
+    image: jwt-auth-demo-backend:local
+    build:
+      context: ../backend
+    environment:
+      # 主機名稱 postgres 就是上面那個服務的名字：compose 會建一個內部網路，服務之間用服務名互相找，
+      # 不是 localhost（localhost 在 container 裡是它自己）
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo
+      # 只給本機用的假密鑰；要換就在 shell 先 export JWT_SECRET 再 up。config.py 要求至少 32 字元
+      JWT_SECRET: ${JWT_SECRET:-compose-only-secret-not-for-production-0123456789abcdef}
+      # Dockerfile 的 CMD 會讀 PORT，和 Render 注入 PORT 是同一個機制
+      PORT: "8000"
+      # 【關卡 22】開 /metrics 給 Prometheus 抓（backend/metrics.py）。線上不設，Vercel 也不會轉發 /metrics
+      METRICS_ENABLED: "true"
+      # 【關卡 22】追蹤要送去哪。預設空字串 = 不追蹤；要追蹤就在 shell 先設這個變數再 up（見檔案開頭）。
+      # 同一個 image 靠環境變數決定要不要送、送去哪，換成 Grafana Cloud 也是只改這裡
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    ports:
+      - "8000:8000"
+    # 等 postgres 的 healthcheck 過了才起 backend，不然啟動時的 alembic upgrade 會因為連不到資料庫而退出
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # backend 自己的 healthcheck：打 /api/ping。image 是 slim，沒有 curl，用 Python 內建的 urllib（失敗會丟例外 → 非 0 退出）
+    # start_period：啟動要先跑 alembic upgrade，這段時間內的失敗不算數
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ping', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ---------- 【關卡 22】可觀測性：只在 --profile observability 時啟動 ----------
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    profiles: ["observability"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      backend:
+        condition: service_healthy
+    # image 是 busybox 做的，有 wget 沒有 curl；/-/healthy 是 Prometheus 自己的 liveness
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 【關卡 22】收 span 的中繼站；設定在 otel/collector.yaml（只印到 log）。image 是 distroless，沒有 shell 所以沒 healthcheck
+  otel-collector:
+    image: otel/opentelemetry-collector:0.163.2
+    profiles: ["observability"]
+    volumes:
+      - ./otel/collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:4318:4318"
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    profiles: ["observability"]
+    environment:
+      # 本機學習用：不用登入、直接是管理員。正式環境絕對不要這樣（要帳號密碼或 SSO）
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      # provisioning：資料來源與儀表板都從檔案載入（grafana/provisioning/、grafana/dashboards/）
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ---------- 【關卡 24】訊息：只在 --profile messaging 時啟動 ----------
+  # Redpanda：Kafka 相容的 broker，一個 binary、不用 ZooKeeper，本機學習最省事；程式碼和真的 Kafka 一樣用 aiokafka
+  redpanda:
+    image: redpandadata/redpanda:v26.2.5
+    profiles: ["messaging"]
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container # 開發模式：單機、資源少、不做正式環境的調校
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --kafka-addr
+      - internal://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092 # 告訴客戶端「用這個名字連我」，compose 內部網路用服務名
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # topic 當成設定建好（正式環境也是這樣：topic 的 partition 數、保留時間是基礎設施的一部分，不靠程式偷偷自動建）
+  redpanda-init:
+    image: redpandadata/redpanda:v26.2.5
+    profiles: ["messaging"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command:
+      - rpk topic create user.registered --brokers redpanda:9092 || rpk topic describe user.registered --brokers redpanda:9092
+
+  # worker：同一個 image，跑 python worker.py。等後端 healthy 是因為遷移在後端啟動時跑，表要先有
+  worker:
+    image: jwt-auth-demo-backend:local
+    build:
+      context: ../backend
+    profiles: ["messaging"]
+    command: ["python", "worker.py"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo
+      JWT_SECRET: ${JWT_SECRET:-compose-only-secret-not-for-production-0123456789abcdef}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      backend:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+
+  # consumer：收事件、做事（這裡只記 log）、同一筆只做一次
+  consumer:
+    image: jwt-auth-demo-backend:local
+    build:
+      context: ../backend
+    profiles: ["messaging"]
+    command: ["python", "consumer.py"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/jwtdemo
+      JWT_SECRET: ${JWT_SECRET:-compose-only-secret-not-for-production-0123456789abcdef}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      backend:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
