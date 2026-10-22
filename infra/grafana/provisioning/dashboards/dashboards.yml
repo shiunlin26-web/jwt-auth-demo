@@ -1,0 +1,10 @@
+# 【關卡 22】Grafana 的儀表板從哪裡載入：infra/grafana/dashboards/ 裡的每個 .json 都會自動出現
+# 儀表板進 git 的好處：改了看得到 diff、別的專案可以直接複製、重開 container 不會不見
+apiVersion: 1
+providers:
+  - name: jwt-auth-demo
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false # 畫面上改了存不回檔案，所以不讓存；要改就改 json
+    options:
+      path: /var/lib/grafana/dashboards

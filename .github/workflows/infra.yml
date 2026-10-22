@@ -106,3 +106,58 @@ jobs:
       - name: compose down
         if: always()
         run: docker compose -f infra/compose.yaml down -v
+
+  # ==================================================================
+  # 【關卡 22】observability：多起 Prometheus 與 Grafana，製造流量，驗證「程式 → /metrics → Prometheus → Grafana」整條都通
+  observability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: compose up（--profile observability 多起 prometheus 與 grafana）
+        run: docker compose -f infra/compose.yaml --profile observability up -d --build --wait --wait-timeout 180
+
+      # 打十次 /api/ping 和一次亂打的路徑，然後直接看 /metrics 的原始文字：這就是 Prometheus 每 5 秒抓的東西
+      - name: 製造流量，看 /metrics
+        run: |
+          for i in $(seq 1 10); do curl -fsS http://localhost:8000/api/ping > /dev/null; done
+          curl -s -o /dev/null http://localhost:8000/no-such-path
+          echo "--- /metrics 裡和 /api/ping、unmatched 有關的行 ---"
+          curl -fsS http://localhost:8000/metrics | grep -E 'route="(/api/ping|unmatched)"'
+
+      # Prometheus 的查詢 API：和 Grafana 畫圖用的是同一個 API。scrape_interval 是 5 秒，最多等 30 秒
+      - name: Prometheus 抓到了嗎
+        run: |
+          for i in $(seq 1 30); do
+            value=$(curl -fsS http://localhost:9090/api/v1/query --data-urlencode 'query=sum(http_requests_total{route="/api/ping"})' | jq -r '.data.result[0].value[1] // empty')
+            if [ -n "$value" ] && [ "$value" != "0" ]; then
+              echo "✅ Prometheus：sum(http_requests_total{route=\"/api/ping\"}) = $value"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "❌ Prometheus 30 秒內沒抓到 /api/ping 的指標；targets 狀態："
+          curl -s http://localhost:9090/api/v1/targets | jq .
+          exit 1
+
+      # Grafana：健康、儀表板有被 provisioning 載入、透過它查 Prometheus 查得到數字（代表資料來源接對了）
+      - name: Grafana 的儀表板與資料來源
+        run: |
+          curl -fsS http://localhost:3000/api/health | tee health.json; echo
+          jq -e '.database == "ok"' health.json > /dev/null
+          title=$(curl -fsS http://localhost:3000/api/dashboards/uid/jwt-backend | jq -r '.dashboard.title')
+          echo "儀表板：$title"
+          [ "$title" = "JWT Auth Demo backend" ] || { echo "❌ 儀表板沒被載入（看 grafana 的 log）"; exit 1; }
+          value=$(curl -fsS -X POST http://localhost:3000/api/ds/query -H 'Content-Type: application/json' \
+            -d '{"from":"now-5m","to":"now","queries":[{"refId":"A","datasource":{"uid":"prometheus"},"expr":"sum(http_requests_total)","instant":true}]}' \
+            | jq -r '.results.A.frames[0].data.values[1][0]')
+          echo "✅ Grafana → Prometheus：sum(http_requests_total) = $value"
+          [ -n "$value" ] && [ "$value" != "null" ]
+
+      - name: compose logs
+        if: failure()
+        run: docker compose -f infra/compose.yaml --profile observability logs --no-color
+
+      - name: compose down
+        if: always()
+        run: docker compose -f infra/compose.yaml --profile observability down -v

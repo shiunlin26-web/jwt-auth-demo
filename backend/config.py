@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     # 是否開放除錯用的端點（例如故意丟例外測 Sentry）。正式環境平常關閉，要演練時再暫時打開
     enable_debug_endpoints: bool = False
 
+    # ---- 【關卡 22】可觀測性 ----
+    # 是否開放 /metrics 給 Prometheus 抓。預設關；compose 裡打開（infra/compose.yaml）。
+    # /metrics 不在 /api 底下，Vercel 不會轉發，線上就算打開外面也打不到
+    metrics_enabled: bool = False
+
     # 【關卡 17】登入與註冊的頻率限制（slowapi 的格式："10/minute"、"100/hour"）
     rate_limit_enabled: bool = True
     auth_rate_limit: str = "10/minute"

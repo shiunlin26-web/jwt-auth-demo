@@ -13,6 +13,11 @@
 #   docker compose -f infra/compose.yaml logs backend            # 看 alembic 遷移和 uvicorn 啟動的 log
 #   docker compose -f infra/compose.yaml down -v                 # 全部關掉並刪掉資料（不加 -v 就保留資料庫）
 #
+# 【關卡 22】多起 Prometheus 和 Grafana（profile：平常 up 不會起它們，要看指標時才加）：
+#   docker compose -f infra/compose.yaml --profile observability up -d --build --wait
+#   http://localhost:9090  Prometheus（Status → Targets 看有沒有抓到 backend）
+#   http://localhost:3000  Grafana（不用登入，儀表板「JWT Auth Demo backend」已經在）
+#
 # 這裡的 postgres 只給本機和 CI 用。線上的資料庫是 Neon，不在 compose 裡。
 
 name: jwt-auth-demo
@@ -50,6 +55,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-compose-only-secret-not-for-production-0123456789abcdef}
       # Dockerfile 的 CMD 會讀 PORT，和 Render 注入 PORT 是同一個機制
       PORT: "8000"
+      # 【關卡 22】開 /metrics 給 Prometheus 抓（backend/metrics.py）。線上不設，Vercel 也不會轉發 /metrics
+      METRICS_ENABLED: "true"
     ports:
       - "8000:8000"
     # 等 postgres 的 healthcheck 過了才起 backend，不然啟動時的 alembic upgrade 會因為連不到資料庫而退出
@@ -64,6 +71,48 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+  # ---------- 【關卡 22】可觀測性：只在 --profile observability 時啟動 ----------
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    profiles: ["observability"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      backend:
+        condition: service_healthy
+    # image 是 busybox 做的，有 wget 沒有 curl；/-/healthy 是 Prometheus 自己的 liveness
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana:13.2.4
+    profiles: ["observability"]
+    environment:
+      # 本機學習用：不用登入、直接是管理員。正式環境絕對不要這樣（要帳號密碼或 SSO）
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      # provisioning：資料來源與儀表板都從檔案載入（grafana/provisioning/、grafana/dashboards/）
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
 volumes:
   pgdata:
