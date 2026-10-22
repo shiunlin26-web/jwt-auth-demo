@@ -66,7 +66,7 @@
 
 ### 關卡 0：密碼規則
 
-**搭配看的程式**：`backend/schemas.py` 第 10～45 行（`PRINTABLE_ASCII`、`check_password_chars`、`UserCreate`、`UserLogin`）；`backend/routes/auth.py` 第 78～113 行（`register`）；`backend/security.py` 的 `hash_password`、`verify_password`；`frontend/src/schemas/auth.ts` 的 `passwordSchema`
+**搭配看的程式**：`backend/schemas.py` 第 10～45 行（`PRINTABLE_ASCII`、`check_password_chars`、`UserCreate`、`UserLogin`）；`backend/routes/auth.py` 第 79～119 行（`register`；關卡 24 在裡面多了 flush 與 outbox 那幾行）；`backend/security.py` 的 `hash_password`、`verify_password`；`frontend/src/schemas/auth.ts` 的 `passwordSchema`
 
 **前置**：後端跑起來。
 

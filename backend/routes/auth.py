@@ -10,6 +10,7 @@ from config import settings
 from database import get_session
 from dependencies import get_current_user
 from models import RefreshToken, User
+from outbox import enqueue
 from rate_limit import limiter
 from schemas import ChangePasswordRequest, Token, UserCreate, UserLogin, UserRead
 from security import (
@@ -99,6 +100,11 @@ async def register(
     )
     session.add(user)
     try:
+        # flush：先把 INSERT 送到資料庫拿到 user.id，但還不 commit；email 重複的 IntegrityError 也在這裡發生
+        await session.flush()
+        # 【關卡 24】「有人註冊了」這個事件和使用者寫進同一個交易（outbox.py）：
+        # commit 成功兩個都在，失敗兩個都不在。寄信、統計之類的事交給 worker，不在這個請求裡做
+        enqueue(session, "user.registered", {"user_id": user.id, "email": user.email})
         await session.commit()
     except IntegrityError:
         # 【關卡 13】競態（race condition）：上面查過「不存在」，但在 commit 前另一個請求剛好註冊了同一個 email。
