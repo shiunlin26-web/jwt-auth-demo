@@ -568,3 +568,48 @@
 
 **收尾**（你看到的 → 對應的觀念）：`1/1 Running` 兩個 → Deployment 保證 N 個副本 / Job `Completed` → 遷移跑一次不放啟動指令 / `80 200` → maxUnavailable 0 + readiness + preStop = 零停機 / `rolled back` → 退版是換回上一個 ReplicaSet / `ErrImagePull` 但 Service 回 200 → 流量只到 Ready 的 pod / Secret 用指令建 → 密鑰不進 git / `kind delete` → 叢集是可拋棄的，清單在 git。收尾後問「哪一步要再講一次」。
 **動手玩**：`LEARNING.md` 關卡 23 的 1（刪一個 pod）、3（殺掉程式）、5（唯讀檔案系統）。
+
+### 關卡 24：非同步訊息（transactional outbox → Kafka、冪等）
+
+**搭配看的程式**：`backend/outbox.py`（開頭的註解就是講義；順序：`enqueue` → `publish_pending` → `run_worker` → `handle_event` → `run_consumer`）；`backend/routes/auth.py` 第 97～129 行（上限檢查、`flush` → `enqueue` → `commit` → `wake_worker`）；`backend/models.py` 的 `OutboxEvent`、`ProcessedEvent`；`backend/main.py` 的 `lifespan`（inline 模式）；`backend/worker.py`、`consumer.py`；`infra/compose.yaml` 的 messaging profile 四個服務；`.github/workflows/infra.yml` 的 `messaging` job；`render.yaml` 的三個新變數
+
+**前置**：三條路線，預期值一樣。**Mac 路線**同關卡 21（Docker）。**本機路線（不用 Docker，Windows 也行）**：關卡 0 的本機後端跑得起來就夠，看的是「沒有 Kafka 時事件印到 log」那一段，Redpanda 的部分看 CI。**VM 路線**看 Actions。指令都在 repo 根目錄下。
+
+**Mac 路線**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `docker compose -f infra/compose.yaml --profile messaging up -d --build --wait` | `Container jwt-auth-demo-redpanda-init-1  Exited`、其餘五個 `Healthy`（postgres、redpanda、backend、worker、consumer） | 多起四個：Redpanda（Kafka 相容的 broker，一個 binary）、redpanda-init（建 topic 後就結束，所以是 Exited 不是 Healthy）、worker、consumer。worker 和 consumer 用的是**同一個 backend image**，只是 command 換成 `python worker.py`／`python consumer.py` |
+| 2 | `docker compose -f infra/compose.yaml --profile messaging logs --no-color worker consumer \| grep -E "Kafka\|開始讀"` | `worker-1 … outbox worker：送到 Kafka  brokers=redpanda:9092`、`consumer-1 … outbox consumer：開始讀  topics=['user.registered']` | 兩邊都是靠 `KAFKA_BOOTSTRAP_SERVERS` 知道 broker 在哪；沒設這個變數 worker 就只印 log（本機路線會看到） |
+| 3 | `email="m24-$(date +%s)@example.com"; curl -s -X POST localhost:8000/api/auth/register -H 'Content-Type: application/json' -d "{\"email\":\"$email\",\"password\":\"Passw0rd!x\"}"` | `{"id":1,"email":"m24-…@example.com","created_at":"…","last_login_at":null}` | 註冊和以前一樣快、一樣的回應。寄信那類的事不在這個請求裡，請求只多做一件事：在同一個交易裡多 INSERT 一筆 outbox |
+| 4 | `docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo -c "SELECT id, topic, published_at IS NOT NULL AS published FROM outboxevent;"` | 一列：uuid、`user.registered`、`t`（最多 5 秒內從 `f` 變 `t`；太快查可能看到 `f`） | 這就是 outbox 表。`published_at` 是 worker 送完才填的；worker 每 5 秒撿一次 `published_at IS NULL` 的 |
+| 5 | `docker compose -f infra/compose.yaml --profile messaging logs --no-color worker \| grep published` | `published  event_id=<uuid> topic=user.registered transport=kafka` | uuid 和步驟 4 的 id 一樣。`transport=kafka` 代表真的送進 Redpanda 了（`acks="all"`：所有副本寫到才算成功） |
+| 6 | `docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer \| grep consumed` | `consumed  event_id=<同一個 uuid> topic=user.registered email=<步驟 3 的 email>` | consumer 從 topic 讀到、交給 `handle_event`：先 INSERT `processedevent`（主鍵 = 事件 id）、做事（這裡只記 log）、commit、才 commit offset |
+| 7 | `docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo -c "SELECT id, topic FROM processedevent;"` | 一列，同一個 uuid | 「處理過」的證據在資料庫，不在記憶體：consumer 重啟也記得 |
+| 8 | `docker compose -f infra/compose.yaml --profile messaging exec -T redpanda sh -c "rpk topic consume user.registered -n 1 -o start -f '%v\n' --brokers redpanda:9092 \| rpk topic produce user.registered --brokers redpanda:9092"` | `Produced to partition 0 at offset 1 with timestamp …` | 把 topic 裡那一筆原封不動再送一次：模擬「送出去了、標記前當掉、重啟再送」的 at-least-once |
+| 9 | `sleep 3; docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer \| grep duplicate; docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo -tAc "SELECT count(*) FROM processedevent;"` | `duplicate  event_id=<同一個 uuid> topic=user.registered`、`1` | 第二次 INSERT 撞主鍵 → 回滾 → 記 `duplicate` → 不做事。這就是冪等：同一筆來幾次都只做一次。和註冊的 email unique 索引是同一招（關卡 13） |
+| 10 | `docker compose -f infra/compose.yaml --profile messaging stop consumer; curl -s -X POST localhost:8000/api/auth/register -H 'Content-Type: application/json' -d "{\"email\":\"m24b-$(date +%s)@example.com\",\"password\":\"Passw0rd!x\"}" > /dev/null; sleep 6; docker compose -f infra/compose.yaml --profile messaging logs --no-color worker \| grep -c published` | `2` | consumer 掛了，註冊照常成功、worker 照常送到 Kafka。訊息在 topic 裡等著，不會丟 |
+| 11 | `docker compose -f infra/compose.yaml --profile messaging start consumer; sleep 5; docker compose -f infra/compose.yaml --profile messaging logs --no-color consumer \| grep -c consumed` | `2` | consumer 回來從上次 commit 的 offset 繼續讀，把剛才那筆補上。「寫的人不用等讀的人、讀的人掛了訊息還在」就是這個 |
+| 12 | `docker compose -f infra/compose.yaml --profile messaging down -v` | `Removed` 幾行 | 關的時候也要帶 `--profile` |
+
+**本機路線（不用 Docker；Mac、Windows 都行）**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `backend/.env` 加一行 `OUTBOX_WORKER=inline`；在 `backend/` 跑 `uv run uvicorn main:app --reload --port 8000` | 啟動 log 多兩行：`outbox worker 在 web 程序裡當背景 task 跑`、`outbox worker：沒設 KAFKA_BOOTSTRAP_SERVERS，事件只印到 log` | 這就是線上 Render 的模式（`render.yaml`）：免費方案開不了第二個服務，worker 在 web 程序裡當背景 task；沒有 Kafka，事件印到 log |
+| 2 | 另一個終端機註冊一個新 email（關卡 0 的 curl 或前端畫面） | 回 201；後端的終端機 1 秒內多一行 `published  event_id=<uuid> topic=user.registered transport=log` | 不用等 5 秒：註冊 commit 之後按了鈴（`wake_worker`），worker 立刻醒。`transport=log` 是 LogPublisher，換成 Kafka 只差一個環境變數 |
+| 3 | Neon SQL Editor（`DATABASE_URL` 那個資料庫）：`SELECT id, topic, published_at FROM outboxevent ORDER BY created_at DESC LIMIT 3;` | 最新一列的 `published_at` 有時間 | outbox 在線上資料庫裡也有這張表（遷移 0005）；`processedevent`（0006）線上是空的，因為線上沒有 consumer |
+| 4 | Render → Logs 搜 `published` | 線上每一次註冊一行 `published`（JSON 格式，`transport: log`） | 同一支程式、同一個模式，線上也看得到整條路的前半段。後半段（Kafka、consumer）看 CI |
+| 5 | 把 `.env` 的那行拿掉 | — | 本機平常不用開 |
+
+**VM 路線**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | GitHub → Actions → **Infra** → 最新的 run → `messaging` job | 三步全綠，約 1 分鐘 | 五個 job 裡最快的一個：Redpanda 幾秒就起來 |
+| 2 | 展開「compose up」 | `redpanda-init-1  Exited`、五個 `Healthy` | 同 Mac 步驟 1 |
+| 3 | 展開「註冊 → worker published → consumer consumed」 | 註冊的 JSON；`worker-1 … published  event_id=… transport=kafka`；`consumer-1 … consumed  event_id=… email=ci-…@example.com`；`✅ 事件走完：outbox → Kafka → consumer`；兩張表各一列、`published` 是 `t` | 同 Mac 步驟 3～7。三個 uuid 都一樣：outbox 的 id = Kafka 訊息的 key = processedevent 的主鍵 |
+| 4 | 展開「同一筆再送一次 → duplicate」 | `Produced to partition 0 at offset 1`、`consumer-1 … duplicate  event_id=…`、`processedevent 筆數：1`、`✅ 冪等：同一筆事件只處理一次` | 同 Mac 步驟 8～9 |
+
+**收尾**（你看到的 → 對應的觀念）：註冊回應沒變慢 → 慢的事不在請求裡 / outbox 表一列、`published` 從 f 變 t → 事件和使用者同一個交易，送出是另一件事 / 三個一樣的 uuid → 事件 id 貫穿整條路 / `duplicate` 且筆數還是 1 → at-least-once + 冪等 / consumer 停了再回來補上 → 訊息在 broker 裡等，讀寫解耦 / `transport=log` → 沒有 Kafka 也走得通，差一個環境變數。收尾後問「哪一步要再講一次」。
+**動手玩**：`LEARNING.md` 關卡 24 的 1（把 enqueue 搬到 commit 之後）、3（worker 開兩個）。
