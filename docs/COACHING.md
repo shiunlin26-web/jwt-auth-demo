@@ -489,3 +489,38 @@
 
 **收尾**（你看到的 → 對應的觀念）：`--wait` 等 healthy → 「起來了」和「能服務了」不一樣，和關卡 11 的 ping / health 同一件事 / 服務名當主機名 → compose 的內部網路 / `down -v` → 資料在 volume 不在容器 / `3 passed` → 真瀏覽器驗的是 cookie 真的帶上，元件測試驗的是畫面對不對 / artifact → CI 把證據留下來。收尾後問「哪一步要再講一次」。
 **動手玩**：`LEARNING.md` 關卡 21 的 1（把 service_healthy 改成 service_started）、3（改錯一個預期值看報告）。
+
+### 關卡 22：指標（Prometheus + Grafana）與追蹤（OpenTelemetry）
+
+**搭配看的程式**：`backend/metrics.py`、`backend/tracing.py`（兩個檔案開頭的註解就是講義）；`backend/main.py` 第 141～152 行（log 帶 trace_id、掛上兩者）；`infra/prometheus/prometheus.yml`；`infra/grafana/provisioning/` 兩個檔、`infra/grafana/dashboards/backend.json`（只看每個 panel 的 `title` 和 `expr`）；`infra/otel/collector.yaml`；`infra/compose.yaml` 的 observability profile 三個服務；`.github/workflows/infra.yml` 的 `observability` job
+
+**前置**：同關卡 21（Docker、`doctor.sh` 說關卡 22 可以）；關卡 21 的 compose 跑過一次（image 已經 build）。指令都在 repo 根目錄下。
+
+**Mac 路線**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 docker compose -f infra/compose.yaml --profile observability up -d --build --wait` | 五行 `Healthy`：postgres、backend、prometheus、otel-collector、grafana | `--profile` 才多起後面三個，平常 `up` 不會（關卡 21 看到的只有兩個）。指令最前面那個環境變數只給這一條指令用，compose 把它轉給 backend；沒給就不追蹤，開關預設關，和線上一樣 |
+| 2 | `for i in $(seq 1 10); do curl -s localhost:8000/api/ping > /dev/null; done; curl -s localhost:8000/metrics \| grep '^http_requests_total'` | `http_requests_total{method="GET",route="/api/ping",status="200"} 1X.0`（X 不固定） | 這就是 Prometheus 每 5 秒抓的東西：純文字、一行一個數字、大括號裡是 label。比 10 大是因為 backend 的 healthcheck 每 5 秒也打一次 ping。`/metrics` 不在 `/api` 底下，所以線上就算打開 Vercel 也轉發不到 |
+| 3 | `curl -s -o /dev/null localhost:8000/no-such-path; curl -s localhost:8000/metrics \| grep 'route="unmatched"' \| head -1` | `http_requests_total{method="GET",route="unmatched",status="404"} 1.0` | 亂打的路徑不會變成新的 label 值，一律記 `unmatched`。問他：如果 route 用實際路徑，`/todos/1`、`/todos/2`…會發生什麼？（每個 id 一條時間序列，撐爆 Prometheus：cardinality 爆炸） |
+| 4 | 瀏覽器開 `http://localhost:9090/targets` | 一列 `backend`，Endpoint `http://backend:8000/metrics`，State **UP** | Prometheus 是「拉」的：它去抓，程式不知道它在哪。目標寫的是 compose 的服務名，和 `DATABASE_URL` 裡的 `postgres` 同一個道理 |
+| 5 | 同頁上方 Query，輸入 `sum by (route) (rate(http_requests_total[1m]))`，Execute、看 Table | 一列 `{route="/api/ping"}`，值大約 0.2～0.5 | `rate` 把「只增不減的總數」變成「每秒幾筆」；Grafana 第一張圖就是這一句。數字小是因為最近一分鐘只有 healthcheck 在打 |
+| 6 | 瀏覽器開 `http://localhost:3000` → Dashboards → **JWT Auth Demo backend** | 五個面板：每秒請求數（依路由）、p95 耗時、5xx 比例（5 分鐘）、請求總數（依狀態碼）、目前版本 `dev` | 不用登入是 compose 設的匿名管理員，正式環境絕對不這樣。儀表板不是點出來的，是 `infra/grafana/dashboards/backend.json` 被 provisioning 載入的：進 git、有 diff、別的專案直接複製；畫面上改了存不回去（`allowUiUpdates: false`） |
+| 7 | `curl -s -D - -o /dev/null localhost:8000/api/health \| grep -i x-request-id` | `x-request-id: ` 後面 12 個十六進位字（每次不同） | 關卡 11 的 request id。記下來，等一下在 trace 裡找它 |
+| 8 | `sleep 8; docker compose -f infra/compose.yaml --profile observability logs --no-color otel-collector > /tmp/collector.log; grep 'Name  ' /tmp/collector.log \| sort \| uniq -c` | 幾行：`Name : GET /api/health`、`GET /api/health http receive`、`GET /api/health http send`、`SELECT` 至少 2 筆 | 等 8 秒是因為 span 先攢著、每 5 秒一批送（BatchSpanProcessor）。一個請求一棵樹：HTTP 的 span 在最外層，`SELECT` 是它的子 span（health 查了 `SELECT 1` 和 `alembic_version` 兩句）；`http receive`／`http send` 是 ASGI 層收送的細節。`/api/ping` 和 `/metrics` 刻意不追蹤（`excluded_urls`），不然每 5 秒一棵樹全是噪音 |
+| 9 | `grep -B 30 'x_request_id' /tmp/collector.log \| grep -E 'Trace ID\|Name\|Kind\|http.route\|x_request_id'` | `Trace ID : <32 個十六進位字>`、`Name : GET /api/health`、`Kind : Server`、`http.route: Str(/api/health)`、`http.response.header.x_request_id: Slice(["<步驟 7 的 id>"])` | span 帶著回應的 X-Request-ID：使用者回報「我的 request id 是 ○○」，就能在追蹤系統裡搜到那棵樹。Trace ID 記下來 |
+| 10 | `docker compose -f infra/compose.yaml --profile observability logs --no-color backend \| grep 'path=/api/health' \| tail -1` | `request_id=<步驟 7 的 id> method=GET path=/api/health status=200 duration_ms=… trace_id=<步驟 9 的 Trace ID>` | 同一個 id 兩邊都有：從 log 的一行找到 trace，從 trace 找回 log。這就是「三種訊號要能互相找」 |
+| 11 | `docker compose -f infra/compose.yaml --profile observability down -v` | `Removed` 幾行 | 關的時候也要帶 `--profile`，不然那三個不會被關掉 |
+
+**VM 路線**
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | GitHub → Actions → **Infra** → 最新的 run → `observability` job | 五步全綠 | 這個 job 的 `env` 給了 `OTEL_EXPORTER_OTLP_ENDPOINT`，所以它同時驗指標和追蹤 |
+| 2 | 展開「製造流量，看 /metrics」 | `http_requests_total{method="GET",route="/api/ping",status="200"} 13.0`、`...route="unmatched",status="404"} 1.0` | 同 Mac 步驟 2、3。13 = 10 次 curl + healthcheck 打的 3 次 |
+| 3 | 展開「Prometheus 抓到了嗎」 | `✅ Prometheus：sum(http_requests_total{route="/api/ping"}) = 3` | 比上一步的 13 小是正常的：Prometheus 每 5 秒抓一次，上一次抓的時候 10 次 curl 還沒打。這就是「指標是取樣，不是逐筆」 |
+| 4 | 展開「Grafana 的儀表板與資料來源」 | `"database": "ok"`、`儀表板：JWT Auth Demo backend`、`✅ Grafana → Prometheus：sum(http_requests_total) = 3` | 三件事：Grafana 活著、儀表板從 json 載入了、透過 Grafana 查 Prometheus 查得到（資料來源接對了）。同 Mac 步驟 4～6 |
+| 5 | 展開「追蹤：collector 收到 span、log 帶 trace_id」 | `x-request-id: …`、`✅ collector 收到 HTTP 的 span：` + `Name : GET /api/health…`、`✅ 底下有 SQL 的子 span：` + 兩行 `Name : SELECT`、`✅ span 帶 request id：` + `x_request_id: Slice([…])`、最後一行 backend 的 log 有 `trace_id=` | 同 Mac 步驟 7～10，一步做完 |
+
+**收尾**（你看到的 → 對應的觀念）：`/metrics` 的文字 → 指標是程式自己累計、Prometheus 來拉 / `unmatched` → label 的值要有限（cardinality） / `rate` → 計數器要除以時間才有意義 / 儀表板從 json 來 → 設定進 git，和 render.yaml、k8s 清單同一個概念 / 一棵樹 → 追蹤回答「時間花在哪」 / 同一個 trace_id 在 log 和 span → 三種訊號互相找。收尾後問「哪一步要再講一次」。
+**動手玩**：`LEARNING.md` 關卡 22 的 1（label 爆炸）、4（collector 掛了請求還好嗎）。選配的 Grafana Cloud（關卡 22「⚠️ 開始前」第二段）學習者自己做，AI 不替他開帳號。

@@ -152,6 +152,13 @@
 **為什麼重要**：這張清單就是關卡 23 Kubernetes 清單的縮小版；E2E 是關卡 16 元件測試補不到的那一段：cookie 在真瀏覽器裡到底帶不帶。
 **動手**：Mac 上 `docker compose up`、`npm run test:e2e`；沒有 Docker 的機器看 CI 的 `compose`、`e2e` 兩個 job。
 
+## 關卡 22：指標與追蹤
+
+**情境**：關卡 11 給店裡裝了日誌（每筆交易一行）和警報器（Sentry）。但老闆問「這小時平均多快？錯誤率多少？」得翻幾萬行日誌加總；問「這筆 120 毫秒花在哪？」日誌只說「總共 120」。
+**做了什麼**：兩樣新東西。**指標**：程式自己數「幾筆請求、多快、幾筆錯」，Prometheus 每 5 秒來抄一次數字，Grafana 畫成圖，圖的設定檔也進 git。**追蹤**：把一個請求畫成一棵樹，最外層是 HTTP，底下是它做的每一句 SQL，各自花多久；日誌裡多一個 trace_id，兩邊互相找得到。
+**為什麼重要**：三種訊號各管一件事：日誌找單一請求、指標看趨勢與告警、追蹤看一個請求走了哪幾站。而且用的是 OpenTelemetry 標準：送到本機的 collector、Grafana Cloud、Datadog 都只改環境變數，程式不動。
+**動手**：Mac 上 `--profile observability` 起來看 localhost:3000 的儀表板和 collector 的 log；沒 Docker 看 CI 的 `observability` job。選配：把 Render 的 trace 送到 Grafana Cloud 免費方案。
+
 ---
 
 ## 整個專案一句話
