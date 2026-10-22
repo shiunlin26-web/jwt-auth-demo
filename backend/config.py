@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     # 【關卡 24-C】worker 怎麼跑：off = 不在 web 程序裡跑（compose、k8s 用獨立的 worker 服務）；
     # inline = 在 web 程序裡當背景 task 跑（Render 免費方案開不了第二個服務，render.yaml 設這個）
     outbox_worker: Literal["off", "inline"] = "off"
+    # 【關卡 24-C】示範站的帳號數上限：到了註冊回 503，沒設就不限制。公開的示範站怕人灌帳號把免費方案的儲存用光
+    max_users: int | None = None
 
     # 【關卡 17】登入與註冊的頻率限制（slowapi 的格式："10/minute"、"100/hour"）
     rate_limit_enabled: bool = True
