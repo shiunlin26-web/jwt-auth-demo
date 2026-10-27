@@ -93,13 +93,54 @@ uv run alembic upgrade head   # 再升回去
 
 ## 6. 備份與還原
 
-- **Neon 有內建還原**：專案 → Restore（或 Branches → 從某個時間點建分支）。免費方案可回溯的時間有限，請在 Neon 後台確認目前的額度。
-- **手動備份**（有裝 psql 的電腦）：
-  ```bash
-  pg_dump "postgresql://user:pass@host/db?sslmode=require" > backup-$(date +%F).sql
-  ```
-  連線字串用 Neon 原本的格式（`postgresql://`、`sslmode=require`），不是 asyncpg 格式。
-- **刪資料前先備份**。這個專案的 `user` 表就是全部的資產。
+原則只有一條：**刪資料前先備份**。這個專案的 `user` 表就是全部的資產。下面是一次半小時的演練（第一次重帶到關卡 11 時做；之後每次要做危險操作前，把第 1～2 步當備份用）。
+
+**名詞先講**
+
+- **還原窗（restore window）**：Neon 把每一筆改動的歷史留著，這段時間內的任何一刻都能回去。免費方案是 **6 小時**（2026-10 的額度，變動以 <https://neon.com/docs/introduction/plans> 為準）。超過 6 小時的錯誤，免費方案救不回來，所以「發現得早」比什麼都重要。
+- **分支（branch）**：Neon 的資料庫可以像 git 一樣開分支，是整個資料庫的複本，開了不用錢（免費方案最多 10 個）。「從歷史還原」做的事就是：在你指定的那一刻開一個新分支、把連線切到它、名字換回 `main`，舊的那份改名留著。**連線字串不變，Render 不用重設**，過程中斷線幾秒。
+- **快照（snapshot）**：手動拍一張的備份，免費方案 1 張。要做危險操作前先拍。
+- **`pg_dump`**：把整個資料庫倒成一個 `.sql` 檔的工具，和平台無關，是「我自己手上有一份」的備份。
+
+### 6.1 演練（任何電腦，只要能開瀏覽器，不用裝東西）
+
+| # | 做什麼 | 預期 | 講什麼 |
+| --- | --- | --- | --- |
+| 1 | 線上網站註冊一個演練帳號 `drill@example.com`，登入成功後登出 | 看得到「登入成功」 | 這就是等一下要「不小心刪掉」的資料 |
+| 2 | Neon 後台 → 你的專案 → **SQL Editor**（左邊選單）→ 確認上面選的分支是 `main`，跑 `SELECT id, email, created_at FROM "user" ORDER BY id DESC LIMIT 5;` | 第一列是 `drill@example.com`；**記下現在的時間（UTC）** | 這是免費的 psql，不用裝；`"user"` 要加雙引號，因為 user 在 Postgres 是保留字，不加會查到別的東西 |
+| 3 | 同一個 SQL Editor 跑 `DELETE FROM "user" WHERE email = 'drill@example.com';` | `DELETE 1` | 模擬手滑。真實情況常是「遷移寫錯」或「WHERE 漏了」 |
+| 4 | 線上網站用 `drill@example.com` 登入 | 登入失敗（帳號不存在） | 資料真的沒了；這就是「要還原」的那一刻 |
+| 5 | Neon 後台 → **Branches** → 點 `main` → **Backup & Restore**（有的版本叫 Restore）→ **Restore from history** → 時間選第 2 步記下的那一刻（刪除之前）→ 確認 | 幾秒後完成；Branches 頁多了一個名字帶 old 和時間戳的分支 | 那個多出來的分支就是「刪掉之後」的狀態，留著是為了「還原錯了可以再回去」 |
+| 6 | 線上網站再登入一次 `drill@example.com` | 登入成功 | 資料回來了，而且 Render 什麼都沒動 |
+| 7 | 開 `/api/health` | `"db":"ok"`、`"migration"` 和還原前一樣 | 連線字串沒變；遷移版本也在資料庫裡，所以跟著一起回到那一刻 |
+| 8 | Branches → 刪掉第 5 步多出來的舊分支 | 分支數回到 1 | 免費方案 10 個分支，演練完要收；正式情況確認沒問題再刪 |
+| 9 | SQL Editor 再跑一次第 3 步的 `DELETE`，把演練帳號清掉 | `DELETE 1` | 收尾；這次是故意的，不用還原 |
+
+**要講清楚的兩件事**：
+- 還原是**整個資料庫**回到那一刻，不是只有那一筆。中間別人的註冊、登入紀錄也會一起消失，所以真實情況要先用 Neon 的 **Time Travel**（同一頁，可以在還原窗內的任一刻跑唯讀查詢）確認「回到哪一刻損失最小」，不要急著按。
+- 6 小時過了就沒了。所以第 6.2 節的手動備份不是多餘的。
+
+### 6.2 手動備份（Mac，選配；平日的 VM 沒有 psql 就跳過）
+
+```bash
+brew install libpq && brew link --force libpq          # 只裝 psql、pg_dump，不裝整個 Postgres
+pg_dump "postgresql://<user>:<pass>@<host>/<db>?sslmode=require" > backup-$(date +%F).sql
+ls -la backup-*.sql                                      # 幾十 KB 起跳，0 就是失敗
+head -30 backup-$(date +%F).sql                           # 看得到 CREATE TABLE "user"
+```
+
+連線字串用 Neon 原本的格式（`postgresql://`、`sslmode=require`，Neon 後台 Connect 按鈕那串），**不是** `.env` 裡的 asyncpg 格式。檔案含密碼雜湊，**不要進 git**（`.gitignore` 擋了 `backup-*.sql`，檔名照上面的格式就不會被加進去）。
+
+還原這個檔案到本機試一次（Mac，有 Docker）：
+
+```bash
+docker compose -f infra/compose.yaml up -d --wait postgres
+docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo < backup-$(date +%F).sql
+docker compose -f infra/compose.yaml exec -T postgres psql -U postgres -d jwtdemo -c 'SELECT count(*) FROM "user";'
+docker compose -f infra/compose.yaml down -v
+```
+
+`count` 和線上一樣就代表這份備份是能用的。**沒有還原過的備份不算備份。**
 
 ## 7. 清理
 

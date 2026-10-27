@@ -328,7 +328,7 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 
 後端在 Render（`render.yaml`）、前端在 Vercel（`frontend/vercel.json`）、資料庫在 Neon，全部免費方案。
 完整步驟、觀念與會踩的坑見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10；出問題先查 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)。
-上線後的維運（看 log、退版、換密鑰、備份）見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，關卡 11。
+上線後的維運（看 log、退版、換密鑰、備份與還原演練）見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，關卡 11。寫新端點前看 API 慣例：[`docs/API.md`](docs/API.md)。
 選配：`.github/workflows/deploy.yml` 把部署變成 GitHub 上的一步（CI 綠 → 叫 Render → 等線上版本對上，Environments 分頁有紀錄）；設了 secret `RENDER_DEPLOY_HOOK` 才啟用，步驟見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 25。
 
 ## 每次 `git pull` 之後

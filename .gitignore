@@ -43,3 +43,6 @@ frontend/playwright/.cache/
 
 # ruff
 .ruff_cache/
+
+# 手動備份（RUNBOOK 第 6.2 節）：含密碼雜湊，不進 git
+backup-*.sql
