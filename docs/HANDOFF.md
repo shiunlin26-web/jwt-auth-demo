@@ -35,7 +35,7 @@
 - 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
 - **範例專案（本 repo）已凍結**：不加業務功能（待辦、分類那種），只改文件、修 bug、合 Dependabot 的 PR。「教學用的延伸關卡」（例如分頁同步登出）**可以**做在本 repo，編號接在路線圖最後一關之後，照第 3 節的格式；業務功能一律在練習專案。它的用途是被複製到其他專案當登入模板。
 - 路線圖已無待做項目；`LEARNING.md` 末尾「之後還可以自己摸的」是不排關卡的延伸清單。`docs/drills/` 是故障演練的 patch，可以照 README 的格式再出新題。
-- **從頭帶一遍的進度**（2026-10-20 決定，排法在 `docs/COACHING.md` 第 2 節）：之前的關卡是 AI 做、他驗收，沒有一步一步帶過；現在從關卡 0 重新帶，仔細關 1～2 小時、快速關 20～30 分鐘。**目前走到：關卡 0～3 已帶完（2026-10-22），下一關是關卡 4**（每帶完一關改這行）。
+- **從頭帶一遍的進度**（2026-10-20 決定，排法在 `docs/COACHING.md` 第 2 節）：之前的關卡是 AI 做、他驗收，沒有一步一步帶過；現在從關卡 0 重新帶，仔細關 1～2 小時、快速關 20～30 分鐘。**目前走到：關卡 0～4 已帶完（2026-10-27），下一關是關卡 5**（每帶完一關改這行）。
 - **基礎設施路線（關卡 21～25）**（2026-10-22 決定，**同日做完**）：compose + E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖。程式、CI job、`COACHING.md` 關卡 21～24 的腳本（Mac / VM 兩條路線）、`PLAIN.md`、`LEARNING.md` 關卡 21～24、`CHAIN.md` 環 8～11、`ARCHITECTURE.md` 都已合併到 main（PR #39～#57）；只剩 25-D（部署追蹤，選配）沒做。小塊清單、進度表、免費方案查證在 `docs/PLAN-INFRA.md`，**進度只記在那裡**。帶法：重帶走完關卡 20 之後才開始帶 21，一週一關，有 Docker 的機器走 Mac 路線、沒有的走 VM 路線看 CI 的 job log（`COACHING.md` 第 2 節末）。
 - **觀念關的帶做進度**（2026-10-20）：關卡 18（Neon SQL 實驗、含第 5 段鎖的示範）和關卡 19（curl 看請求回應、cookie 罐換票、舊票重用 401、Path 不帶 cookie、Bearer 打 `/api/me`、CORS 的 `Origin` 實驗）已帶學習者在本機親手跑過一遍；**關卡 20 的 `docs/drills/` 演練還沒做**，接手請從那裡開始。帶法照 `docs/COACHING.md`（一次一個指令，讓他貼輸出再解釋），程度校準見第 1 節。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次；環 8～11（基礎設施）選做。
@@ -118,7 +118,7 @@
 | GitHub | 程式碼、CI、branch protection | `shiunlin26-web/jwt-auth-demo`，預設分支 `main` | 學習者帳號 |
 | Render | 後端（Docker） | 服務 `jwt-auth-demo-backend`，新加坡區，`render.yaml` 描述；網址 `https://jwt-auth-demo-backend.onrender.com` | GitHub 登入 |
 | Vercel | 前端 | 專案 Root Directory 是 `frontend`，`frontend/vercel.json` 做 rewrites | GitHub 登入 |
-| Neon | 正式 Postgres | 一個專案；連線字串填在 Render 的 `DATABASE_URL` | GitHub 登入 |
+| Neon | Postgres | **兩個專案**（關卡 10 決定正式與開發分開）：`jwt-auth-demo-prod` 的 `neondb` 給 Render（連線字串填在 Render 的 `DATABASE_URL`，本機不碰）；`jwt-auth-demo` 的 `neondb` 是本機 `DATABASE_URL`、`jwtdemo_test` 是本機 `TEST_DATABASE_URL`（pytest 會清空）。SQL Editor 要先選對專案和資料庫 | GitHub 登入 |
 | Sentry | 錯誤追蹤 | 專案 `jwt-auth-demo-backend`（FastAPI）；DSN 填在 Render 的 `SENTRY_DSN` | GitHub 登入 |
 
 **環境變數名稱**（值在各平台，永遠不在 git；本機放 `backend/.env`，範本是 `backend/.env.example`）：
