@@ -39,7 +39,7 @@
 - **從頭帶一遍的進度**（2026-10-20 決定，排法在 `docs/COACHING.md` 第 2 節）：之前的關卡是 AI 做、他驗收，沒有一步一步帶過；現在從關卡 0 重新帶，仔細關 1～2 小時、快速關 20～30 分鐘。**目前走到：關卡 0～8 已帶完（2026-10-27；6、7 快速走），下一關是關卡 9（快速走，本機沒 Docker，看 Actions 的 log）**（每帶完一關改這行）。到關卡 11 時順便做 `PLAN-FULLSTACK.md` 的 B10 備份還原演練。
 - **基礎設施路線（關卡 21～25）**（2026-10-22 決定，**同日做完**）：compose + E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖。程式、CI job、`COACHING.md` 關卡 21～24 的腳本（Mac / VM 兩條路線）、`PLAIN.md`、`LEARNING.md` 關卡 21～24、`CHAIN.md` 環 8～11、`ARCHITECTURE.md` 都已合併到 main（PR #39～#57）；只剩 25-D（部署追蹤，選配）沒做。小塊清單、進度表、免費方案查證在 `docs/PLAN-INFRA.md`，**進度只記在那裡**。帶法（2026-10-27 改）：重帶走完先開練習專案（`PLAN-FULLSTACK.md` 第 1 節），關卡 21～24 只走 VM 路線（看 CI 的 job log，每關一小時）；Mac 動手是選配，有興趣的週末再做。
 - **觀念關的帶做進度**（2026-10-20）：關卡 18（Neon SQL 實驗、含第 5 段鎖的示範）和關卡 19（curl 看請求回應、cookie 罐換票、舊票重用 401、Path 不帶 cookie、Bearer 打 `/api/me`、CORS 的 `Origin` 實驗）已帶學習者在本機親手跑過一遍；**關卡 20 的 `docs/drills/` 演練還沒做**，接手請從那裡開始。帶法照 `docs/COACHING.md`（一次一個指令，讓他貼輸出再解釋），程度校準見第 1 節。
-- **下一步是練習專案**：學習者會自己開一個新 repo，題目由他決定（還沒定），照 `docs/CHAIN.md` 的七環再走一次；技術棧和本 repo 一樣（Python + React，搬模板，2026-10-27 定）；時間與功能順序在 `docs/PLAN-FULLSTACK.md` 第 1 節；環 8～11（基礎設施）選做。
+- **下一步是練習專案**：學習者會自己開一個新 repo，題目是記帳本（2026-10-27 定，功能 1～3 的使用者故事草稿在 `docs/PLAN-FULLSTACK.md` 第 6 節，他要用自己的話重寫），照 `docs/CHAIN.md` 的七環再走一次；技術棧和本 repo 一樣（Python + React，搬模板，2026-10-27 定）；時間與功能順序在 `docs/PLAN-FULLSTACK.md` 第 1 節；環 8～11（基礎設施）選做。
 
 接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-22，main 的 CI 綠（關卡 21～25 的 PR 全部綠著合併）、線上 `/api/health` 的 `migration` 是 `0006`（學習者在 Render 確認）。
 
