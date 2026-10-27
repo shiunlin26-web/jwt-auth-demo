@@ -126,7 +126,7 @@
 
 **帶我做一關（Mac 或 VM）：**
 
-> 先讀 `AGENTS.md`、`docs/COACHING.md` 第 1 節與第 3 節「關卡 ＿＿」。我現在在 ＿＿（Mac／VM），先跑 `scripts/doctor` 給你看。照腳本一次一步帶我：一個指令、預期值用數字和字串、我貼輸出、你從輸出講。收尾後問我哪一步要再講一次。
+> 先讀 `AGENTS.md`、`docs/COACHING.md` 第 1 節與第 3 節「關卡 ＿＿」。我現在在 ＿＿（Mac／VM），先跑 `bash scripts/doctor.sh`（Mac）或 `scripts\doctor.ps1`（VM）給你看。照腳本一次一步帶我：一個指令、預期值用數字和字串、我貼輸出、你從輸出講。收尾後問我哪一步要再講一次。
 
 **卡住了：**
 

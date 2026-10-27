@@ -1,7 +1,7 @@
 # API.md：這個模板的 API 慣例（練習專案開第 3 步前複製成自己的）
 
-> 用途：`PLAN-FULLSTACK.md` 第 1 節第 3 步說「開始做功能前先定一頁 API 規範」，這就是那一頁。它寫的是**本模板現在實際的做法**（每一條都能在程式裡找到），加上新功能會碰到、模板還沒有的三件事（列表、授權的狀態碼、從 OpenAPI 產型別）的建議。
-> 練習專案：複製這份到你的 repo，把「建議」改成你的決定，之後每個端點照它。AI 做功能的計畫（第 4 節六步循環的第 2 步）要寫「照 `API.md` 第幾條」。
+> 用途：`PLAN-FULLSTACK.md` 第 2 節 A6 說「第 3 步開始前把這一頁複製成自己的」，這就是那一頁。它寫的是**本模板現在實際的做法**（每一條都能在程式裡找到），加上新功能會碰到、模板還沒有的三件事（列表、授權的狀態碼、從 OpenAPI 產型別）的建議。
+> 練習專案：複製這份到你的 repo，把「建議」改成你的決定，之後每個端點照它。AI 做功能的計畫（`PLAN-FULLSTACK.md` 第 4 節六步循環的第 2 步）要寫「照 `API.md` 第幾條」。
 > 讀法：第 1～7 條是規矩，第 8 條是每個新端點的檢查表，第 9 條是一個完整例子。
 
 ## 1. 路徑
@@ -77,7 +77,7 @@
 - `GET /api/health`：能服務嗎，回 `status`、`db`、`migration`（alembic 版本）、`version`（commit）。部署後第一個看的東西（`RUNBOOK.md` 第 0 節）。
 - `GET /api/_boom`、`GET /api/_ip`：演練與除錯，`ENABLE_DEBUG_ENDPOINTS=true` 才開，平常回 404。
 - 自動文件：本機 <http://localhost:8000/docs>（互動頁）和 `/openapi.json`。**在根路徑不在 `/api` 底下**，所以正式環境從前端網域開不到，要用 Render 的網址開。
-- 從 OpenAPI 產前端型別（模板還沒做，功能 1 做完可以加）：`npx openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts`（免費、不用裝任何服務），之後 `src/api/todos.ts` 的請求／回應型別從它 import，後端改了欄位前端 `tsc` 會紅。
+- 從 OpenAPI 產前端型別（模板還沒做，功能 1 做完可以加）：`npx openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts`（免費、不用裝任何服務；實測過：對本模板產出約 500 行，前端 `tsc` 吃得下），之後 `src/api/todos.ts` 的請求／回應型別從它 import，後端改了欄位前端 `tsc` 會紅。
 
 ## 8. 新端點檢查表（每個 PR 的 review 照這個看）
 
@@ -88,7 +88,7 @@
 5. 列表有分頁、`page_size` 上限、排序白名單；排序欄位有索引（改 `models.py` 就要產遷移）。
 6. 會寄信、會花錢、會被猜的端點有 `@limiter.limit`。
 7. 測試至少：成功、401、404（別人的）、422（一個壞輸入）。
-8. 前端：`src/api/<資源>.ts` 用 `api`（會自動 refresh），query key 照 `useMe.ts` 的樣子，錯誤顯示用 `getErrorMessage`。
+8. 前端：API 呼叫放 `src/api/<資源>.ts`、用 `api`（會自動 refresh）；query／mutation 的 hook 放 `src/features/<功能>/queries.ts`，query key 照 `useMe.ts` 的樣子（`CHAIN.md` 附錄 A）；錯誤顯示用 `getErrorMessage`。
 
 ## 9. 一個完整的例子：待辦事項
 
