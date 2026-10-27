@@ -263,39 +263,32 @@
 **題目**（三題，都是「刪一行會怎樣」）：(1) `authService.login` 刪掉 `setAccessToken` → 畫面仍未登入，`/api/me` **不會被打**（`useMe` 看盒子沒 token 不抓，守門員留在登入頁）；延伸：手動 `getMe()` 會 401 → refresh 200 → me 200 而且人就登入了，因為 cookie 已有 refresh token、攔截器會寫回盒子；(2) `initializeAuth` 拿什麼換票、刪掉 `setInitialized()` 卡哪 → cookie 的 refresh token；卡「載入中」，`selectStatus` 看 `initialized` false 就回 `loading`，`RequireAuth` 走不到後面；寫在 `finally` 是失敗也要標；(3) 為什麼換底層畫面不用改 → 畫面只碰 `useAuth()` 和 `authService.*` 兩個介面，關卡 6 定的，關卡 8 換的是介面底下。
 **動手玩**：`LEARNING.md` 關卡 16 的 1、2 用測試看同一件事。
 
-### 關卡 9：Docker 與 CI
+### 關卡 9：Docker 與 CI — 快速走
 
-**搭配看的程式**：`backend/Dockerfile`、`.github/workflows/ci.yml`、`backend/pyproject.toml`、`backend/uv.lock`
+**搭配看的程式**：`backend/Dockerfile`（17～67：兩個階段，套件清單先、程式碼後、非 root、CMD 先遷移再起 uvicorn）、`.github/workflows/ci.yml`（`name:` 就是 Actions 頁的步驟名）
 
-**前置**：學習者本機沒有 Docker，這關全部看 GitHub Actions 的 log。
-
-| 步 | 操作 | 預期 | 看到之後講什麼 |
-| --- | --- | --- | --- |
-| 1 | `uv run ruff check .` 和 `uv run ruff format --check .`（在 `backend`） | `All checks passed!`、`N files already formatted` | CI 第一步就是這兩個，本機先跑就不會紅 |
-| 2 | 打開 `.github/workflows/ci.yml`，數 `backend` job 有幾個 `- name:` | 和 Actions 頁面左邊的步驟一一對應 | CI 就是把你本機跑的指令排成一列 |
-| 3 | GitHub → Actions → 最新一列 → 點 `backend` → 展開 `Docker build` | 找到 `CACHED` 字樣 | 層快取：沒變的層不重做。`backend/Dockerfile` 先 COPY 套件清單再 COPY 程式，就是為了這個 |
-| 4 | 同一頁展開 `Smoke test` 和 `Docker logs` | `{"status":"ok"...}`、`Running upgrade ... -> 0006`、`Uvicorn running on http://0.0.0.0:8000` | 容器啟動時先跑遷移再起伺服器，和 Render 上一模一樣 |
-| 5 | 打開 `backend/Dockerfile`，找 `--host 0.0.0.0` | 一行 | 容器裡要聽 `0.0.0.0` 外面才連得到，`127.0.0.1` 會「顯示成功但 502」 |
-
-**收尾**：CI = 本機指令排成一列 / Docker = 把啟動步驟寫死 / 紅了點進去看是哪一步。
-**動手玩**：`LEARNING.md` 關卡 9 的 1、4（要 push 一次，開練習分支做）。
-
-### 關卡 10：部署（Render + Vercel + Neon，同站）
-
-**搭配看的程式**：`frontend/vercel.json`、`render.yaml`、`backend/config.py` 的 `cookie_secure`、`cors_origins`、`frontend/vite.config.ts` 的 `proxy`
-
-**前置**：線上網址在 `HANDOFF.md` 第 7 節。**這關可能碰到平台設定頁，改任何設定前先說**。
+**前置**：本機沒 Docker，全部看 GitHub Actions 的 log。讀 `PLAIN.md` 關卡 9。**先講名詞**：image（整台機器的快照：OS、Python、套件、程式）、容器（image 跑起來的一個實例，Render 上就是一個）、CI（每次推程式自動跑一串檢查，就是 PR 上那兩個綠勾）。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `curl.exe -s https://<前端網址>/api/health` | `{"status":"ok","db":"ok","migration":"0006","version":"<commit 前幾碼>"}` | 打的是 Vercel 的網址，回的是 Render 的內容：Vercel 代打了（`frontend/vercel.json` 的 rewrite） |
-| 2 | `curl.exe -s -i https://<前端網址>/api/health \| Select-String "server\|x-request-id"` | `server:` 那行不是 `uvicorn`；`x-request-id` 有值 | 本機直打後端 `server` 是 `uvicorn`，這裡被代理層換掉了：瀏覽器從頭到尾只看到 Vercel，這就是「同站」 |
-| 3 | 瀏覽器開前端登入，DevTools → Network 點 `login` → Response Headers 的 `set-cookie` | `Path=/api/auth; Secure; HttpOnly; SameSite=lax` | 正式環境多了 `Secure`（關卡 2 的 `COOKIE_SECURE`） |
-| 4 | Network 過濾 `api` | 所有網址都是 `<前端網址>/api/...`，沒有 `onrender.com` | 代理在工作 |
-| 5 | 重新整理 | 還在登入狀態 | 這一步才證明 cookie 真的帶得上，關卡 10 當初踩的坑全在這裡 |
-| 6 | Render → Logs，搜步驟 2 的 `x-request-id` | 找到同一筆 `"request"` log | 前端看到的編號和後端記的是同一個 |
+| 1 | 在 `backend`：`uv run ruff check .`、`uv run ruff format --check .` | `All checks passed!`、`28 files already formatted` | CI 的 Lint、Format check 兩步，推之前本機跑就不會紅 |
+| 2 | Actions → 最新一列 → `backend` job → 展開 **Docker build** 和 **Smoke test** | Docker build：`[builder 1/5] FROM python:3.13-slim` … `[builder 4/5] COPY pyproject.toml uv.lock` → `[builder 5/5] RUN uv sync` → `[stage-1 ...]`；**不會有 `CACHED`**（Actions 每次是全新機器，沒有上次的層；`CACHED` 只在同一台機器第二次 build 或特別設了快取才出現，曾經寫「找 CACHED」是錯的）。Smoke test：前幾行 `curl: (7) Failed to connect` 不是錯（容器先跑 `alembic upgrade head` 再起 uvicorn，迴圈每秒試一次最多 30 次），然後 `{"message":"pong"}`、`✅`、`/api/health` 的 `db: ok`、`migration: 0006`、`version: null`（CI 沒有 Render 的 `RENDER_GIT_COMMIT`） | 一層一個指令；套件清單先 COPY、`uv sync` 完才 `COPY . .`，有快取的機器（Render、本機 Docker）改程式碼不用重裝套件。兩個階段：builder 裝套件，stage-1 只複製 `.venv`、用 `app` 使用者跑，image 裡沒有 uv 和編譯工具。CI 從空機器跑一遍，本機綠不代表 CI 綠 |
 
-**收尾**：同站 = 瀏覽器只看到一個網域 / rewrite 不是轉址 / cookie 的 `Secure` 正式才開。
+**收尾（不出題）**：Dockerfile 套件清單先、程式碼後是為了快取；CI 從空機器 build → 跑起來 → 打 `/api/ping`、`/api/health`，Render 部署做同一套；smoke test 是「跑起來打一下」。等他說下一關。
+**動手玩**：`LEARNING.md` 關卡 9 的 1、4（要 push，開練習分支）。
+
+### 關卡 10：部署（Render + Vercel + Neon，同站）— 快速走
+
+**搭配看的程式**：`frontend/vercel.json`（兩條 rewrite：`/api/*` 轉 Render、其他回 `index.html`）、`render.yaml`、`backend/config.py` 的 `cookie_secure`、`cors_origins`
+
+**前置**：線上網址：後端 `https://jwt-auth-demo-backend.onrender.com`，前端 `https://jwt-auth-demo-zeta.vercel.app`（學習者的）。**不改任何平台設定，只看**。讀 `PLAIN.md` 關卡 10。**先講名詞**：Render（跑後端容器）、Vercel（放前端靜態檔）、rewrite = 轉發（Vercel 自己去打 Render 再把回應給瀏覽器，瀏覽器只看到 Vercel；**不是轉址**，轉址是叫瀏覽器換網址就跨站了）。
+
+| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `curl.exe -s -i https://<前端網址>/api/health` | `200`；`Server: Vercel`、`X-Render-Origin-Server: uvicorn`、`Rndr-Id`、`Cf-Ray: ...-HKG`、`X-Vercel-Id: hkg1::...`、`X-Request-Id`、`Cache-Control: no-store`、`X-Vercel-Cache: MISS`、`Strict-Transport-Security`；JSON `db: ok`、`migration: 0006`、`version` = main 最新 commit | 用標頭表講整條鏈：瀏覽器看到的是 Vercel；Vercel 背後真的打了 Render（uvicorn）；Render 前面還有 Cloudflare（`Cf-Ray`，關卡 17 的 `TRUSTED_PROXY_HOPS=2` 數的就是這些層）；`X-Request-Id` 與 `no-store` 是自己的 `main.py` 加的，真的到了線上；`X-Vercel-Cache: MISS` 是 `no-store` 的效果；HSTS 是 Vercel 加的。`version` 對上 `git log` 的 commit = 合併後 Render 自動部署成功；`migration: 0006` = 正式庫（`jwt-auth-demo-prod`）也升到最新 |
+| 2 | 瀏覽器開前端網址，F12 Network，用線上帳號登入，點 `login` → Response Headers 的 `set-cookie`；看 Network 裡 `/api/` 請求的網址 | `...; Path=/api/auth; SameSite=lax; Secure`（本機沒有 `Secure`）；全部 `vercel.app`，沒有 `onrender.com` | `COOKIE_SECURE` 在 Render 設 true、本機預設 false。瀏覽器從頭到尾不知道 Render 存在，cookie 的同站條件成立；前端直接打 `onrender.com` 的話 cookie 屬於另一個網域、refresh 不帶、重新整理就掉（`DEBUGGING.md` 第一批坑）。順便：`retry-after`、`x-ratelimit-*` 線上也在；`content-encoding: br` 是 Vercel 壓縮的 |
+
+**收尾（不出題）**：瀏覽器只看到一個網域，Vercel 轉給 Render，Render 前面還有 Cloudflare；`version` 對上 commit 就是部署成功的證明；線上 cookie 多 `Secure`。等他說下一關。
 **動手玩**：`LEARNING.md` 關卡 10 的 2（故意跨站，要改 Vercel 設定，先說）。
 
 ### 關卡 11：維護
