@@ -14,7 +14,7 @@
 
 ## 2. 認證與授權
 
-- **認證**（你是誰）：請求帶 `Authorization: Bearer <access token>`；端點用 `Depends(get_current_user)` 拿到 `User`（`dependencies.py`）。access token 幾分鐘（`config.py` 的 access_token_expire_minutes），過期回 401，前端的 `api` 實例收到 401 會自動打 `/api/auth/refresh` 再重送一次（`client.ts` 的回應攔截器，只重送一次）。
+- **認證**（你是誰）：請求帶 `Authorization: Bearer <access token>`；端點用 `Depends(get_current_user)` 拿到 `User`（`dependencies.py`）。access token 30 分鐘（`config.py` 的 `jwt_expire_minutes`），過期回 401，前端的 `api` 實例收到 401 會自動打 `/api/auth/refresh` 再重送一次（`client.ts` 的回應攔截器，只重送一次）。
 - refresh token 放 httpOnly cookie，`path=/api/auth`、`SameSite=Lax`、正式環境 `Secure`。前端的 JS 碰不到它，也不用管它。
 - **授權**（你能不能動這一筆）：模板只有「登入才能看 `/me`」，沒有別人的資料可以越權，所以**練習專案的第一個功能就要定**：
   - 查詢一律帶 `WHERE owner_id = current_user.id`（SQLModel：`select(Todo).where(Todo.id == id, Todo.owner_id == user.id)`）。
