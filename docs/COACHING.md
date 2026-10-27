@@ -20,7 +20,7 @@
 - **開始前先確認環境**：跑過 `scripts\setup.ps1`、前後端起來、`uv run pytest -q` 綠。沒跑過就先帶他跑（`README.md`「每次開機怎麼把專案跑起來」）。
 - **先名詞、再在哪看、最後邏輯**。程式邏輯不用逐行講（`HANDOFF.md` 第 1 節的程度校準）。新名詞第一次出現就解釋（Bearer、Origin、Path、系統表），不要先用後解釋。
 - **一次只有一個主題**。步驟之間不要塞額外知識，想補充的留到那關收尾。
-- **問之前先確認每個問的東西都有答案值得講**（曾經問了cookie 存放處的「兩個 FALSE」，答完才說第一個不重要，這會讓人覺得白問）。一次只問有意義的那一兩格。
+- **問之前先確認每個問的東西都有答案值得講**（曾經問了 cookie 存放處的「兩個 FALSE」，答完才說第一個不重要，這會讓人覺得白問）。一次只問有意義的那一兩格。
 - **名詞先定義再用，而且每個關鍵名詞都要有一個比喻**（曾經雜湊、SHA-256、bcrypt、鹽、簽章沒先講就拿來用，整關跟著亂；標準是沒有背景的人也聽得懂）。同一類東西有好幾個時（兩張票、三種工具），每次提到都要指名是哪一個，不要只說「票」。
 - **他貼的輸出亂掉**（兩個指令疊在一起、終端機把上一個的尾巴接上來）：先說「結果是對的，前面是終端機疊在一起」，直接講，不要叫他重跑。
 - **他說「看不懂」**：不要整段換個說法重講。問「哪一行」，或從他最後貼的輸出重新開始，一次講一行。
@@ -104,13 +104,13 @@
 - **bcrypt**：給密碼用的雜湊機，慢（成本 12 = 揉 4096 遍 = 約 0.1 秒一次）而且每次撒一把隨機的「鹽」，同一個密碼每次結果不同。輸出固定格式 `$2b$12$` + 22 字鹽 + 31 字結果，鹽不是祕密，直接寫在裡面；驗證時先用 email 找到人，從他那串讀出鹽、重算、比對。慢是為了讓小偷猜很多次划不來（你付一次 0.1 秒，他付幾百萬次）；鹽是為了讓同一個密碼在不同人那裡結果不同、事先算好的表沒用。
 - **簽章**（access token 用的）：不是加密。內容誰都看得懂，但改一個字就對不上；只有拿 `JWT_SECRET` 的後端算得出正確簽章。
 - **三樣東西三種工具**：密碼 → bcrypt（存起來比對）；refresh token → SHA-256（存起來查表）；access token → 簽章（不存，驗簽）。
-- **每次說「票」都要指名是哪張**。整關的cookie 存放處、cookie、名冊、作廢、刪除、reused、Invalid 全部是 **refresh token** 的事；access token 沒有「舊的」這回事，過期就丟。
+- **每次說「票」都要指名是哪張**。整關的 cookie 存放處、cookie、名冊、作廢、刪除、reused、Invalid 全部是 **refresh token** 的事；access token 沒有「舊的」這回事，過期就丟。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
 | 1 | `curl.exe -s -c jar.txt localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` 然後 `type jar.txt` | JSON 有 `access_token`；cookie 存放處最後一行 `#HttpOnly_localhost FALSE /api/auth FALSE <秒數> refresh_token <43 字>` | cookie 存放處 = curl 的 cookie jar（`-c`/`--cookie-jar` 寫入、`-b` 讀出），本機就是 `jar.txt`，模擬瀏覽器的 DevTools → Application → Cookies。**不要再自創「罐子」這種詞**，學習者問「罐子是什麼、你自創的？」。只問 `/api/auth`（Path：只有打這路徑才帶）和**第二個** `FALSE`（Secure 沒開，http 也送；正式是 TRUE）。第一個 FALSE 是 curl 內部欄位，**不要問**。43 字 = `secrets.token_urlsafe(32)`：32 個隨機 byte 用 base64 印成可讀的字（3 byte → 4 字，所以 43）。`set-cookie` = 後端請瀏覽器把這張存起來 |
-| 2 | `curl.exe -v -b jar.txt -c jar.txt -X POST localhost:8000/api/auth/refresh` | `>` 有 `Cookie: refresh_token=舊值`；`<` 有 `set-cookie: refresh_token=新值`；`* Replaced cookie` | `-b`/`--cookie` 從cookie 存放處帶出去、`-c`/`--cookie-jar` 存回來，是 curl 自己的參數（`curl.exe --help all \| Select-String cookie`）。後端五段：`Cookie(...)` 取票（179）→ `hash_token` 查表、`with_for_update` 鎖（191～195）→ 舊的 `revoked = True`（229）→ `issue_refresh_token` 發新的（230）→ `set_refresh_cookie` + 新 access token（233～237）。瀏覽器平常同時做 `-b` 和 `-c`，自動的 |
-| 3 | 舊值已不在cookie 存放處裡，用字串帶：`curl.exe -s -i -b "refresh_token=<步驟 1 的 43 字>" -X POST localhost:8000/api/auth/refresh` | `401`，`Refresh token reused` | 票**還在**表裡，`revoked = true` 又被送來 → 當成被偷 → `revoke_all_refresh_tokens` 把這個人全部的 refresh token **刪掉**（62 行是 `delete`，不是標記）。先讓他猜：cookie 存放處裡的新票還能用嗎 |
+| 2 | `curl.exe -v -b jar.txt -c jar.txt -X POST localhost:8000/api/auth/refresh` | `>` 有 `Cookie: refresh_token=舊值`；`<` 有 `set-cookie: refresh_token=新值`；`* Replaced cookie` | `-b`/`--cookie` 從 cookie 存放處帶出去、`-c`/`--cookie-jar` 存回來，是 curl 自己的參數（`curl.exe --help all \| Select-String cookie`）。後端五段：`Cookie(...)` 取票（179）→ `hash_token` 查表、`with_for_update` 鎖（191～195）→ 舊的 `revoked = True`（229）→ `issue_refresh_token` 發新的（230）→ `set_refresh_cookie` + 新 access token（233～237）。瀏覽器平常同時做 `-b` 和 `-c`，自動的 |
+| 3 | 舊值已不在 cookie 存放處裡，用字串帶：`curl.exe -s -i -b "refresh_token=<步驟 1 的 43 字>" -X POST localhost:8000/api/auth/refresh` | `401`，`Refresh token reused` | 票**還在**表裡，`revoked = true` 又被送來 → 當成被偷 → `revoke_all_refresh_tokens` 把這個人全部的 refresh token **刪掉**（62 行是 `delete`，不是標記）。先讓他猜：cookie 存放處裡的新票還能用嗎 |
 | 4 | `curl.exe -s -i -b jar.txt -X POST localhost:8000/api/auth/refresh` | `401`，`Invalid refresh token` | 票**不在**表裡（201 行）。兩句 401：`reused` = 還在但蓋章，`Invalid` = 查不到。輪替是標記（留證據），重用偵測是刪除（全清） |
 | 5 | Neon SQL Editor **先確認選的是 `DATABASE_URL` 那個資料庫**（關卡 18 用的是 `TEST_DATABASE_URL`，Editor 會停在那裡；`Get-Content backend\.env \| Select-String DATABASE_URL` 看資料庫名）。跑 `SELECT count(*) FROM refreshtoken WHERE user_id = <他的 id>;` | `0` | 和步驟 4 對上。資料庫不對會查到「都沒有」 |
 | 6 | 重新登入（步驟 1），再查 `SELECT token_hash, revoked, created_at FROM refreshtoken WHERE user_id = <id>;`，然後在 `backend` 跑 `uv run python -c "from security import hash_token; print(hash_token('<cookie 存放處裡的 43 字>'))"` | 一筆 `revoked = f`，`token_hash` 64 字；自己算出來的跟資料庫**一模一樣** | 資料庫只有 SHA-256 亂碼，沒有原值。後端收到 cookie 就是這樣找到那筆：原值 → SHA-256 → `WHERE token_hash =`。`hashlib.sha256(token.encode()).hexdigest()`：文字變 byte → 雜湊 32 byte → 印成 64 個 16 進位字 |
@@ -150,11 +150,11 @@
 
 **搭配看的程式**：`backend/routes/auth.py` 的 `delete_expired_refresh_tokens`（65）、`logout`（241）、`logout_all`（266）、`change_password`（286）；`backend/schemas.py` 的 `ChangePasswordRequest`；`frontend/src/api/client.ts` 的 response 攔截器（74～97，第 3 題要用）；`frontend/src/pages/SettingsPage.tsx`
 
-**前置**：後端跑起來（先 `curl.exe -s -i localhost:8000/api/ping` 確認，曾經後端沒開、cookie 存放處是空的還往下做）、帳號 `t@test.com` / `Passw0rd!x`。用兩個 cookie 罐模擬兩台裝置：A 電腦、B 手機。**一次只給一步、只收一步的輸出**（曾經一次丟三步，其中一步貼錯 token 就繞了很久）。access token 要他整串複製，指令裡直接把他貼過的 token 填好，不要留 `<佔位符>`（曾經原樣送出 `<A的token>`、也曾只貼 `eyJhbGci` 八個字，都回 `401 Invalid or expired token`：那是 `get_current_user` 驗簽章失敗，進不到函式）。
+**前置**：後端跑起來（先 `curl.exe -s -i localhost:8000/api/ping` 確認，曾經後端沒開、cookie 存放處是空的還往下做）、帳號 `t@test.com` / `Passw0rd!x`。用兩個 cookie 存放處（`a.txt`、`b.txt`）模擬兩台裝置：A 電腦、B 手機。**一次只給一步、只收一步的輸出**（曾經一次丟三步，其中一步貼錯 token 就繞了很久）。access token 要他整串複製，指令裡直接把他貼過的 token 填好，不要留 `<佔位符>`（曾經原樣送出 `<A的token>`、也曾只貼 `eyJhbGci` 八個字，都回 `401 Invalid or expired token`：那是 `get_current_user` 驗簽章失敗，進不到函式）。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | 登入兩次：`curl.exe -s -c a.txt localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'`，再一次 `-c b.txt`，然後 `type a.txt`、`type b.txt` | 兩個 JSON 各一個 `access_token`；兩個cookie 存放處的 `refresh_token` 值不同 | 同一個帳號兩台裝置，各一張會員卡。把 A 的 access token 留著 |
+| 1 | 登入兩次：`curl.exe -s -c a.txt localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'`，再一次 `-c b.txt`，然後 `type a.txt`、`type b.txt` | 兩個 JSON 各一個 `access_token`；兩個 cookie 存放處的 `refresh_token` 值不同 | 同一個帳號兩台裝置，各一張會員卡。把 A 的 access token 留著 |
 | 2 | Neon（`neondb`）：`SELECT count(*), count(*) FILTER (WHERE revoked) AS revoked FROM refreshtoken WHERE user_id = <id>;` | 不只 2（他之前每次登入、每次換票都各 INSERT 一列，蓋章的舊卡不刪） | 表會慢慢長大是正常的：蓋章的卡留著當證據，登入時的 DELETE 只清**過期**的。這關的兩個動作會讓它一次歸零 |
 | 3 | 用 A 改密碼：`curl.exe -s -i localhost:8000/api/auth/change-password -b a.txt -c a.txt -H "Authorization: Bearer <A 的 token 整串>" -H "Content-Type: application/json" -d '{\"current_password\":\"Passw0rd!x\",\"new_password\":\"Passw0rd!y\"}'`；再查一次步驟 2 的 SQL（先讓他猜 count） | `200`，新 `access_token`、新 `set-cookie`；count `1`、revoked `0` | `change_password` 五步：bcrypt 驗目前密碼（錯回 **400** 不是 401）→ 新舊相同 400 → 新密碼 bcrypt 存 → `revoke_all_refresh_tokens` 整排刪 → `issue_refresh_token` 立刻補發一張給自己。少了補發，改密碼的人也會被登出 |
 | 4 | B 換票：`curl.exe -s -i -b b.txt -X POST localhost:8000/api/auth/refresh`（先猜關卡 1 的哪句 401） | `401 Invalid refresh token` | B 的卡被整排刪掉，查不到。**但 B 手上的 access token 到 30 分鐘過期前還能用**：驗 access token 不查資料庫，「其他裝置登出」是下次換票時才發生。要立刻失效得加黑名單表、每個請求都查，就失去 access token 快的優點，設計上接受這個取捨（`logout_all` 的 docstring） |
@@ -181,10 +181,10 @@
 | 1 | `uv run pytest -q`（在 `backend`） | 一排點，最後 `67 passed in 271s`（數字以輸出為準） | 慢是因為測試資料庫在 Neon，67 次 TRUNCATE 都跨海；CI 用本機 Postgres 約 1 分鐘。這些測試就是關卡 0～3 用 curl 做過的事 |
 | 2 | `uv run pytest --collect-only -q \| Select-Object -First 30`（**`-q` 只能一個**，兩個會變成只印每個檔案幾個） | 一行一個 `tests/test_auth.py::test_...`，中文會印成 `註冊`（PowerShell 輸出編碼） | 名稱就是規格。幫他解開對照：註冊成功 / 重複註冊 400 / 中文密碼 422 / 密碼錯 401 / 登入密碼太短也 401 = 關卡 0；登入拿兩張票 / refresh 換發 / 舊的再用撤銷全部 / DB 只存雜湊 = 關卡 1；登出所有裝置 / 改密碼 / 目前密碼錯 400 = 關卡 3；登入時清過期 = 關卡 2 的 DELETE |
 | 3 | `uv run pytest -v -k refresh_token` | `4 passed`，四個名稱用中文印出來 | `-k` 挑名字裡有這串的。**`-k` 後面打中文會變 `????`**（指令列輸入編碼，和關卡 0 的 `python -c` 同一個坑），用名稱裡的英文片段，或先 `chcp 65001` |
-| 4 | 打開 `tests/test_auth.py` 第 117 行，把函式貼給他，一行對一步 | `register` / `login` / 記 `old_cookie` / `refresh` = 關卡 1 第 1～2 步；`thief = make_client(cookies=...)` + `refresh` = 第 3 步；三個 `assert`（401、那句、`count == 0`）= 第 3、5 步；本人 `refresh` 401 = 第 4 步 | `client` = 帶 `-b -c` 的 curl、`make_client` = 第二個cookie 存放處、`helpers.py` 的 `register`/`login` 帳號固定。測試的三段：**準備、動作、斷言**，讀任何測試都找這三段 |
+| 4 | 打開 `tests/test_auth.py` 第 117 行，把函式貼給他，一行對一步 | `register` / `login` / 記 `old_cookie` / `refresh` = 關卡 1 第 1～2 步；`thief = make_client(cookies=...)` + `refresh` = 第 3 步；三個 `assert`（401、那句、`count == 0`）= 第 3、5 步；本人 `refresh` 401 = 第 4 步 | `client` = 帶 `-b -c` 的 curl、`make_client` = 第二個 cookie 存放處、`helpers.py` 的 `register`/`login` 帳號固定。測試的三段：**準備、動作、斷言**，讀任何測試都找這三段 |
 | 5 | `routes\auth.py` 第 229 行 `rt.revoked = True` 前面加 `#`，**存檔**（曾經沒存到，還是 4 passed：先 `Get-Content routes\auth.py \| Select-String -n "rt.revoked = True"` 看有沒有 `#`），`uv run pytest -q -x -k refresh_token` | `FAILED ...撤銷全部 - assert 200 == 401`、`1 failed, 1 passed` | 讀法：`assert 實際 == 預期`，左邊程式真的回的、右邊測試要的。拆三個小問題問：200 是誰 / 紅的是小偷那個 (a) 還是本人那個 (b)（第一個失敗就停）/ 拿掉蓋章後舊票 `revoked` 永遠 false，207 行 `if rt.revoked` 不走，小偷換成功 200。重點：登入、換票、`/me` 全部正常，**沒有任何錯誤訊息，只有測試抓得到** |
 | 6 | `git checkout -- routes/auth.py`，再跑一次 | `4 passed` | |
-| 7 | `conftest.py` 不出題，用白話講三件事：(1) 26～34 行：沒設 `TEST_DATABASE_URL` 或跟 `DATABASE_URL` 一樣就拒跑，因為下一件會清表；(2) 43～59 行 `clean_database` 標 `autouse=True`，每個測試前自動跑，第一次砍掉重建、之後 TRUNCATE，所以每個測試從空庫開始、`register` 永遠不撞；`yield` 上面是測試前、下面是測試後；(3) 60 行起 `client`：測試參數寫 `client` 就拿到一個「帶cookie 存放處的 curl」，打記憶體裡的 app，`get_session` 被換成測試庫的版本。25 行 `limiter.enabled = False` 是因為測試從同一個 IP 打幾十次登入 | | 一句話：用錯庫就不跑、每個測試前清空、給你一個 client。讀測試時只要知道 `client` 從這來 |
+| 7 | `conftest.py` 不出題，用白話講三件事：(1) 26～34 行：沒設 `TEST_DATABASE_URL` 或跟 `DATABASE_URL` 一樣就拒跑，因為下一件會清表；(2) 43～59 行 `clean_database` 標 `autouse=True`，每個測試前自動跑，第一次砍掉重建、之後 TRUNCATE，所以每個測試從空庫開始、`register` 永遠不撞；`yield` 上面是測試前、下面是測試後；(3) 60 行起 `client`：測試參數寫 `client` 就拿到一個「帶 cookie 存放處的 curl」，打記憶體裡的 app，`get_session` 被換成測試庫的版本。25 行 `limiter.enabled = False` 是因為測試從同一個 IP 打幾十次登入 | | 一句話：用錯庫就不跑、每個測試前清空、給你一個 client。讀測試時只要知道 `client` 從這來 |
 
 **conftest.py 可以略過，而且要明講**（學習者問「一定要讀懂嗎」「什麼時候要知道、不會寫也要能抄」）：現在只要上面那張「測試裡寫什麼 → 拿到什麼」的表。要回來的時機是練習專案環 5 請 AI 寫第一個測試時，用三件事驗收：有拒用正式庫的保險絲、每個測試前清空或隔離、`client` 打的是真後端接的是測試庫。怎麼抄：`CHAIN.md` 附錄 A 的 `conftest.py` 那列（整個複製、改 TRUNCATE 的表名、關掉自己專案的外部服務）。每個專案的準備檔內容不同（rollback 代替 TRUNCATE、Docker Postgres 代替 Neon、TestClient 代替 AsyncClient），但「準備資料庫、接到測試庫、給一個 client」三件事都在；前端的 `src/test/setup.ts` + `server.ts` 是同一個東西。
 **學習者的程度（2026-10-27）**：讀得懂測試程式本身（三段式、`assert`、一行對一步），讀不懂 conftest 這種「準備用的」程式，這是正常的，不要逼。
@@ -443,7 +443,7 @@
 | 1 | `curl.exe -v localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` | `>` 四行請求、`<` 一串回應、最後一行 JSON | `>` 是你送的、`<` 是回來的、`*` 是 curl 碎念。請求行、標頭、空行、內容 |
 | 2 | 找 `< set-cookie:` 那行 | `HttpOnly; Max-Age=604800; Path=/api/auth; SameSite=lax`，本機沒有 `Secure` | 一個分號一個規則：JS 讀不到 / 7 天 / 只在 `/api/auth` 帶 / 跨站不帶 / 正式才限 https。`routes/auth.py` 第 34 行附近 |
 | 3 | 找 `x-ratelimit-remaining`、`cache-control: no-store`、`x-request-id` | 三行都在 | 關卡 17、19、11 各加的 |
-| 4 | 關卡 1 的步驟 1～4（cookie 罐、換票、舊票重用、新票也失效） | 同關卡 1 | 用 curl 看最清楚 |
+| 4 | 關卡 1 的步驟 1～4（cookie 存放處、換票、舊票重用、新票也失效） | 同關卡 1 | 用 curl 看最清楚 |
 | 5 | 重新登入 `-c jar.txt`，`curl.exe -v -b jar.txt localhost:8000/api/me` | `>` **沒有** `Cookie:` 行；`401`、`www-authenticate: Bearer` | Path 不是 `/api/auth` 就不帶；`/api/me` 要的是另一張票 |
 | 6 | `curl.exe -s -i localhost:8000/api/me -H "Authorization: Bearer <登入回的 access_token>"` | `200`，`id`、`email`、`last_login_at` | 兩張票分工：refresh 走 cookie 只到 `/api/auth`，access 走標頭打其他 API |
 | 7 | 把 access token 中間一段貼進 `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("<中間那段>"))` | `{"sub":"7","iat":...,"exp":...}` | 票誰都能看，所以不放祕密；第三段簽章防改。改一個字再打 `/api/me` 會 401 |
