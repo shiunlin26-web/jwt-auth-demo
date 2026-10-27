@@ -218,54 +218,49 @@
 **題目只問他做過的**（曾經問「套用了 0007 之後要還原的順序」被嗆「我又沒做過」）：(1) 加了 `nickname` 後 `check` 紅、`pytest` 綠，為什麼；(2) 0003/0004 為什麼不能刪；(3) 0007 如果是 `nullable=False`，`upgrade head` 會怎樣、為什麼。
 **動手玩**：`LEARNING.md` 關卡 5 的 1（downgrade 再 upgrade，會動到 Neon，留到關卡 11 一起做）。
 
-### 關卡 6：前端整理（api / auth / components）
+### 關卡 6：前端整理（api / auth / components）— 快速走
 
-**搭配看的程式**：`frontend/src/api/auth.ts`、`api/client.ts`、`auth/useAuth.ts`、`components/UserPanel.tsx`、`main.tsx`
+**搭配看的程式**：`frontend/src/api/auth.ts`（一個端點一個函式）、`api/client.ts:21`（`baseURL = "/api"`）、`frontend/vite.config.ts:32`（`proxy`）
 
-**前置**：前後端跑起來。這關是讀結構，不是跑指令。
+**前置**：前端開著就好，不改程式、不跑後端指令。讀 `PLAIN.md` 關卡 6 那三句開場。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `Get-ChildItem frontend\src -Recurse -Name \| Select-String -NotMatch "test"` | 看到 `api/`、`auth/`、`app/`、`components/`、`pages/`、`schemas/` | 一個資料夾一種責任：`api` 跟後端講話、`auth` 登入狀態、`pages` 畫面 |
-| 2 | 登入後 DevTools → Network，列出有哪些 `/api/...` | `login`、`me` | 每一個都對應 `frontend/src/api/auth.ts` 的一個函式 |
-| 3 | 打開 `api/auth.ts`，找 `login`、`getMe` | 各幾行，呼叫 `api.post`、`api.get` | 它們不管 token，token 的事在 `api/client.ts` |
-| 4 | 打開 `api/client.ts`，找 `interceptors.request` 和 `interceptors.response` | request：加 `Authorization`；response：401 就 refresh 再重送 | 全專案只有這裡處理 token，頁面完全不知道 |
-| 5 | Console：`const { useAuthStore } = await import("/src/auth/authStore.ts"); useAuthStore.getState();` | 物件裡有 `accessToken`、`notice`、`initialized` | 登入狀態放在 `auth/`，畫面只是讀它 |
+| 1 | `Get-ChildItem frontend\src -Recurse -Name \| Select-String -NotMatch "test"`，讓他從名字猜 `api/`、`auth/`、`pages/` 放什麼 | 六個資料夾 | 他會說 `auth/` 是「驗證」，修正成「**登入狀態**」（驗證在後端）。給六個資料夾的表：`api/` 跟後端講話、`auth/` 登入狀態與守門員、`app/` 骨架（路由、導覽列）、`pages/` 一頁一檔、`components/` 零件、`schemas/` 表單規則 |
+| 2 | 打開 `api/auth.ts`，只看六個 `export async function` 和裡面的 `api.post/get` 那行；問 `login` 打的路徑、為什麼不用寫 `localhost:8000` | `/auth/login`；六個函式各對一個後端端點，裡面沒有任何 token 的事 | 他會說「本機才用 localhost:8000」，修正：**本機也不打**。`baseURL` 是 `/api` 接在前面，相對路徑打「自己現在的網域」，本機 Vite `proxy` 轉給 8000、正式 Vercel rewrites 轉給 Render；前端從頭到尾不知道後端在哪，這就是同站 |
 
-**收尾**：api / auth / pages 三層各做一件事，搬到新專案時整個 `api/` 和 `auth/` 複製就能用（`CHAIN.md` 搬家清單）。
-**動手玩**：`LEARNING.md` 關卡 6 的 3（和關卡 1 步驟 7 一樣）。
+**收尾（不出題）**：`api/` + `auth/` 是登入功能的全部，搬新專案複製這兩個資料夾（`CHAIN.md` 搬家清單）；前端只打相對路徑 `/api`，誰轉發是各環境的事。等他說下一關。
 
-### 關卡 7：多頁面與守門員（React Router）
+### 關卡 7：多頁面與守門員（React Router）— 快速走
 
-**搭配看的程式**：`frontend/src/app/router.tsx`、`app/AppLayout.tsx`、`auth/RequireAuth.tsx`、`auth/GuestOnly.tsx`、`pages/NotFoundPage.tsx`
+**搭配看的程式**：`frontend/src/auth/RequireAuth.tsx`（三個 `if`）、`app/router.tsx:29～45`（樹狀結構，守門員在外層）、`auth/GuestOnly.tsx`
 
-**前置**：前後端跑起來。全部在瀏覽器網址列做，預期值是「網址變成什麼」。
+**前置**：前後端開著，瀏覽器 `localhost:5173`。全部在網址列做，預期值是「網址變成什麼」。讀 `PLAIN.md` 關卡 7。
 
-| 步 | 操作 | 預期（看網址列） | 看到之後講什麼 |
+| 步 | 操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | 登出狀態，網址列輸入 `localhost:5173/settings` | 變成 `/login` | `auth/RequireAuth.tsx`：沒登入就送去登入頁，並記住你本來要去哪 |
-| 2 | 登入 | 回到 `/settings`，不是首頁 | 記住的那個「本來要去哪」 |
-| 3 | 已登入，輸入 `/login` | 變成 `/` | `auth/GuestOnly.tsx`，反過來的守門員 |
-| 4 | 輸入 `/abc` | 404 頁 | `app/router.tsx` 最後一條路由 |
-| 5 | 點導覽列「帳號設定」，DevTools → Network | **沒有**新的 HTML 下載，只有可能的 `/api/me` | 單頁應用換頁不重新下載頁面，`<Link>` 和 `<a>` 的差別 |
+| 1 | 登出，網址列輸入 `localhost:5173/settings`；然後在這個登入頁登入 | 變成 `/login`；登入後變回 `/settings` 不是首頁 | `RequireAuth` 三個 `if`：`loading` 顯示載入中 / `unauthenticated` → `<Navigate to="/login" replace state={{from}} />` / 否則 `<Outlet />`。`state.from` 記住本來要去哪，`replace` 讓上一頁不會回到進不去的頁。`router.tsx` 把 `/` 和 `/settings` 放在 `RequireAuth` 的 `children`，新頁面放進去自動被守；`GuestOnly` 反過來包 `/login`、`/register` |
+| 2 | 登入狀態，DevTools Network 開著點「設定」「首頁」切換幾次；然後問「把 `RequireAuth` 三個 `if` 刪掉直接開 `/settings`，看得到別人的資料嗎」 | Network **什麼都沒有**（連 `/api/me` 都沒有，關卡 12 的快取 30 秒內不重抓）；看得到畫面殼、看不到資料 | 單頁應用換頁不重載；資料靠 `/api/me`，後端要 Bearer token，沒登入就 401。**前端的守門員、CORS、表單驗證都是體驗，安全永遠在後端做一次** |
 
-**收尾**：路由表在一個檔案 / 守門員包在外面，新頁面自動被保護 / 換頁不重載。
-**動手玩**：`LEARNING.md` 關卡 7 的 1（加一頁，十行內）。
+**收尾（不出題）**：守門員包在 `router.tsx` 外層，新頁面放進 `children` 自動被守；`Navigate` 帶 `state.from`；前端擋的都繞得過，後端才是真的。等他說下一關。
 
 ### 關卡 8：Zustand + axios
 
-**搭配看的程式**：`frontend/src/auth/authStore.ts`、`auth/authService.ts`、`api/client.ts`（request / response 兩個攔截器、`_retry`）
+**搭配看的程式**：`frontend/src/auth/authStore.ts:24～49`（盒子：三個資料、四個方法）、`auth/authService.ts:29～65`（登入登出動作，每個都是「打 API、改盒子」兩行；`initializeAuth` 啟動時拿 cookie 換票）、`auth/useAuth.ts:15～25`（元件怎麼看盒子）、`api/client.ts:60～97`（兩個攔截器）
 
-**前置**：前後端跑起來。
+**前置**：前後端開著、登入狀態、Console 已 `allow pasting`。
+
+**先講名詞**：store = 全站共用狀態的**盒子**（登入了沒、token 是什麼，整個前端一份），Zustand 做盒子的套件，特點是 React 外面也能讀寫，所以攔截器拿得到 token；攔截器 = axios 在每個請求送出前、回應回來後插的一段程式。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | Console：`const { useAuthStore } = await import("/src/auth/authStore.ts"); useAuthStore.getState();` | 有 `accessToken`（一串 `eyJ...`） | access token 只在記憶體，重新整理就沒了，所以才需要 refresh |
-| 2 | Console：`useAuthStore.getState().setNotice("我從 Console 改的");` | 畫面上方的提示文字立刻變 | 沒碰任何元件，改 store 畫面就跟著變 |
-| 3 | `backend\.env` 加 `JWT_EXPIRE_MINUTES=1`，重啟，登入等 1 分鐘，按「重新取得我的資料」 | Network：`me` 401 → `refresh` 200 → `me` 200，畫面沒出錯 | `api/client.ts` 的 response 攔截器。刪掉 `.env` 那行 |
-| 4 | 打開 `api/client.ts` 找 `_retry` | 一行 `original._retry = true` | 重送一次還是 401 就放棄，不然會無限迴圈 |
+| 1 | Console：`const { useAuthStore } = await import("/src/auth/authStore.ts"); useAuthStore.getState();` | 七樣：`accessToken`、`initialized: true`、`notice`、四個 `ƒ` | 他會問 `create<AuthState>()((set) => ({...}))` 的 `set` 是什麼、為什麼能塞這麼多層。講法：三層看（`create<AuthState>()` 回傳工廠 → 工廠收你的「說明書」函式並把 `set` 塞給它 → 說明書回傳盒子的初始內容和方法）；`set` 是**唯一合法的改盒子工具**，做兩件事：蓋欄位（沒給的不動）、通知看盒子的元件重畫；`set({ accessToken })` 是同名縮寫；`()()` 是 Zustand 給 TS 的固定寫法照抄；Java 對照是 class 三欄位四方法、改欄位要經過 `set` |
+| 2 | Console：`useAuthStore.getState().setNotice("我從 Console 改的");` | 頁面上方提示立刻變 | 問「為什麼畫面會變」→ `set` 的第二件事。誰在看盒子：`useAuth.ts:18` 的 `useAuthStore(...)`；誰在改：`authService.ts` 每個動作「先打 API 再改盒子」。資料流一條線：畫面 → `authService` → API → 改盒子 → 元件重畫。`initializeAuth` 是「重新整理還在登入」的來源，`finally` 裡 `setInitialized()` 讓守門員離開載入中 |
+| 3 | Console：`const m = await import("/src/api/auth.ts"); useAuthStore.getState().setAccessToken("bad"); await m.getMe();` | Network `me 401 → refresh 200 → me 200`，Console **沒紅字**，印出使用者物件 | 他會問「為什麼 refresh 後重打 me，是登入本來就會打嗎」→ 不是，第二個 `me` 是攔截器 `return api(original)` 重送的（`client.ts:96`），呼叫端只拿到最後的 200，`client.test.ts:40` 的測試名就是「呼叫端完全沒感覺」。登入本身不打 `/me`，那是關卡 12 的 `useMe` |
 
-**收尾**：狀態在 store / token 在攔截器 / 攔截器只重試一次。
+**收尾一句話**：登入狀態放在一個全站共用的盒子，只能用 `set` 改、改了畫面自動重畫；兩個攔截器讓貼 token 和 401 換票重送對呼叫端透明。
+**收尾要講到**：資料流那條線（畫面 → authService → API → 改盒子 → 重畫；每個請求攔截器貼 token；401 換票重送；重新整理 `initializeAuth` 換票回盒子）/ 盒子裡有沒有 token 是前端認定登入的唯一依據。
+**題目**（三題，都是「刪一行會怎樣」）：(1) `authService.login` 刪掉 `setAccessToken` → 畫面仍未登入，`/api/me` **不會被打**（`useMe` 看盒子沒 token 不抓，守門員留在登入頁）；延伸：手動 `getMe()` 會 401 → refresh 200 → me 200 而且人就登入了，因為 cookie 已有 refresh token、攔截器會寫回盒子；(2) `initializeAuth` 拿什麼換票、刪掉 `setInitialized()` 卡哪 → cookie 的 refresh token；卡「載入中」，`selectStatus` 看 `initialized` false 就回 `loading`，`RequireAuth` 走不到後面；寫在 `finally` 是失敗也要標；(3) 為什麼換底層畫面不用改 → 畫面只碰 `useAuth()` 和 `authService.*` 兩個介面，關卡 6 定的，關卡 8 換的是介面底下。
 **動手玩**：`LEARNING.md` 關卡 16 的 1、2 用測試看同一件事。
 
 ### 關卡 9：Docker 與 CI
