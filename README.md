@@ -348,6 +348,7 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 一步步把這個專案練到接近生產級的過程，記錄在 [`docs/LEARNING.md`](docs/LEARNING.md)。
 要接手帶人（或換一個 AI 工具繼續）：先讀 [`docs/HANDOFF.md`](docs/HANDOFF.md)，帶做的方法與每關腳本在 [`docs/COACHING.md`](docs/COACHING.md)；要把這套搬到新專案：[`docs/CHAIN.md`](docs/CHAIN.md)（七環主線 + 選做的環 8～11）。
 基礎設施路線（關卡 21～25：compose 與 E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖）的計畫與進度在 [`docs/PLAN-INFRA.md`](docs/PLAN-INFRA.md)，怎麼親手跑在 [`infra/README.md`](infra/README.md)。
+這個專案之後還差什麼、下一階段怎麼排：[`docs/PLAN-FULLSTACK.md`](docs/PLAN-FULLSTACK.md)。
 
 ## 常見問題
 
