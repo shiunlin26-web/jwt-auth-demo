@@ -28,6 +28,7 @@ frontend/src/       React + Vite。api/（axios、TanStack Query 快取）、aut
   test/             Vitest 的 setup 與 MSW 假後端；測試檔放在被測檔案旁邊（*.test.ts、*.test.tsx）
 .github/workflows/  ci.yml：後端 ruff（lint + format）、pyright、alembic check、pytest、Docker build/run/smoke；前端 eslint、prettier、vitest、tsc + build
                     infra.yml（只在 PR 跑）：compose、e2e（Playwright）、observability（Prometheus / Grafana / OTel）、k8s（kind）、messaging（Redpanda）
+                    codeql.yml（SAST，PR 與每週）、audit.yml（每週 pip-audit / npm audit，不擋 PR）、deploy.yml（選配的部署追蹤，沒設 secret 就跳過）
 infra/              關卡 21～24 的基礎設施：compose.yaml（profiles：observability、messaging）、k8s/（kustomize）、prometheus/、grafana/、otel/。搬登入模板可以不搬
 backend/            另有 metrics.py（/metrics）、tracing.py（OpenTelemetry）、outbox.py + worker.py + consumer.py（transactional outbox、Kafka）
 render.yaml         Render 後端設定；frontend/vercel.json：Vercel 轉發 /api 到 Render

@@ -2809,6 +2809,8 @@ minor、patch 通常可以，但先看一眼 changelog。CI 綠只代表「現�
 
 </details>
 
+> 2026-10-27 註記：Dependabot 之外又加了兩個免費的安全檢查（都是 `.github/workflows/`）：`codeql.yml` 用 GitHub 的 CodeQL 掃程式碼的漏洞模式（SQL injection、XSS……），每個 PR 與每週一跑，結果在 Security → Code scanning；`audit.yml` 每週一用 `pip-audit`、`npm audit` 掃鎖定版本的已知漏洞（CVE），刻意不放在 PR 上跑，紅了看通知再決定。第一次跑 pip-audit 就抓到 `certifi` 2026.7.22 有 PYSEC-2026-4320，已升到修補版（只動 `uv.lock`）。公開 repo 兩個都免費；repo 改回私有 CodeQL 要付費。Settings → Security → Dependabot alerts 也建議打開（免費、一個開關）。
+
 ---
 
 ## 關卡 14：Zod + React Hook Form ✅

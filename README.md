@@ -63,6 +63,9 @@ jwt-auth-demo/
 ├── .editorconfig              # 編輯器共用的縮排、換行規則
 ├── .github/workflows/ci.yml   # CI：每次 push / PR 自動跑 ruff、pyright、alembic check、pytest、Docker build；前端 prettier / lint / vitest / build
 ├── .github/workflows/infra.yml  # 只在 PR 跑：compose、e2e（Playwright）、observability、k8s（kind）、messaging（Redpanda）
+├── .github/workflows/codeql.yml # CodeQL 靜態分析（SAST）：PR 與每週一掃程式碼的漏洞模式；公開 repo 免費
+├── .github/workflows/audit.yml  # 每週一：pip-audit、npm audit 掃套件的已知漏洞（不擋 PR）
+├── .github/workflows/deploy.yml # 【關卡 25-D，選配】CI 綠後叫 Render 部署、等 /api/health 版本對上；沒設 secret 就跳過
 ├── .github/dependabot.yml     # 每週自動開 PR 更新套件
 ├── docs/                      # PLAIN（每關白話版）、COACHING（帶做腳本）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環 + 選做四環的任務書）、QA、DEBUGGING、RUNBOOK、PLAN、PLAN-INFRA（基礎設施路線）、ARCHITECTURE（整條鏈的地圖）
 ├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
