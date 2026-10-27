@@ -82,7 +82,7 @@ consumer：INSERT processedevent（主鍵 = 事件 id）→ 撞到就是重複�
 | 後端 | FastAPI、SQLModel、Alembic、slowapi | Render（Docker） | `ci.yml` backend job（ruff、pyright、pytest 67 個（以輸出為準）、alembic check、Docker smoke） | 新 route 另開檔案掛進 `/api`；改 `models.py` 一定產遷移 | 免費（冷啟動） | Express / NestJS / Spring / Go：middleware、DI、遷移工具對應 |
 | 資料庫 | Neon Postgres | Neon | `/api/health` 的 `db`、`migration`；關卡 18 的索引與鎖實驗 | 加表都掛 `user_id`；刪欄位分兩次部署 | 免費 | RDS / Cloud SQL / Supabase；遷移：Prisma、Flyway |
 | 登入 | access JWT 記憶體 + refresh cookie 輪替 | 後端 | pytest 的 refresh 輪替、重用偵測、改密碼後全部失效 | OAuth 登入另加 provider，token 設計不變 | 免費 | 任何語言：bcrypt / argon2 + JWT 函式庫 |
-| CI | GitHub Actions 兩個 workflow | GitHub | Actions 分頁全綠；壞的 PR 合不進去 | 新基礎設施就加一個 job | 公開 repo 免費 | GitLab CI、CircleCI：job → steps → service 一樣 |
+| CI | GitHub Actions：`ci.yml`、`infra.yml`、`codeql.yml`（SAST）、`audit.yml`（每週套件漏洞掃描）、`deploy.yml`（選配） | GitHub | Actions 分頁全綠；壞的 PR 合不進去；Security → Code scanning 沒有 open alert；Audit 每週綠 | 新基礎設施就加一個 job | 公開 repo 免費（CodeQL 私有要付費） | GitLab CI、CircleCI：job → steps → service 一樣 |
 | CD | Render Auto-Deploy after CI、Vercel Git 整合 | Render、Vercel | `/api/health` 的 `version` 對得上 commit | Deploy Hook + GitHub Environments（25-D 的 `deploy.yml` 已在 repo 裡，沒設 secret 時跳過；線上目前仍是 Render Auto-Deploy）；GitOps（Argo CD） | 免費 | Fly.io、Cloud Run、ECS：都吃 Dockerfile + `PORT` |
 | 容器 | multi-stage Dockerfile、非 root、uv | 到處 | `ci.yml` Docker build/run/smoke | 加 worker 的 image 就是同一個，換 command | 免費 | Node：`node:22-slim`；Go：distroless |
 | 本機整套 | docker compose + profiles | Mac | `infra.yml` compose job | 加 profile 加服務 | 免費 | 同 |
