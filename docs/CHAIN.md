@@ -383,7 +383,7 @@
 | `pyproject.toml`、`uv.lock`、`.python-version` | 改 `name`、`description`；套件清單、ruff / pyright 設定不用改。搬完跑 `uv sync` |
 | `config.py` | 不用改。所有設定都從這裡讀，新專案的新設定加在這裡 |
 | `database.py` | 不用改 |
-| `models.py` | `User`、`RefreshToken`、`OutboxEvent`、`ProcessedEvent` 四張都保留（後兩張是關卡 24 的，註冊時會寫 outbox，拆掉要連 `outbox.py` 一起改，先不要）；練習專案的表加在後面，都要有 `user_id` 外鍵 |
+| `models.py` | `User`、`RefreshToken`、`OutboxEvent`、`ProcessedEvent` 四張都保留（後兩張是關卡 24 的，註冊時會寫 outbox，拆掉要連 `outbox.py` 一起改，先不要）；練習專案的表加在後面，都要有指向 `user.id` 的 `owner_id` 外鍵（命名照 `API.md` 第 2 條；模板自己的 `refreshtoken` 用 `user_id` 是舊名，不用改） |
 | `schemas.py` | 保留；新功能的請求 / 回應格式加在後面 |
 | `security.py`、`rate_limit.py` | 不用改（密碼雜湊、JWT、refresh token；頻率限制與代理後的客戶端 IP）。正式環境記得設 `TRUSTED_PROXY_HOPS`（`render.yaml` 已有） |
 | `dependencies.py` | 不用改。新端點用 `Depends(get_current_user)` 拿目前使用者 |
@@ -395,7 +395,7 @@
 | `tests/` 整個資料夾（`conftest.py`、`helpers.py`、`test_auth.py`、`test_rules.py`、`test_health.py`、`test_rate_limit.py`、`test_register_cap.py`、`test_metrics.py`、`test_outbox.py`、`test_tracing.py`）、`pytest.ini` | 不用改。`conftest.py` 的 `TRUNCATE` 那行要把新專案的表名加進去（現在已經有四張） |
 | `Dockerfile`、`.dockerignore`、`.env.example` | 不用改 |
 
-搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`；`.env.example` 只列前兩個，第三個要自己加）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"`（預期印出 Detected added table 四次：`outboxevent`、`processedevent`、`user`、`refreshtoken`）→ `uv run alembic upgrade head` → `uv run alembic check`（預期 `No new upgrade operations detected.`）→ `uv run pytest -q`（67 個測試應該全綠，數字以輸出為準）→ `uv run uvicorn main:app --reload --port 8000`，開 `/api/health` 要看到 `"migration":"0001"`。
+搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`；`.env.example` 裡 `TEST_DATABASE_URL` 那行是註解掉的，取消註解再填）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"`（預期印出 Detected added table 四次：`outboxevent`、`processedevent`、`user`、`refreshtoken`）→ `uv run alembic upgrade head` → `uv run alembic check`（預期 `No new upgrade operations detected.`）→ `uv run pytest -q`（67 個測試應該全綠，數字以輸出為準）→ `uv run uvicorn main:app --reload --port 8000`，開 `/api/health` 要看到 `"migration":"0001"`。
 
 ### 前端（`frontend/`）
 
@@ -432,11 +432,11 @@
 
 ### 搬家後第一次要做的外部步驟
 
-1. Neon：開新專案，拿連線字串（改成 `postgresql+asyncpg://`、`ssl=require`），另建一個測試資料庫
+1. Neon：和本 repo 一樣開**兩個**專案（`<題目>-prod` 給 Render，本機不碰；`<題目>` 給本機的 `DATABASE_URL`），連線字串改成 `postgresql+asyncpg://`、`ssl=require`；測試資料庫在本機那個專案裡另建（SQL Editor 跑 `CREATE DATABASE <題目>_test;`，填 `TEST_DATABASE_URL`）。為什麼分兩個：`HANDOFF.md` 第 7 節
 2. GitHub：開 repo，推上去，確認 CI 綠
 3. Render：New → Blueprint → 選 repo → 填 `DATABASE_URL`、`JWT_SECRET` → 等 Deploy live → 開 `/api/health`
 4. Vercel：Import repo，Root Directory 設 `frontend`，**先**把 `vercel.json` 的 Render 網址改好再 Import（`DEBUGGING.md` 有為什麼）
-5. Render：Auto-Deploy 改成 After CI Checks Pass；GitHub：main 開 branch protection
+5. Render：Auto-Deploy 改成 After CI Checks Pass（⚠️ 免費方案不一定有這個選項，沒有就用 `deploy.yml` 的 Deploy Hook，`RUNBOOK.md` 第 0 節）；GitHub：main 開 branch protection
 6. Sentry：開專案，DSN 填進 Render 的 `SENTRY_DSN`
 
 這六步在 `LEARNING.md` 關卡 10、11 的「⚠️ 開始前」有逐格的點法。
