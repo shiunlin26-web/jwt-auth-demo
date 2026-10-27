@@ -195,21 +195,27 @@
 
 ### 關卡 5：資料庫遷移（Alembic）
 
-**搭配看的程式**：`backend/models.py`；`backend/migrations/env.py`、`migrations/versions/0001～0006`；`backend/alembic.ini`；`backend/Dockerfile` 第 67 行的 CMD（啟動時先 `alembic upgrade head`）
+**搭配看的程式**：`backend/models.py`（櫃子長什麼樣）；`backend/migrations/versions/0001～0006`（六張施工單，一檔一張；0002 最短最好讀）；`backend/Dockerfile:67` 的 CMD（啟動時先 `alembic upgrade head`）；`.github/workflows/ci.yml` 的「遷移檢查」那步
 
-**前置**：後端能連到 Neon。
+**前置**：後端能連到本機那個 `neondb`；`uv` 找不到就先 `$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"`。這關不動 Neon 的資料，只看和產生檔案；真的 downgrade 留到關卡 11。
+
+**先講名詞**：資料表結構（櫃子）vs 資料（放進去的東西）、遷移 = 改櫃子的施工單（有「做」upgrade 和「拆」downgrade 兩個方向）、Alembic = 管施工單的工具、`alembic_version` = 資料庫裡記「做到第幾張」的一筆。關卡 5 之前用 `create_all` 只能「沒有就建」不能改，加欄位要砍表、資料全丟。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `uv run alembic current` | `0006 (head)` | 資料庫現在的「施工進度」。Neon 的 `alembic_version` 表只有這一筆 |
-| 2 | `uv run alembic history` | 0001 → 0002 → … → 0006 六行（0005、0006 是關卡 24 加的） | 每一行是一張施工單，`backend/migrations/versions/` 一檔一張 |
-| 3 | `uv run alembic check` | `No new upgrade operations detected.` | 程式的 `models.py` 和資料庫一致 |
-| 4 | `backend\models.py` 的 `User` 加一行 `nickname: str \| None = None`，再 `uv run alembic check` | `New upgrade operations detected`，提到 `add_column` 和 `nickname` | 改了 models 沒開施工單，CI 就是用這個抓。改回來：`git checkout -- backend/models.py` |
-| 5 | Neon：`SELECT version_num FROM alembic_version;` | `0006` | 和步驟 1 對上 |
-| 6 | 打開 `backend/migrations/versions/0002_*.py` | 看到 `upgrade()` 加欄位、`downgrade()` 刪欄位 | 每張施工單都有「做」和「拆」 |
+| 1 | `uv run alembic current` | `0006 (head)` | 資料庫站在第六階，`head` = 最高階 |
+| 2 | `uv run alembic history` | 六行由新到舊，`0003 add user nickname`、`0004 remove user nickname` | 問他 0003 + 0004 合起來做了什麼（什麼都沒做）→ 為什麼不能刪：正式環境照順序做過、`alembic_version` 記 0006、0005 的 `down_revision` 指著 0004，刪了鏈就斷。施工單是歷史，做錯再開一張改回來 |
+| 3 | `uv run alembic check` | 一堆 INFO，最後 `No new upgrade operations detected.` | 程式的櫃子和資料庫的櫃子一致 |
+| 4 | `models.py` 的 `User` 在 `last_login_at` 下面加 `nickname: str \| None = None`（4 格縮排），存檔，再 `check` | `Detected added column 'user.nickname'`、`FAILED: New upgrade operations detected` | CI 的「遷移檢查」就是它。問：這時 `pytest` 會過嗎？會，測試庫用 `create_all` 直接照 `models.py` 建，永遠一致；只有走施工單的庫（本機 `neondb`、正式）才對不上。這是關卡 20 第 3 題「本機綠、CI 紅」的來源 |
+| 5 | `uv run alembic revision --autogenerate --rev-id 0007 -m "add user nickname"`，打開產生的檔案貼 `upgrade()`、`downgrade()` 兩段 | `op.add_column('user', Column('nickname', AutoString(), nullable=True))` / `op.drop_column('user', 'nickname')` | **upgrade 不是「新增」、downgrade 不是「移除」**（學習者這樣以為）：upgrade = 做這張單的事，downgrade = 還原。0004 的 upgrade 就是刪欄位。樓梯比喻：`upgrade head` 往上爬每階跑 `upgrade()`（Dockerfile 每次部署跑）、`downgrade -1` 退一階跑 `downgrade()`（關卡 11 退版），所以 downgrade 必須剛好是 upgrade 的相反。`nullable=True` 是因為表裡已有使用者，`False` 會 `contains null values` 整張 rollback |
+| 6 | 收拾：`Remove-Item migrations\versions\0007_add_user_nickname.py`、`git checkout -- models.py`、`uv run alembic check`、`git status` | `No new upgrade operations`、`working tree clean` | 沒套用過直接刪檔；套用過要先 `downgrade -1` 再刪 |
 
-**收尾**：資料庫結構用施工單管 / 改 models 一定開單 / `alembic check` 是守門員。
-**動手玩**：`LEARNING.md` 關卡 5 的 1（downgrade 再 upgrade，會動到 Neon，做之前說一聲）。
+**自動產生會問的**（學習者問「都是自動的嗎」「一次改很多表呢」）：對，`--autogenerate` 比對 `models.py` 和資料庫，差異寫成 upgrade、反過來寫成 downgrade；多張表的差異在同一張單裡，downgrade 反序（0001 兩張表、外鍵順序）。抓得到：加刪表、加刪欄位、索引、unique、外鍵；大多抓到：改型別；**抓不到**：改名（變成 drop + add，資料全丟，要改成 `alter_column(new_column_name=)`）、搬資料（要自己寫 SQL）。所以流程是改 models → autogenerate → **打開看** → upgrade → 連檔 commit，看那一眼是他的工作，AI 改的也要看。一張單只做一件事。
+**實務補救**（學習者問「實際上一定會出例外，怎麼補救、怎麼避免」）：三層保護（單在 git 裡刪了 `git checkout` 回來；CI 從空庫 `upgrade head` 鏈斷就紅；規矩「套用過的單不改不刪只加新的」）。補救表：檔案被刪 → `git checkout <commit> -- 路徑` 或照實際結構重寫同編號；兩人同時開單 `Multiple heads` → `alembic merge` 或改 `down_revision`；`alembic_version` 和檔案對不上 → `alembic stamp <版本>`（確定結構真的在那階才用）；有人手動改表 → 開一張單補進歷史；跑到一半失敗 → Postgres DDL 有交易會整張 rollback，修好重跑。**expand / contract**：加欄位先 nullable、部署、寫入、再開單改 NOT NULL；刪欄位先讓程式不讀（部署一版）再刪；改名用 alter_column。請 AI 改表時盯第一張單有沒有 `drop_column` 或 `nullable=False`。
+
+**收尾一句話**：資料庫結構用施工單管，改 models 一定開單、看一眼、套用、一起 commit；每張單能做也能拆；程式換版用 git、資料庫換版用 Alembic。
+**題目只問他做過的**（曾經問「套用了 0007 之後要還原的順序」被嗆「我又沒做過」）：(1) 加了 `nickname` 後 `check` 紅、`pytest` 綠，為什麼；(2) 0003/0004 為什麼不能刪；(3) 0007 如果是 `nullable=False`，`upgrade head` 會怎樣、為什麼。
+**動手玩**：`LEARNING.md` 關卡 5 的 1（downgrade 再 upgrade，會動到 Neon，留到關卡 11 一起做）。
 
 ### 關卡 6：前端整理（api / auth / components）
 
