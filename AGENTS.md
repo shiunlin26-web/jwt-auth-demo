@@ -17,7 +17,7 @@ JWT 登入的教學範本：FastAPI 後端 + React 前端 + Neon Postgres，已�
 - 20 天計畫（設計理由，時程已過期）：`docs/PLAN.md`
 - 基礎設施路線（關卡 21～25：compose、E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖）：`docs/PLAN-INFRA.md`。做任何一小塊前讀它的第 2 節與那一小塊的段落，**不要讀 `LEARNING.md` 全文**
 - 整條鏈的地圖（四條路徑、每塊怎麼證明）：`docs/ARCHITECTURE.md`；基礎設施怎麼親手跑：`infra/README.md`
-- 轉全端還差什麼、下一階段怎麼排（練習專案、延伸關卡 26～30、雲、和 AI 合作的固定循環）：`docs/PLAN-FULLSTACK.md`
+- 重帶走完之後的路：`docs/PLAN-FULLSTACK.md`（最小路線五步約 8 週、差距目錄、和 AI 合作的固定循環）。技術棧定了：練習專案和本 repo 一樣 Python + React
 
 ## 結構
 
