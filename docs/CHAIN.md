@@ -374,6 +374,8 @@
 
 從本 repo 複製到練習專案。**先搬、跑起來、再改**。每個檔案開頭有中文註解說為什麼這樣寫，搬過去請保留。
 
+> 2026-10-27 照這份清單在乾淨目錄實際搬過一次（PR #75）：後端 ruff、pyright、`alembic revision --autogenerate`、`alembic check`、67 個測試、起服務註冊登入；前端 lint、prettier、tsc、vitest、build，全綠。那次補上的漏洞已經改進下面的表。
+
 ### 後端（`backend/`）
 
 | 檔案 | 搬過去要改什麼 |
@@ -381,25 +383,26 @@
 | `pyproject.toml`、`uv.lock`、`.python-version` | 改 `name`、`description`；套件清單、ruff / pyright 設定不用改。搬完跑 `uv sync` |
 | `config.py` | 不用改。所有設定都從這裡讀，新專案的新設定加在這裡 |
 | `database.py` | 不用改 |
-| `models.py` | `User`、`RefreshToken` 保留；練習專案的表加在後面，都要有 `user_id` 外鍵 |
+| `models.py` | `User`、`RefreshToken`、`OutboxEvent`、`ProcessedEvent` 四張都保留（後兩張是關卡 24 的，註冊時會寫 outbox，拆掉要連 `outbox.py` 一起改，先不要）；練習專案的表加在後面，都要有 `user_id` 外鍵 |
 | `schemas.py` | 保留；新功能的請求 / 回應格式加在後面 |
 | `security.py`、`rate_limit.py` | 不用改（密碼雜湊、JWT、refresh token；頻率限制與代理後的客戶端 IP）。正式環境記得設 `TRUSTED_PROXY_HOPS`（`render.yaml` 已有） |
 | `dependencies.py` | 不用改。新端點用 `Depends(get_current_user)` 拿目前使用者 |
-| `routes/auth.py`、`routes/users.py` | 不用改。新功能另開 `routes/todos.py` 之類，在 `main.py` 掛進 `api` router |
+| `routes/__init__.py`、`routes/auth.py`、`routes/users.py` | 不用改。新功能另開 `routes/todos.py` 之類，在 `main.py` 掛進 `api` router |
 | `main.py` | 保留 middleware（request id、no-store）、`/api` 前綴、`ping`、`health`、`_boom`、`_ip`；`include_router` 加新的 |
 | `logging_config.py` | 不用改 |
+| `metrics.py`、`tracing.py`、`outbox.py` | **要搬，不用改**。`main.py` 直接 import `metrics` 和 `tracing`，`routes/auth.py` 直接 import `outbox`，少一個後端起不來（ruff 也會因為 import 分組錯而報 I001）。全靠環境變數開關：什麼都不設就是「`/metrics` 有、追蹤不送、註冊事件只印到 log」 |
 | `alembic.ini`、`migrations/env.py`、`migrations/script.py.mako` | 不用改。**不要**複製 `migrations/versions/` 裡的檔案，新專案從頭產生：`uv run alembic revision --autogenerate --rev-id 0001 -m "init"` |
-| `tests/conftest.py`、`tests/helpers.py`、`tests/test_auth.py`、`tests/test_rules.py`、`tests/test_health.py`、`tests/test_rate_limit.py`、`pytest.ini` | 不用改。`conftest.py` 的 `TRUNCATE` 那行要把新專案的表名加進去 |
+| `tests/` 整個資料夾（`conftest.py`、`helpers.py`、`test_auth.py`、`test_rules.py`、`test_health.py`、`test_rate_limit.py`、`test_register_cap.py`、`test_metrics.py`、`test_outbox.py`、`test_tracing.py`）、`pytest.ini` | 不用改。`conftest.py` 的 `TRUNCATE` 那行要把新專案的表名加進去（現在已經有四張） |
 | `Dockerfile`、`.dockerignore`、`.env.example` | 不用改 |
 
-搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"` → `uv run alembic upgrade head` → `uv run pytest -q`（67 個測試應該全綠，數字以輸出為準）→ `uv run uvicorn main:app --reload --port 8000`。
+搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`；`.env.example` 只列前兩個，第三個要自己加）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"`（預期印出 Detected added table 四次：`outboxevent`、`processedevent`、`user`、`refreshtoken`）→ `uv run alembic upgrade head` → `uv run alembic check`（預期 `No new upgrade operations detected.`）→ `uv run pytest -q`（67 個測試應該全綠，數字以輸出為準）→ `uv run uvicorn main:app --reload --port 8000`，開 `/api/health` 要看到 `"migration":"0001"`。
 
 ### 前端（`frontend/`）
 
 | 檔案 | 搬過去要改什麼 |
 | --- | --- |
 | `package.json`、`package-lock.json`、`.nvmrc`、`.env.example` | 改 `name`。搬完 `npm ci` |
-| `vite.config.ts`、`vitest.config.ts`、`vercel.json`、`tsconfig*.json`、`eslint.config.js`、`.prettierrc`、`.prettierignore`、`index.html` | `vercel.json` 的 `destination` 改成新的 Render 網址；`index.html` 的 `<title>`；其他不用改 |
+| `vite.config.ts`、`vitest.config.ts`、`vercel.json`、`tsconfig*.json`、`eslint.config.js`、`.prettierrc`、`.prettierignore`、`index.html` | `vercel.json` 的 `destination` 改成新的 Render 網址（是 `render.yaml` 的 `name` 加 `.onrender.com`）；`index.html` 的 `<title>`；其他不用改。`tsconfig.node.json` 的 include 有列 `playwright.config.ts` 和 `e2e`，環 8 前不搬那兩個也沒關係，tsc 不會因為找不到而報錯 |
 | `src/test/setup.ts`、`src/test/server.ts`、`src/api/client.test.ts`、`src/auth/RequireAuth.test.tsx`、`src/components/LoginForm.test.tsx` | 不用改。新功能的測試照 `LoginForm.test.tsx` 的樣子寫在被測檔案旁邊；`server.ts` 的 `handlers` 加新 API 的預設回應 |
 | `src/main.tsx` | 不用改（`initializeAuth()`、`QueryClientProvider`、`RouterProvider`） |
 | `src/api/client.ts`、`src/api/auth.ts`、`src/api/queryClient.ts` | 不用改。新功能的 API 另開 `src/api/todos.ts`，用 `api.get` / `api.post`（會自動帶 token、自動 refresh） |
@@ -413,16 +416,19 @@
 
 | 檔案 | 搬過去要改什麼 |
 | --- | --- |
-| `.github/workflows/ci.yml`、`.github/dependabot.yml`、`.editorconfig` | 如果後端 / 前端資料夾名稱一樣就完全不用改 |
-| `render.yaml` | 改 `name`；其他不用改 |
+| `.github/workflows/ci.yml`、`.github/dependabot.yml`、`.editorconfig`、`.gitattributes` | 如果後端 / 前端資料夾名稱一樣就完全不用改（`ci.yml` 裡的 `jwt-backend:ci` 只是 CI 內部的 image 名，留著沒關係） |
+| `.github/workflows/codeql.yml`、`audit.yml` | 不用改。公開 repo 免費；⚠️ 練習專案如果設成私有，CodeQL 要付費，那就把 `codeql.yml` 拿掉 |
+| `.github/workflows/deploy.yml` | 選配。沒設 secret `RENDER_DEPLOY_HOOK` 就自動跳過，要用看 `docs/RUNBOOK.md` 第 0 節 |
+| `render.yaml` | 改 `name`（Render 的網址跟著它，`frontend/vercel.json` 要對上）；其他不用改 |
 | `.gitignore`、`CLAUDE.md` | 不用改 |
-| `scripts/setup.ps1` | 第 8 行和 README 裡的 clone 網址改成新 repo；其餘不用改 |
+| `README.md` | 自己寫，不要複製（本 repo 的 README 是學習專案的說明） |
+| `scripts/setup.ps1` | 第 8～9 行的 clone 網址與資料夾名改成新 repo（README 如果照抄那兩行也要改）；其餘不用改 |
 | `AGENTS.md` | 用附錄 B 的範本，不要直接複製本 repo 的（它有學習專案專屬的規矩） |
 | `docs/DEBUGGING.md`、`docs/RUNBOOK.md` | 複製過去當起點，練習專案踩到的坑加上去 |
-| `scripts/setup.sh`、`scripts/doctor.sh`、`scripts/doctor.ps1` | clone 網址改成新 repo；其餘不用改 |
+| `scripts/setup.sh`、`scripts/doctor.sh`、`scripts/doctor.ps1` | 不用改（裡面沒有 repo 網址，都是從目前所在的 repo 動作） |
 | `infra/`、`.github/workflows/infra.yml` | 環 8～11 才要，可以先不搬。搬的話：compose 的 `name`、k8s 的 namespace、image 名、Grafana 儀表板 JSON 的 `uid` 與 `title` 改成新專案的 |
 | `frontend/e2e/`、`frontend/playwright.config.ts` | 環 8 才要；測試裡的文案（按鈕、標題、placeholder）換成新專案的 |
-| `backend/metrics.py`、`tracing.py`、`outbox.py`、`worker.py`、`consumer.py` | 環 9、11 才要；不用改，全靠環境變數開關 |
+| `backend/worker.py`、`consumer.py` | 環 11 才要（compose 裡獨立的 worker 與 consumer 程序）；不用改。`metrics.py`、`tracing.py`、`outbox.py` 不在這裡，它們是必搬的，見後端表 |
 
 ### 搬家後第一次要做的外部步驟
 
