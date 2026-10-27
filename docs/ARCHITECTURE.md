@@ -1,6 +1,6 @@
 # ARCHITECTURE.md：整條鏈的地圖
 
-> 狀態：v2（2026-10-22；v1 在關卡 21～24 的程式做完時寫，v2 在教學文件與 CHAIN 環 8～11 寫完時收尾）。這一頁的目的：**十分鐘讓一個沒看過 repo 的人看懂整條鏈**，每一塊都有「怎麼證明它會動」。
+> 狀態：v2（2026-10-22；v1 在關卡 21～24 的程式做完時寫，v2 在教學文件與 CHAIN 環 8～11 寫完時收尾；2026-10-27 做過交接演練：只給一個全新的 AI 這一頁，它答不出來的地方補進 1.2、1.4、第 2、3 節）。這一頁的目的：**十分鐘讓一個沒看過 repo 的人看懂整條鏈**，每一塊都有「怎麼證明它會動」。
 > 每一塊的教學細節在 `LEARNING.md` 對應的關卡；怎麼親手跑在 `infra/README.md`；為什麼這樣排在 `PLAN-INFRA.md`。
 > 第 6 節「60 秒說法」是給面試用的，每一格留給學習者用自己的話填。
 
@@ -18,7 +18,7 @@
    ▼
 Vercel rewrites  ──/api/*──▶  Render（Docker 容器，backend/Dockerfile）
                                  │  FastAPI
-                                 │   ├ middleware：request id、Cache-Control: no-store、指標、（追蹤）
+                                 │   ├ middleware：request id、Cache-Control: no-store、指標與追蹤（兩個開關，線上沒開，見 1.4）
                                  │   ├ /api/auth/login：bcrypt 驗密碼 → access token（JWT，回 body）
                                  │   │                  + refresh token（隨機字串、DB 存雜湊、HttpOnly cookie、Path=/api/auth）
                                  │   ├ /api/auth/refresh：輪替 + 重複使用偵測
@@ -43,7 +43,7 @@ git push 分支 ──▶ GitHub Actions
                    （選配 25-D）deploy.yml：CI 綠 → POST Render Deploy Hook → 等 version 對上才綠，Environments 分頁留紀錄
 ```
 
-同一個 image 的三種跑法：Render（一個實例，遷移在啟動指令）、compose（本機整套）、Kubernetes（遷移是 Job，Deployment 2 副本零停機滾動更新、`rollout undo` 退版、壞 image 被 readiness 擋住）。
+同一個 image 的三種跑法：Render（一個實例，遷移在 Dockerfile 的啟動指令：先 `alembic upgrade head` 再 uvicorn）、compose（本機整套，遷移同樣在啟動指令，backend 等 postgres healthy 才起）、Kubernetes（遷移是獨立的 Job；Deployment 2 副本，liveness `/api/ping`、readiness `/api/health`、`maxSurge: 1`、`maxUnavailable: 0`、preStop 睡 5 秒等 Service 名單更新，所以換版零停機；`rollout undo` 退版；壞 image 新 pod 永遠不 Ready、舊 pod 繼續服務）。k8s 清單只有後端：worker 與 consumer 只在 compose 的 messaging profile 跑，k8s 要跑就是再加一個 Deployment，同一個 image 換 command。
 
 ### 1.3 事件路徑：註冊之後要通知別人
 
@@ -72,24 +72,28 @@ consumer：INSERT processedevent（主鍵 = 事件 id）→ 撞到就是重複�
 
 三種訊號怎麼分工：log 找「這一個請求」、指標看「趨勢與比例」、追蹤看「這一個請求花在哪」；request_id 和 trace_id 讓三者互相找得到。
 
+線上（Render）現在開著的：JSON log、Sentry、`/api/ping`、`/api/health`、inline 的 outbox worker（事件印到 log）。沒開的：`/metrics`（`METRICS_ENABLED` 沒設；它也不在 `/api` 底下，Vercel 不會轉發）、追蹤（`OTEL_EXPORTER_OTLP_ENDPOINT` 沒設）、Kafka 與 consumer（事件只到 log）。這三樣只在 compose 與 CI 跑；要在線上開都只改環境變數，程式不動。
+
 ## 2. 每一塊：在哪跑、怎麼證明、怎麼擴充、要多少錢、換棧對照
 
 | 區塊 | 這裡用什麼 | 在哪跑 | 怎麼證明它會動 | 怎麼擴充 | 費用 | 換技術棧對照 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 前端 | React 19、Vite、Router、Zustand、TanStack Query、RHF + Zod、Tailwind | Vercel | `ci.yml` frontend job；`infra.yml` e2e job（Playwright 走註冊→登入→重整→登出） | 加頁面與 query、加 E2E 條數 | 免費 | Next.js / Vue / Svelte：守門員、伺服器狀態、代理的概念一樣 |
-| 後端 | FastAPI、SQLModel、Alembic、slowapi | Render（Docker） | `ci.yml` backend job（ruff、pyright、pytest 64 個、alembic check、Docker smoke） | 新 route 另開檔案掛進 `/api`；改 `models.py` 一定產遷移 | 免費（冷啟動） | Express / NestJS / Spring / Go：middleware、DI、遷移工具對應 |
+| 後端 | FastAPI、SQLModel、Alembic、slowapi | Render（Docker） | `ci.yml` backend job（ruff、pyright、pytest 67 個（以輸出為準）、alembic check、Docker smoke） | 新 route 另開檔案掛進 `/api`；改 `models.py` 一定產遷移 | 免費（冷啟動） | Express / NestJS / Spring / Go：middleware、DI、遷移工具對應 |
 | 資料庫 | Neon Postgres | Neon | `/api/health` 的 `db`、`migration`；關卡 18 的索引與鎖實驗 | 加表都掛 `user_id`；刪欄位分兩次部署 | 免費 | RDS / Cloud SQL / Supabase；遷移：Prisma、Flyway |
 | 登入 | access JWT 記憶體 + refresh cookie 輪替 | 後端 | pytest 的 refresh 輪替、重用偵測、改密碼後全部失效 | OAuth 登入另加 provider，token 設計不變 | 免費 | 任何語言：bcrypt / argon2 + JWT 函式庫 |
 | CI | GitHub Actions 兩個 workflow | GitHub | Actions 分頁全綠；壞的 PR 合不進去 | 新基礎設施就加一個 job | 公開 repo 免費 | GitLab CI、CircleCI：job → steps → service 一樣 |
-| CD | Render Auto-Deploy after CI、Vercel Git 整合 | Render、Vercel | `/api/health` 的 `version` 對得上 commit | Deploy Hook + GitHub Environments（25-D）；GitOps（Argo CD） | 免費 | Fly.io、Cloud Run、ECS：都吃 Dockerfile + `PORT` |
+| CD | Render Auto-Deploy after CI、Vercel Git 整合 | Render、Vercel | `/api/health` 的 `version` 對得上 commit | Deploy Hook + GitHub Environments（25-D 的 `deploy.yml` 已在 repo 裡，沒設 secret 時跳過；線上目前仍是 Render Auto-Deploy）；GitOps（Argo CD） | 免費 | Fly.io、Cloud Run、ECS：都吃 Dockerfile + `PORT` |
 | 容器 | multi-stage Dockerfile、非 root、uv | 到處 | `ci.yml` Docker build/run/smoke | 加 worker 的 image 就是同一個，換 command | 免費 | Node：`node:22-slim`；Go：distroless |
 | 本機整套 | docker compose + profiles | Mac | `infra.yml` compose job | 加 profile 加服務 | 免費 | 同 |
 | Kubernetes | kustomize base + overlay、Job 遷移、Deployment 2 副本、probes、preStop | kind（CI、Mac） | `infra.yml` k8s job：rollout、零停機 80 次全 200、undo、壞 image 被擋 | overlay 加 prod：registry image、Ingress + TLS、HPA、PDB；Helm / Argo CD | 線上叢集要錢（GKE / EKS 每月幾十美元起） | 概念跨雲一樣 |
 | 指標 | prometheus_client、Prometheus、Grafana | compose（CI、Mac） | `infra.yml` observability job：Prometheus 有數字、Grafana 儀表板存在且查得到 | 加告警 rule；k8s 用 service discovery | 免費；Grafana Cloud 免費方案 | Datadog、CloudWatch：概念同 |
 | 追蹤 | OpenTelemetry（FastAPI + asyncpg）、OTLP、collector | compose（CI、Mac）；Grafana Cloud 選配 | observability job 的「追蹤」那步：HTTP span、SQL 子 span、request id、log 有 trace_id | collector 換 exporter 就接任何後端；前端也能送 | 免費 | OTel 本來就跨語言跨廠商 |
-| 錯誤與 log | JSON log + request id、Sentry | Render | `/api/_boom` 演練：log 有 traceback、Sentry 收到 | log 收到 Loki / CloudWatch | 免費 | pino / slog + Sentry SDK |
+| 錯誤與 log | JSON log + request id、Sentry | Render | `/api/_boom` 演練（`ENABLE_DEBUG_ENDPOINTS=true` 才有這個端點）：Render Logs 有 traceback、Sentry 收到 issue；沒有 CI job | log 收到 Loki / CloudWatch | 免費 | pino / slog + Sentry SDK |
 | 訊息 | transactional outbox、aiokafka、Redpanda、冪等 consumer | compose（CI、Mac）；Render 用 inline + log | `infra.yml` messaging job：published → consumed → 重送是 duplicate | 事件多種 topic；consumer 拆成獨立服務；託管 Kafka（Confluent、MSK） | 自己跑免費；託管 Kafka 要錢 | RabbitMQ / SQS / Pub/Sub：outbox 與冪等的做法一樣 |
-| 維運 | RUNBOOK（退版、roll forward、換密鑰、備份）、DEBUGGING、drills | 文件 | 關卡 20 的故障演練 | 每踩一個坑加一條 | 免費 | 跟語言無關 |
+| 維運 | RUNBOOK（退版、roll forward、換密鑰、備份）、DEBUGGING、drills | 文件 | RUNBOOK 每一節照做過一次（關卡 11）；`docs/drills/` 的故障演練：手動套 patch、找原因、還原（關卡 20，沒有 CI job）。第 6 節的「維護（11）」= 這列 + 上面「錯誤與 log」列 | 每踩一個坑加一條 | 免費 | 跟語言無關 |
+
+表裡的「怎麼證明」要在本機親手做：指令在 `infra/README.md`，一步一步帶（指令、預期值、講什麼）在 `COACHING.md` 關卡 21～24 的 Mac 路線；沒有 Docker 的機器看 CI job 的 log（VM 路線）。
 
 ## 3. 哪些東西刻意不做（下一步往哪擴）
 
@@ -99,7 +103,7 @@ consumer：INSERT processedevent（主鍵 = 事件 id）→ 撞到就是重複�
 | 線上 Kubernetes 叢集 | 沒有免費的；Render 夠用 | `infra/k8s/overlays/` 加 prod overlay，image 推 GHCR，Ingress + cert-manager |
 | 託管 Kafka | 沒有免費方案 | 程式只改 `KAFKA_BOOTSTRAP_SERVERS` 與認證的環境變數 |
 | Helm、Argo CD | kustomize 夠用；GitOps 是下一階段 | 把 `kubectl apply -k` 交給 Argo CD 看 repo 自動 sync |
-| HPA、PDB、Ingress | 不在一台 kind 上示範 | `infra/k8s/base/` 加三個檔案 |
+| HPA、PDB、Ingress | 不在一台 kind 上示範 | `infra/k8s/overlays/` 的 prod overlay 加三個檔案（base 保持能在一台 kind 上跑，和第 2 節 Kubernetes 列一致） |
 | 告警 | 儀表板已有「5xx 比例」查詢 | Grafana alert rule 用同一條查詢 |
 | Tempo / Loki | collector 印 log 已能看 span | collector 的 exporter 改成 otlphttp 送到 Tempo；log 收到 Loki |
 | 前端 Dockerfile | 前端留在 Vercel | 要進叢集時 `nginx:alpine` 放 `dist/` |
