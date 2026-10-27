@@ -27,6 +27,7 @@
 - **他說「我沒看到你說的東西」**：相信他，是你記錯了。改成用指令、數字或檔案內容驗證，不要再描述畫面。
 - **每個實驗結束一句話「這證明了什麼」**。一關結束用「你看到的 → 對應的觀念」表格收尾，**收尾之後要問「哪一步要我再講一次？」**，他說沒有再進下一關（關卡 19 曾經收尾講太快）。
 - **一關的收尾有三段，缺一不可，而且不要催**（關卡 0 曾經因為催太快，被要求先整理好再往下）：(1) 用一個情境把整關脈絡從頭講一遍（一個請求走幾站、每站誰在做、出錯回什麼）；(2) 出 5～7 題讓他用自己的話答，題目要蓋到這關的每個觀念；(3) 逐題對答案，對一半的說清楚缺哪一半，錯的用情境重講，再補一輪只問錯的。最後給一份「整理」：一句話、脈絡表、狀態碼表、規則、他誤解過的地方。**他說「下一關」才開下一關**，不要在收尾訊息的結尾就塞下一關的第一步。
+- **PowerShell 指令列打中文會變 `?`**（`python -c '中文'`、`pytest -k 中文` 都撞過）：預期值要用英文片段或 curl 的 JSON 走；輸出的中文被印成 `\uXXXX` 是輸出編碼，`-v` 模式正常。別在這上面繞。
 - **出題只問他打得開的程式**（曾經問「關卡 2 之前的 `os.getenv` 寫法會怎樣」，那段程式已經不在 repo 裡，他沒地方看）。要問歷史版本，先給 `git show <commit>~1:<檔案>` 讓他看到再問。
 - **改了任何程式檔（包括只加註解）之後，grep 文件裡所有引用那個檔案的行數**：`grep -n "<檔名>" docs/*.md` 一個一個對。曾經給 `security.py` 檔頭加了 14 行註解，關卡 1、2 引用它的六個行數全部沒跟著改，另一個對話核對才發現。合併別人的分支之後也要做一次。
 - **需要他改程式的步驟**（動手玩）：給檔案路徑、改前一行、改後一行，最後一定寫「改回來：`git checkout -- <檔案>`」。
@@ -169,20 +170,25 @@
 
 ### 關卡 4：自動化測試（pytest）
 
-**搭配看的程式**：`backend/tests/conftest.py`（測試資料庫、`client`、`make_client`）、`helpers.py`、`test_auth.py`、`test_rules.py`；`backend/pyproject.toml` 的 pytest 設定
+**搭配看的程式**：`backend/tests/test_auth.py`（117 行 `test_舊的refresh_token再被使用會撤銷全部`、230 行 `test_改密碼成功`）、`tests/helpers.py`（`register`、`login`、固定帳號 `test@example.com`）、`tests/conftest.py`（只講三件事，見步驟 7）；`backend/pyproject.toml` 的 pytest 設定
 
-**前置**：`backend\.env` 有 `TEST_DATABASE_URL`。
+**前置**：`backend\.env` 有 `TEST_DATABASE_URL`，而且是 `jwt-auth-demo` 專案的 `jwtdemo_test`（不是 `neondb`，更不是 `jwt-auth-demo-prod`）。本機要是最新版：`git pull`，然後**在 `backend`** `uv sync`、`uv run alembic upgrade head`（曾經在 repo 根目錄跑這兩個，`No pyproject.toml found`）。`uv` 找不到：這個視窗是裝 uv 之前開的，`$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"`，或整個 Windows Terminal 關掉重開（新分頁不會重讀 PATH）。
+
+**先講名詞**：測試（跟 curl 做的事一樣，由程式自己打、自己對）、pytest（找 `test_` 開頭的函式一個一個跑）、assert（「我斷言這個對」，不對就紅）、測試資料庫（每個測試前清空，所以絕對不能是正式或開發用的那個）。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `uv run pytest -q`（在 `backend`） | 最後一行 `67 passed`（數字以輸出為準；關卡 21 起又加了十幾個） | 這些測試就是關卡 0～3 你用 curl 做過的事，機器代勞 |
-| 2 | `uv run pytest -q --collect-only -q \| Select-Object -First 25` | 一行一個測試名稱，中文的 | 名稱就是規格：`test_舊的refresh_token再被使用會撤銷全部` 對應關卡 1 步驟 3、4 |
-| 3 | `uv run pytest -q -k 撤銷全部 -v` | `1 passed`，名稱印出來 | `-k` 挑名字裡有這個字的測試 |
-| 4 | `backend\routes\auth.py` 找到 `rt.revoked = True`（refresh 裡那行），前面加 `#`，`uv run pytest -q -x` | 第一個紅的就停（`-x`），名稱和「撤銷」「換發」有關；最後幾行有 `assert` 和實際值 | 從最後一行往上讀：期望什麼、實際拿到什麼。改回來：`git checkout -- backend/routes/auth.py` |
-| 5 | 打開 `backend/tests/test_auth.py`，找步驟 3 那個測試 | 看得到：登入、refresh、拿舊 cookie 再 refresh、assert 401 | 測試的三段：準備、動作、斷言。和你 curl 做的一模一樣 |
+| 1 | `uv run pytest -q`（在 `backend`） | 一排點，最後 `67 passed in 271s`（數字以輸出為準） | 慢是因為測試資料庫在 Neon，67 次 TRUNCATE 都跨海；CI 用本機 Postgres 約 1 分鐘。這些測試就是關卡 0～3 用 curl 做過的事 |
+| 2 | `uv run pytest --collect-only -q \| Select-Object -First 30`（**`-q` 只能一個**，兩個會變成只印每個檔案幾個） | 一行一個 `tests/test_auth.py::test_...`，中文會印成 `註冊`（PowerShell 輸出編碼） | 名稱就是規格。幫他解開對照：註冊成功 / 重複註冊 400 / 中文密碼 422 / 密碼錯 401 / 登入密碼太短也 401 = 關卡 0；登入拿兩張票 / refresh 換發 / 舊的再用撤銷全部 / DB 只存雜湊 = 關卡 1；登出所有裝置 / 改密碼 / 目前密碼錯 400 = 關卡 3；登入時清過期 = 關卡 2 的 DELETE |
+| 3 | `uv run pytest -v -k refresh_token` | `4 passed`，四個名稱用中文印出來 | `-k` 挑名字裡有這串的。**`-k` 後面打中文會變 `????`**（指令列輸入編碼，和關卡 0 的 `python -c` 同一個坑），用名稱裡的英文片段，或先 `chcp 65001` |
+| 4 | 打開 `tests/test_auth.py` 第 117 行，把函式貼給他，一行對一步 | `register` / `login` / 記 `old_cookie` / `refresh` = 關卡 1 第 1～2 步；`thief = make_client(cookies=...)` + `refresh` = 第 3 步；三個 `assert`（401、那句、`count == 0`）= 第 3、5 步；本人 `refresh` 401 = 第 4 步 | `client` = 帶 `-b -c` 的 curl、`make_client` = 第二個罐子、`helpers.py` 的 `register`/`login` 帳號固定。測試的三段：**準備、動作、斷言**，讀任何測試都找這三段 |
+| 5 | `routes\auth.py` 第 229 行 `rt.revoked = True` 前面加 `#`，**存檔**（曾經沒存到，還是 4 passed：先 `Get-Content routes\auth.py \| Select-String -n "rt.revoked = True"` 看有沒有 `#`），`uv run pytest -q -x -k refresh_token` | `FAILED ...撤銷全部 - assert 200 == 401`、`1 failed, 1 passed` | 讀法：`assert 實際 == 預期`，左邊程式真的回的、右邊測試要的。拆三個小問題問：200 是誰 / 紅的是小偷那個 (a) 還是本人那個 (b)（第一個失敗就停）/ 拿掉蓋章後舊票 `revoked` 永遠 false，207 行 `if rt.revoked` 不走，小偷換成功 200。重點：登入、換票、`/me` 全部正常，**沒有任何錯誤訊息，只有測試抓得到** |
+| 6 | `git checkout -- routes/auth.py`，再跑一次 | `4 passed` | |
+| 7 | `conftest.py` 不出題，用白話講三件事：(1) 26～34 行：沒設 `TEST_DATABASE_URL` 或跟 `DATABASE_URL` 一樣就拒跑，因為下一件會清表；(2) 43～59 行 `clean_database` 標 `autouse=True`，每個測試前自動跑，第一次砍掉重建、之後 TRUNCATE，所以每個測試從空庫開始、`register` 永遠不撞；`yield` 上面是測試前、下面是測試後；(3) 60 行起 `client`：測試參數寫 `client` 就拿到一個「帶罐子的 curl」，打記憶體裡的 app，`get_session` 被換成測試庫的版本。25 行 `limiter.enabled = False` 是因為測試從同一個 IP 打幾十次登入 | | 一句話：用錯庫就不跑、每個測試前清空、給你一個 client。讀測試時只要知道 `client` 從這來 |
 
-**收尾**：測試是把 curl 的步驟寫成程式 / 紅了先讀最後幾行 / `-k`、`-x`、`-v` 三個參數夠用。
-**動手玩**：`LEARNING.md` 關卡 4 的「自己寫一個」。
+**收尾一句話**：把三關的 curl 寫成程式，一個指令 30 秒驗完；紅了讀最後一行 `assert 實際 == 預期`；改壞了沒有錯誤訊息的 bug 只有測試抓得到。
+**題目只出有觀念的**（曾經問「`-k` 中文為什麼失敗」「測試庫為什麼要不同」被嫌沒意義）：(1) `assert 200 == 401` 拆三個小問題（上面步驟 5）；(2) **用準備、動作、斷言三段，用中文寫「電腦改密碼後手機被登出」要測什麼**。他答「兩台登入 / A 改密碼 / B 換票 401」就對了，再補一句「A 自己換票要 200」（補發那一半），然後貼 230 行 `test_改密碼成功` 給他對：多了舊密碼登入 401、新密碼登入 200 兩個斷言。
+**動手玩**：`LEARNING.md` 關卡 4 的「自己寫一個」（照 230 行的樣子寫 `test_登出所有裝置後兩台都401`）。
 
 ### 關卡 5：資料庫遷移（Alembic）
 
