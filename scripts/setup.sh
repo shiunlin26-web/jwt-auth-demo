@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --env-file) ENV_FILE="${2:-}"; shift 2 ;;
     --skip-tests) SKIP_TESTS=1; shift ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -euo pipefail/{/^#/p;}' "$0"; exit 0 ;;   # 印檔頭註解到 set 之前為止，檔頭加減行不用改這裡
     *) echo "不認識的參數：$1（可用：--env-file <路徑>、--skip-tests）" >&2; exit 2 ;;
   esac
 done
