@@ -2483,6 +2483,7 @@ log 要你主動去翻。Sentry 反過來：程式丟出沒接住的例外時，
 3. **改了 models.py 沒寫遷移**：開分支，`models.py` 的 `User` 加一個欄位 `nickname: str | None = None`，**不要**跑 alembic revision，開 PR。本機 pytest 會過，但 CI 的「遷移檢查」會紅。這就是故障演練第 4 條，提前讓你看一次。關掉 PR。
 4. **退版演練**：Render → Events → 找上一個成功的部署 → Rollback。看 `/api/health` 的 `version` 變成舊的 commit。再 Manual Deploy 回最新。
 5. **本機遷移退一版**：`uv run alembic downgrade -1` → `uv run alembic current` 看變 0003 → Neon 的 `user` 表 `nickname` 欄位回來了（0004 是刪它）→ `uv run alembic upgrade head`。
+   > 2026-10-28 註記：關卡 24 之後 head 是 0006，`downgrade -1` 會到 0005，拿掉的是 `processedevent` 表（0006 的 `downgrade()` 是 `drop_table`），不是 `nickname`。帶做版本見 `COACHING.md` 關卡 11 步驟 4。
 
 ### 想一想
 
