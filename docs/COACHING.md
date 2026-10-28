@@ -307,6 +307,7 @@
 
 **跳過的兩樣，要明講**：Sentry（`/api/_boom` 要改 Render 的 `ENABLE_DEBUG_ENDPOINTS`，看一封 email 學習量少；關卡 20 動手玩 5 用本機 `/api/_boom` 看 ERROR log 就夠）；換 `JWT_SECRET`（`RUNBOOK.md` 第 4 節讀過知道結論就好：換了不會把大家登出，因為 refresh token 跟密鑰無關，只有手上的 access token 失效、下次換票自動拿新的）。
 
+**收尾用這張表**（三種「退」各退不同的東西、彼此獨立，壞掉先判斷壞的是哪一層）：Render Rollback 退線上程式（驗 `version`；不退資料庫；退完修 main）/ `alembic downgrade -1` 退資料庫結構（只在本機；正式 roll forward）/ Neon Restore 還原資料（整庫回到那一刻；6 小時窗）/ `request_id` 不是退是找。2026-10-28 學習者四個演練都親手做過。
 **收尾（不出題）**：`request_id` 串前後端；`/api/health` 一個網址答三件事（活著、資料庫通、哪一版，`version` 對 main 的 commit）；還原是整個資料庫回到那一刻不是只有一筆，先用 Time Travel 看回到哪一刻損失最小，還原窗 6 小時所以發現得早最重要；沒有還原過的備份不算備份（6.2 的 `pg_dump` 週末 Mac 做）；程式退版按一下但不退資料庫、退完修 main；資料庫正式不退、roll forward。等他說下一關。
 **動手玩**：`LEARNING.md` 關卡 11 的 1（`/api/_boom` 看 Sentry，要改 Render 環境變數，先說）。
 
