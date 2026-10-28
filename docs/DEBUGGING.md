@@ -27,6 +27,9 @@
 | 啟動時 `ValidationError ... jwt_secret ... at least 32 characters` | `JWT_SECRET` 太短 | `uv run python -c "import secrets; print(secrets.token_urlsafe(32))"` 重新產生 | 2 |
 | `relation "user" does not exist` / `column ... does not exist` | 資料表沒建或不是最新 | `uv run alembic upgrade head`；正式環境看 Render log 裡 alembic 那段有沒有失敗 | 5 |
 | `TypeError: connect() got an unexpected keyword argument 'sslmode'` | Neon 的連線字串沒改成 asyncpg 格式 | 開頭 `postgresql+asyncpg://`、`sslmode=require` 改 `ssl=require`、刪掉 `channel_binding` | README |
+| `npm install`／`npm ci` 出現 `EBADENGINE` 警告 | Node 比 `package.json` 的 `engines`（22.22 以上）舊 | 升級 Node；`setup.ps1` 會自己重裝到對的版本 | README |
+| `The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed` | SQLAlchemy 2.1 起不再自動裝 `greenlet` | `pyproject.toml` 已寫 `sqlalchemy[asyncio]`，在 `backend` 重跑 `uv sync` | 8 |
+| 本機前端打 `/api/...` 回 500 或 `ECONNREFUSED` | Vite 轉發不到後端：後端沒在 8000 跑 | 先起後端（`uv run uvicorn main:app --reload --port 8000`） | 0 |
 
 ## CI
 
