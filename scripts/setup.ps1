@@ -11,7 +11,7 @@
 repo 還在的話只要第二行，腳本自己會 git pull。
 
 做的事：
-  1. 沒有 Node.js、uv 就裝（Node 照 .nvmrc 的大版號）。有 winget 用 winget，沒有就直接從官網下載 zip，不需要管理員權限
+  1. 沒有 Node.js、uv 就裝；Node 比 .nvmrc 的大版號舊也重裝（舊版 Node 裝出來的 node_modules 少東西，見 DEBUGGING.md）。有 winget 用 winget，沒有就直接從官網下載 zip，不需要管理員權限
   2. git pull 最新 main
   3. 設定 git 的 user.name / user.email（沒有的話會問你）
   4. backend：uv sync、建立 .env（沒有的話問你 Neon 的兩個連線字串，貼原始格式即可；JWT_SECRET 自動產生）、alembic upgrade head
@@ -52,6 +52,16 @@ function Convert-NeonUrl($url) {
     return $url
 }
 function Has($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
+
+# 【工具】Node 只檢查「有沒有」不夠，還要檢查版本。機器預裝的舊 Node（例如 18）會讓 npm ci 安靜地跳過
+# Rolldown 的原生套件（engines 不符的選用套件 npm 直接略過、不報錯），之後 npm run dev 才炸
+# Cannot find native binding（DEBUGGING.md 有這條）。大版號 >= .nvmrc 就算過，更新的版本（24）也可以
+function Node-Ok {
+    if (-not (Has node)) { return $false }
+    $required = [int]((Get-Content "$RepoRoot\frontend\.nvmrc").Trim() -replace "^v?(\d+).*$", '$1')
+    $actual = [int]((node --version) -replace "^v?(\d+).*$", '$1')
+    return $actual -ge $required
+}
 
 # 讓這個 PowerShell 視窗立刻看得到剛裝好的工具（不用重開終端機，DEBUGGING.md 第一條的坑）
 function Refresh-Path {
@@ -94,7 +104,7 @@ function Install-Node {
     if (Has winget) {
         winget install --id "OpenJS.NodeJS.$major" -e --accept-source-agreements --accept-package-agreements
         Refresh-Path
-        if (Has node) { return }
+        if (Node-Ok) { return }
     }
     $index = Invoke-RestMethod "https://nodejs.org/dist/index.json"
     $ver = ($index | Where-Object { $_.version -like "v$major.*" } | Select-Object -First 1).version
@@ -115,7 +125,14 @@ function Install-Uv {
 
 Step "檢查工具"
 if (-not (Has git))  { Step "安裝 git";  Install-Git }
-if (-not (Has node)) { Step "安裝 Node.js（照 .nvmrc 的大版號）"; Install-Node }
+if (-not (Node-Ok)) {
+    Step "安裝 Node.js（照 .nvmrc 的大版號；太舊也重裝）"
+    Install-Node
+    if (-not (Node-Ok)) {
+        $now = if (Has node) { (node --version) + "，在 " + (Get-Command node).Source } else { "找不到 node" }
+        throw "Node 裝了，但這個視窗跑到的還是舊的（$now）。PATH 上有另一個 Node 排在前面：移除它（設定 → 應用程式 → Node.js）或把它從 PATH 拿掉，重開終端機再跑一次。"
+    }
+}
 if (-not (Has uv))   { Step "安裝 uv";   Install-Uv }
 Write-Host ("git  " + (git --version))
 Write-Host ("node " + (node --version))
