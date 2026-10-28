@@ -3,7 +3,7 @@
 #
 # 學習者晚上與週末用 Mac，Mac 不會每次開機清空，所以第一次跑完之後再跑只是 git pull + 同步套件。
 # 做的事和 setup.ps1 一樣，順序也一樣，兩邊對照著看：
-#   1. 沒有 Homebrew、git、Node（照 frontend/.nvmrc 的大版號）、uv 就裝
+#   1. 沒有 Homebrew、git、Node（照 frontend/.nvmrc 的大版號）、uv 就裝；Node 比 .nvmrc 舊也重裝（舊版 Node 裝出來的 node_modules 少東西，見 DEBUGGING.md）
 #   2. git pull 最新 main
 #   3. 設定 git 的 user.name / user.email（沒有的話會問你）
 #   4. backend：uv sync、建立 .env（沒有的話問你 Neon 的兩個連線字串，貼原始格式即可；JWT_SECRET 自動產生）、alembic upgrade head
@@ -34,6 +34,15 @@ cd "$REPO_ROOT"
 step() { printf '\n\033[36m==> %s\033[0m\n' "$1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# 【工具】Node 只檢查「有沒有」不夠，還要檢查版本。舊版 Node（例如 18）下 npm ci 會安靜地跳過 Rolldown 的原生套件
+# （engines 不符的選用套件 npm 直接略過、不報錯），之後 npm run dev 才炸 Cannot find native binding（DEBUGGING.md 有這條）。
+# 大版號 >= .nvmrc 就算過，更新的版本（24）也可以
+NODE_MAJOR="$(tr -d '[:space:]' < frontend/.nvmrc | sed -E 's/^v?([0-9]+).*/\1/')"
+node_ok() {
+  have node || return 1
+  [ "$(node --version | sed -E 's/^v?([0-9]+).*/\1/')" -ge "$NODE_MAJOR" ]
+}
+
 # Neon 後台複製出來的是 psycopg 格式，asyncpg 要改三個地方（README 第 1 節）。貼原始格式也會被轉對。
 convert_neon_url() {
   local url="$1"
@@ -55,20 +64,25 @@ if [ "$(uname -s)" = "Darwin" ]; then
   if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi
 
   have git || { step "安裝 git"; brew install git; }
-  if ! have node; then
-    major="$(tr -d '[:space:]' < frontend/.nvmrc)"
-    step "安裝 Node.js $major（照 frontend/.nvmrc 的大版號）"
-    brew install "node@$major"
+  if ! node_ok; then
+    step "安裝 Node.js $NODE_MAJOR（照 frontend/.nvmrc 的大版號；太舊也重裝）"
+    brew install "node@$NODE_MAJOR"
     # node@22 這種固定版本的套件 brew 不會自動連進 PATH，照它的提示加進 zsh 的設定
-    node_bin="$(brew --prefix "node@$major")/bin"
+    node_bin="$(brew --prefix "node@$NODE_MAJOR")/bin"
     export PATH="$node_bin:$PATH"
-    grep -q "node@$major/bin" "$HOME/.zprofile" 2>/dev/null || echo "export PATH=\"$node_bin:\$PATH\"" >> "$HOME/.zprofile"
+    grep -q "node@$NODE_MAJOR/bin" "$HOME/.zprofile" 2>/dev/null || echo "export PATH=\"$node_bin:\$PATH\"" >> "$HOME/.zprofile"
+    if ! node_ok; then
+      now="$(node --version 2>/dev/null || echo '找不到 node')"
+      echo "Node $NODE_MAJOR 裝了，但這個終端機跑到的還是舊的（$now，在 $(command -v node || echo '?')）。PATH 上有另一個 Node 排在前面（nvm、brew 的舊版 node……）：移除它或把它從 PATH 拿掉，重開終端機再跑一次" >&2
+      exit 1
+    fi
   fi
   have uv || { step "安裝 uv"; brew install uv; }
 else
-  for t in git node uv; do
+  for t in git uv; do
     have "$t" || { echo "缺 $t：這支腳本只在 macOS 自動裝工具，請先自己裝好再跑" >&2; exit 1; }
   done
+  node_ok || { echo "Node 要 $NODE_MAJOR 以上（現在：$(node --version 2>/dev/null || echo '沒裝')）：這支腳本只在 macOS 自動裝工具，請先自己裝好再跑" >&2; exit 1; }
 fi
 echo "git  $(git --version)"
 echo "node $(node --version)"
