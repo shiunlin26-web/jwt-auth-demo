@@ -24,6 +24,8 @@
 | `setup.ps1` 跑到 `alembic upgrade head` 報 `sslmode` / `channel_binding` / `getaddrinfo` | 連線字串格式或主機名稱錯（舊版腳本不會自動轉格式） | `notepad backend\.env` 改成 `postgresql+asyncpg://...?ssl=require`；新版腳本貼 Neon 原始格式會自動轉 | 工具 |
 | `uv run pytest` 要跑三、四分鐘 | 測試資料庫在 Neon（新加坡），每個測試好幾趟網路來回 | 正常。平常用 `setup.ps1 -SkipTests`；本機有 Postgres 的話把 `TEST_DATABASE_URL` 指到本機會變 20 秒 | 18 |
 | `ModuleNotFoundError: No module named 'xxx'` | 指令沒用 `uv run` 開頭，用到系統的 Python | 指令前加 `uv run`；在 `backend` 跑 `uv sync` | 9 |
+| `npm run dev` 報 `SyntaxError: The requested module 'node:util' does not provide an export named 'styleText'`，錯誤最後一行是 `Node.js v18.x` | 跑到的 Node 太舊。Vite 8 底層的 Rolldown 要 Node 20.19 以上（專案 `engines` 要求 `>=22.22`）。常見是機器預裝的舊 Node 排在 PATH 前面，或裝完新版沒重開終端機 | `where.exe node` 看第一行是哪一個；移除舊版（設定 → 應用程式 → Node.js）或把新版目錄移到 PATH 前面，重開終端機確認 `node -v`。新版 `setup.ps1` 遇到太舊的 Node 會自動重裝 | 工具 |
+| `npm run dev` 報 `Cannot find native binding`，底下一層層 `Cannot find module '@rolldown/binding-win32-x64-msvc'` | `node_modules` 是在舊版 Node 下裝的：npm 對 engines 不符的**選用**套件會安靜地跳過、不報錯，所以 Rolldown 的原生套件根本沒裝，當時的 `npm ci` 看起來卻成功 | 先確認 `node -v` 是 22 以上，在 `frontend` 跑 `Remove-Item -Recurse -Force node_modules` 再 `npm ci`。**不要**照錯誤訊息刪 `package-lock.json`，repo 的 lockfile 是對的，刪了會重新產生一份、弄髒 git | 工具 |
 | 啟動時 `ValidationError ... Field required` | `.env` 少了必填設定（`DATABASE_URL`、`JWT_SECRET`），或 `.env` 不在 `backend` 裡；正式環境則是平台的環境變數沒設 | 本機補 `.env`；Render 到 Environment 分頁補 | 2、10 |
 | 啟動時 `ValidationError ... jwt_secret ... at least 32 characters` | `JWT_SECRET` 太短 | `uv run python -c "import secrets; print(secrets.token_urlsafe(32))"` 重新產生 | 2 |
 | `relation "user" does not exist` / `column ... does not exist` | 資料表沒建或不是最新 | `uv run alembic upgrade head`；正式環境看 Render log 裡 alembic 那段有沒有失敗 | 5 |
