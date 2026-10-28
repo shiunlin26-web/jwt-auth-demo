@@ -344,22 +344,21 @@
 **收尾（不出題）**：四種檢查各抓一種錯，推之前八個指令全跑，CI 跑一樣的；型別檢查把「哪天會炸」提前到存檔當下，`assert` 是對它說「我保證」；安全細節照正式專案做（timing、`IntegrityError` 接住、`to_thread`、JWT `require exp`）。Dependabot 看 GitHub → Insights → Dependency graph 就好，另一個對話已加 CodeQL 與 audit。等他說下一關。
 **動手玩**：`LEARNING.md` 關卡 13 的 2（前端 strict）、5（註冊競態）。
 
-### 關卡 14：Zod + React Hook Form
+### 關卡 14：Zod + React Hook Form — 快速走
 
-**搭配看的程式**：`frontend/src/schemas/auth.ts`、`components/RegisterForm.tsx`、`LoginForm.tsx`、`ChangePasswordForm.tsx`、`api/client.ts` 的 `getErrorMessage`
+**搭配看的程式**：`frontend/src/schemas/auth.ts:16～20`（`passwordSchema` 三條規則，對 `backend/schemas.py:13～29`）、`:33～41`（`refine` 跨欄位）、`components/RegisterForm.tsx:17～19`（`useForm` + `zodResolver` + `mode: "onChange"`）、`api/client.ts` 的 `getErrorMessage`（422 陣列用「；」串）
 
-**前置**：前端跑起來。
+**前置**：前端跑起來。讀 `PLAIN.md` 關卡 14。**先講名詞**：schema（欄位與規則的宣告，前端版的 `UserCreate`）、Zod（寫 schema 的套件，一份同時出驗證和型別 `z.infer`）、React Hook Form（管欄位的值、碰過沒、錯誤、能不能送）。
+
+**他有表單經驗，會說「這關可以快速過」**：照規則抽一題確認：「把 `RegisterForm.tsx:18` 的 `resolver` 拿掉，空白表單送出會怎樣？回幾號、訊息顯示在哪、靠哪邊的規則？」答對（422、前端按鈕下方、後端規則）就只講收尾；答錯（曾經答「400、顯示在後端」）就實際做下面第 2 步。
 
 | 步 | 操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | 開 `/register`，email 打 `abc` | 出現「Email 格式不正確」、按鈕不能按 | `schemas/auth.ts` 的 Zod 規則，`mode: "onChange"` 邊打邊驗 |
-| 2 | 密碼打 `short`，再打中文 | 「至少 8 個字元」、「只能包含英文字母」 | 和後端 `schemas.py` 同一套規則，兩邊各一份 |
-| 3 | `frontend\src\schemas\auth.ts` 的 `.min(8)` 改 `.min(12)` | 提示立刻變成 12 | 規則在一個檔案，表單自動跟著變。改回來 |
-| 4 | `components/RegisterForm.tsx` 把 `resolver:` 那行註解掉，空白表單送出 | 後端 `422`，訊息出現在按鈕下方 | 前端驗證拿掉，後端還是擋得住：「前端驗證是體驗，後端驗證是安全」。改回來 |
-| 5 | 登入頁密碼打錯 | 「登入失敗：Incorrect email or password」 | 後端的 `detail` 原樣顯示，`api/client.ts` 的 `getErrorMessage` |
+| 1 | 對照兩邊的三條密碼規則；`/register` 密碼打 `short`、中文、`Passw0rd!x` | 提示和後端 422 的 `msg` 同一句；正則 `[\x20-\x7E]` 和 `PRINTABLE_ASCII` 同一個區間 | 規則兩邊各一份、要一樣。`mode: "onChange"` 邊打邊驗所以按鈕灰、提示即時 |
+| 2 | `RegisterForm.tsx:18` 的 `resolver:` 那行前面加 `//`，存檔，`/register` 空白送出；看完 `git checkout -- frontend/src/components/RegisterForm.tsx` | 按鈕變可按；按下去按鈕下方「註冊失敗：value is not a valid email address...；String should have at least 8 characters」 | 這行就是 422 的證據：兩個欄位各一個 `msg`，`getErrorMessage` 用「；」串（關卡 0 第 10 步的陣列）。後端沒「顯示」東西，只回 JSON，顯示是前端做的。前端拿掉後端照樣擋，只是慢一趟、一次只報每欄第一條 |
 
-**收尾**：規則一份、型別自動推 / 即時提示 / 後端永遠再驗一次。
-**動手玩**：`LEARNING.md` 關卡 14 的 4。
+**收尾（不出題）**：規則一份在 `schemas/auth.ts`，驗證和型別都從它來；前端規則是體驗、後端是安全，兩份要一樣；`z.infer` 不用手寫 type。等他說下一關。
+**動手玩**：`LEARNING.md` 關卡 14 的 4（前後端規則不一致會怎樣）。
 
 ### 關卡 15：Tailwind CSS
 
