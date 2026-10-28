@@ -115,7 +115,7 @@ uv run alembic upgrade head   # 再升回去
 | 6 | 線上網站再登入一次 `drill@example.com` | 登入成功 | 資料回來了，而且 Render 什麼都沒動 |
 | 7 | 開 `/api/health` | `"db":"ok"`、`"migration"` 和還原前一樣 | 連線字串沒變；遷移版本也在資料庫裡，所以跟著一起回到那一刻 |
 | 8 | Branches → 刪掉第 5 步多出來的舊分支 | 分支數回到 1 | 免費方案 10 個分支，演練完要收；正式情況確認沒問題再刪 |
-| 9 | SQL Editor 再跑一次第 3 步的 `DELETE`，把演練帳號清掉 | `DELETE 1` | 收尾；這次是故意的，不用還原 |
+| 9 | 線上網站用 `drill@example.com` 登入 → 帳號設定 → **登出所有裝置**；然後 SQL Editor 再跑一次第 3 步的 `DELETE` | `DELETE 1` | 收尾；這次是故意的，不用還原。**一定要先「登出所有裝置」**：第 6 步登入後 `refreshtoken` 表有列指著這個 user（換過票的話還有蓋章的舊列），直接 DELETE 會撞外鍵 `refreshtoken_user_id_fkey`（`violates foreign key constraint`）；導覽列的「登出」只刪 cookie 那一列，不夠。或用 SQL：`DELETE FROM refreshtoken WHERE user_id = <id>;` 再刪 user |
 
 **要講清楚的兩件事**：
 - 還原是**整個資料庫**回到那一刻，不是只有那一筆。中間別人的註冊、登入紀錄也會一起消失，所以真實情況要先用 Neon 的 **Time Travel**（同一頁，可以在還原窗內的任一刻跑唯讀查詢）確認「回到哪一刻損失最小」，不要急著按。
