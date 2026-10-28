@@ -311,20 +311,22 @@
 
 ### 關卡 12：TanStack Query
 
-**搭配看的程式**：`frontend/src/api/queryClient.ts`、`auth/useMe.ts`、`components/UserPanel.tsx`、`main.tsx` 的 `QueryClientProvider`
+**搭配看的程式**：`frontend/src/auth/useMe.ts`（十行宣告：key `["me"]`、`queryFn: getMe`、`enabled` 沒登入不抓）、`api/queryClient.ts`（`staleTime: 30_000`、`retry: 1`、最下面 `subscribe` 看 token 消失就 `clear()`）、`components/UserPanel.tsx:20`（`isFetching`、`refetch`、`dataUpdatedAt`）、`app/AppLayout.tsx:22`、`pages/HomePage.tsx:8`（另外兩個 `useMe()`）
 
-**前置**：前後端跑起來。
+**前置**：前後端跑起來。讀 `PLAIN.md` 關卡 12。**先講名詞**：快取（抓回來存一份在記憶體）、query key（快取裡每份資料的名字，一樣就共用）、fresh / stale（30 秒內新鮮不重抓、過了算過期下次有人要就重抓）。
 
 | 步 | 操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | 登入，DevTools → Network 過濾 `me` | **一個** `/api/me` | 三個元件都要使用者資料，但只打一次：`auth/useMe.ts` 的 `queryKey: ["me"]` 共用快取 |
-| 2 | 點頁面角落 TanStack Query Devtools 的圖示（`main.tsx` 的 `ReactQueryDevtools`），找 `["me"]` | 狀態 `fresh`，30 秒後變 `stale` | `api/queryClient.ts` 的 `staleTime: 30_000`：30 秒內不重抓 |
-| 3 | 按「重新取得我的資料」 | 按鈕文字變「更新中...」、「上次更新」時間變、Network 多一個 `/api/me` | `refetch` 和 `isFetching` |
-| 4 | 等超過 30 秒，切到別的分頁再切回來 | Network 自動多一個 `/api/me`，你沒按任何東西 | `refetchOnWindowFocus`：過期了就趁你回來時更新 |
-| 5 | 登出 | Network **沒有** 401 的 `/api/me` | `useMe.ts` 的 `enabled`：沒登入就不抓 |
+| 1 | 登出、Network 清空、過濾 `me`、登入 | **一個** `/api/me` | 三個元件都顯示 email，但 key 都是 `["me"]`，只抓一次 |
+| 2 | 頁面角落 TanStack Query Devtools 圖示 → 找 `["me"]` | 剛登入綠色 fresh，30 秒後 stale；**Observers: 3** | 他會問「Observers 3 是三個地方在用？在哪三個？」→ `Get-ChildItem frontend\src -Recurse -Include *.tsx \| Select-String "useMe()"`：`AppLayout.tsx:22`（導覽列）、`HomePage.tsx:8`（首頁標題）、`UserPanel.tsx:20`（面板）。每呼叫一次 `useMe()` 一個 observer；切到登入頁 observers 變 0 但快取還在 |
+| 3 | 首頁按「重新取得我的資料」 | 按鈕「更新中...」、「上次更新」時間變、Network 多一個 `/api/me`、Devtools 回 fresh；Devtools 的 Last Updated 和畫面的「上次更新」**一樣** | 畫面那個時間就是 `useMe()` 回的 `dataUpdatedAt`，套件記的，不用自己存 |
+| 4 | 等超過 30 秒（stale），切到別的瀏覽器分頁再切回來 | Network 自動多一個 `/api/me`，沒按任何東西 | `refetchOnWindowFocus` 預設：過期了趁你回來更新。關卡 7 切頁 Network 空的是因為還在 30 秒內 |
+| 5 | Network 清空，登出 | **沒有** `/api/me`（更沒有 401）；Devtools 的 `["me"]` 消失 | `enabled: status === "authenticated"` 沒登入不啟動；`queryClient.ts` 的 `subscribe` 盯「token 從有變沒有」就 `clear()`，因為 key 不含使用者 id，A 登出 B 登入不清會閃 A 的 email |
 
-**收尾**：後端資料交給 Query 管 / key 一樣就共用 / staleTime 決定多久算舊。
-**動手玩**：`LEARNING.md` 關卡 12 的 2、4。
+**收尾一句話**：前端狀態分兩種，櫃台自己的（token、提示）留 Zustand，後端資料的副本交給 Query，它管抓、存、新鮮過期、載入中、錯誤、重抓。判斷只用一條：**後端有沒有正本**。
+**收尾要講到**：分工表（`accessToken`/`initialized`/`notice` → Zustand；`me`、之後的記帳紀錄 → Query）/ 關卡 8 之前要自己寫的六件事現在是十行宣告 / Query 的快取也在記憶體，和 Zustand 的差別不是存哪而是有沒有正本可抓（學習者答題時說「Zustand 刷新就不見」，要修正）。
+**題目**（三題）：(1) `staleTime` 改 0 / `Infinity`，第 4 步怎麼變 → 每次切回都重抓 / 永遠不自動重抓只剩 `refetch` 和登出清；(2) 拿掉 `enabled`，登出後 Network 會出現什麼 → `me 401 → refresh 401 → clearSession`，已經登出還會再看到一次「登入已過期」；(3) 記帳本「本月支出清單」放哪、key 怎麼取 → Query，後端有正本；`["expenses", "2026-10"]`，從大到小排、月份進 key 各月一份快取、新增後 `invalidateQueries({ queryKey: ["expenses"] })` 一次全過期。
+**動手玩**：`LEARNING.md` 關卡 12 的 4（拿掉登出清快取，看 B 閃 A 的 email）。
 
 ### 關卡 13：工程品質基線
 
