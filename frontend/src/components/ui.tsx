@@ -18,7 +18,8 @@ export function TextInput(props: ComponentProps<"input">) {
   );
 }
 
-type ButtonProps = ComponentProps<"button"> & { variant?: "primary" | "secondary" | "danger" };
+// variant 的合法值從 buttonVariants 的 key 推出來：加一種按鈕只改下面那個物件，型別自動跟上（和 Zod 的 z.infer 同一個原則：型別從定義推，不手抄）
+type ButtonProps = ComponentProps<"button"> & { variant?: keyof typeof buttonVariants };
 
 // 三種按鈕只差顏色，用 variant 切換；disabled 時變淡、游標變成禁止
 const buttonVariants = {
