@@ -781,22 +781,15 @@ Dockerfile 做出一個 image；Render、compose、Kubernetes 都跑同一個 im
 
 ---
 
-## 踩過的坑（一次整理）
+## 踩過的坑（只留已經修掉的）
+
+現在還會遇到的症狀都在 `DEBUGGING.md`（症狀 → 原因 → 修法），這裡不重抄。下面三個是程式已經改掉、新 clone 不會再碰到的，留著當歷史：
 
 | 症狀 | 原因 | 學到什麼 | 關卡 |
 |---|---|---|---|
 | 中文密碼註冊 500 | bcrypt 只能處理 72 bytes | 輸入要在門口（schema）擋好 | 0 |
-| 登入 500，DB 缺欄位 | `create_all` 不會改已存在的表 | 用 Alembic 管資料表 | 1、5 |
-| refresh 500 `MissingGreenlet` | commit 後讀屬性 | commit 前先存變數 | 1 |
-| 後端起不來 `ValidationError` | `.env` 少填必填設定 | fail fast 是好事，看錯誤訊息補上 | 2 |
-| `ModuleNotFoundError` | 沒用 `uv run` 執行，或還沒 `uv sync` | 指令前加 `uv run`；在 `backend` 跑 `uv sync` | 9 |
 | Alembic `UnicodeDecodeError` | Windows 讀 `alembic.ini` 的中文註解 | 設定檔保持 ASCII | 5 |
 | `greenlet` 找不到 | SQLAlchemy 2.1 不再自動安裝 | 用 `sqlalchemy[asyncio]` | 8 |
-| compose 的 backend 一直 unhealthy | slim image 沒有 curl | healthcheck 用 image 裡有的工具 | 21 |
-| OTel 的 SQLAlchemy 套件裝不上 | 只支援到 2.0 | 掛在 asyncpg 驅動層 | 22 |
-| `kubectl apply -k` 拒絕 overlay 外的檔案 | kustomize 的安全限制 | 那個目錄自己一份 kustomization | 23 |
-| pytest 的 `asyncio.Event` 綁錯 loop | 模組層建的 Event | 在 worker 迴圈裡建 | 24 |
-| Neon 計算時數被 worker 吃掉 | 每 5 秒輪詢，資料庫不休眠 | 線上輪詢 600 秒 + 註冊時按鈴 | 24 |
 
 ---
 

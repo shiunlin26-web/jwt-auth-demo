@@ -1,7 +1,7 @@
 # PLAN.md：20 天計畫（2026-10-12）的決定紀錄
 
 > 狀態：已過期、已縮減（2026-10-28）。原本是 199 行的 20 天計畫（v3）；時程比它快、內容全部做完，所以只留「當時為什麼這樣排」和還被別處引用的幾段。完整原文在 git 歷史：`git show 5976278:docs/PLAN.md`。
-> 活的東西在別處：學習者是誰 → `HANDOFF.md` 第 1 節；已定的事 → `HANDOFF.md` 第 5 節；練習專案的規則 → `CHAIN.md`「怎麼用」與附錄 C；免費方案查證 → `PLAN-INFRA.md` 第 8 節；故障演練題庫 → `drills/README.md`；接下來的路 → `PLAN-FULLSTACK.md`。
+> 活的東西在別處：學習者是誰 → `HANDOFF.md` 第 1 節；已定的事 → `HANDOFF.md` 第 5 節；練習專案的規則 → `CHAIN.md`「怎麼用」；免費方案查證 → `PLAN-INFRA.md` 第 8 節；故障演練題庫 → `drills/README.md`；接下來的路 → `PLAN-FULLSTACK.md`。
 
 ## 1. 當時的前提（2026-10-12）
 
