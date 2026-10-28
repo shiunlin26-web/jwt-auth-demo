@@ -28,7 +28,8 @@ Render 有一鍵退版，不用改程式碼：
 
 1. Render → 服務 → 左邊 **Events**（或 Deploys）
 2. 找到上一個 **Deploy live** 的紀錄 → 右邊「…」→ **Rollback to this deploy**
-3. 等它變 Live，做第 0 節的檢查
+3. 等它變 Live，做第 0 節的檢查：`/api/health` 的 `version` 會變成上一版的 commit，這就是退成功的證明
+4. 修好 main 之後要回最新：**Manual Deploy → Deploy latest commit**（或直接 push 新 commit 觸發自動部署）
 
 退版之後**記得修 main**：退版只是把線上換回舊 image，main 上壞的程式碼還在，下一次 push 又會部署壞的版本。
 

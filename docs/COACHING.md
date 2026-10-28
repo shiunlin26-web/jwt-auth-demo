@@ -62,7 +62,7 @@
 | 節奏 | 關卡 | 每關時間 | 做法 |
 | --- | --- | --- | --- |
 | **仔細走** | 0、1、2、3、4、5、8、12、17、18、19、20 | 1～2 小時 | 第 3 節的腳本全部做完，收尾表、問「哪一步再講一次」、至少一個動手玩 |
-| **快速走** | 6、7、9、10、11、13、14、15、16 | 20～30 分鐘 | 讀 `PLAIN.md` 那段，只做腳本的前兩步親眼看一次就過。9、10、11 只看 log，不改平台設定 |
+| **快速走** | 6、7、9、10、11、13、14、15、16 | 20～30 分鐘 | 讀 `PLAIN.md` 那段，只做腳本的前兩步親眼看一次就過。9、10 只看 log，不改平台設定。**11 例外**：加三個演練（備份還原、Render 退版、本機 alembic 退版），各 5～30 分鐘，都是按平台的按鈕、不改設定、不會跳付費頁（學習者 2026-10-28 問「只做還原就夠了嗎」，決定補退版兩項；Sentry 與換密鑰跳過，理由在關卡 11 腳本） |
 
 順序照編號。每天約 4 小時，預計 5～7 天。走到哪記在 `HANDOFF.md` 第 2 節。關卡 21～24（基礎設施，`PLAN-INFRA.md`）重帶走完之後只走「VM 路線」（看 CI 的 log，每關一小時）；「Mac 路線」是選配，有興趣的週末再做，兩條路線的預期值一樣。重帶走完先開練習專案（`PLAN-FULLSTACK.md` 第 1 節）。仔細走的關如果他說「這個我已經懂了」，抽腳本中間一步讓他講預期值，講得出就跳過。
 
@@ -302,8 +302,13 @@
 | 1 | 拿關卡 10 用 curl 打線上 `/api/health` 時回應的 `X-Request-Id`，Render → 服務 → Logs → 搜那串 | 一行 JSON：`"request_id"` 同一個、`"time"` 和回應的 `Date` 一樣、`"path": "/api/health"`、`"status": 200`、`"duration_ms": 16.1` | 使用者回報問題時請他給 `X-Request-Id`，直接搜。欄位表：`status`（搜 500、一堆 401）、`duration_ms`（登入 100 上下正常、1 是沒比對、幾千是冷啟動）、`path`（同 IP 連打 login）、`level: ERROR`（沒接住的例外附 traceback）。本機文字、線上 JSON（`render.yaml` 的 `LOG_JSON=true`），欄位一樣 |
 | 2 | 備份還原演練，照 `RUNBOOK.md` 6.1 的 9 步一步一步給：註冊 `drill@example.com` 登出 → `jwt-auth-demo-prod` 的 SQL Editor 查到它、記時間 → `SELECT now();` 再 `DELETE` → 線上登入失敗 → Branches → main → Restore from history，時間選「建立之後、刪除之前」留一分鐘緩衝（Neon 選單是台灣時間就 +8）→ 線上登入成功 → `/api/health` 一樣 → 刪 `production_old_<時間>` 分支 → 清演練帳號 | 還原幾秒完成；多一個 `production_old_2026-...Z` 分支；登入回來；`db: ok`、`migration` 不變；Render 什麼都沒動 | **清演練帳號會撞外鍵**（`refreshtoken_user_id_fkey`，`models.py:23`）：登入後表裡有 refresh token 指著他，而且只要換過一次票就有蓋章的舊列留著，網站的「登出」只刪 cookie 那一列不夠。**先按「登出所有裝置」**（`revoke_all_refresh_tokens` 整排刪），再 `DELETE FROM "user"`。曾經叫他「登出再刪」是錯的，學習者自己試出「登出所有裝置」才對。正式專案有刪帳號功能時用 `ON DELETE CASCADE` 或先呼叫 `revoke_all`；這裡沒有，保留預設的「擋」是保護 |
 
-**收尾（不出題）**：`request_id` 串前後端；`/api/health` 一個網址答三件事（活著、資料庫通、哪一版，`version` 對 main 的 commit）；還原是整個資料庫回到那一刻不是只有一筆，先用 Time Travel 看回到哪一刻損失最小，還原窗 6 小時所以發現得早最重要；沒有還原過的備份不算備份（6.2 的 `pg_dump` 週末 Mac 做）。等他說下一關。
-**動手玩**：`LEARNING.md` 關卡 11 的 1（`/api/_boom` 看 Sentry，要改 Render 環境變數，先說）、4（Render 退版）。
+| 3 | **Render 退版**（`RUNBOOK.md` 第 2 節；5 分鐘，按按鈕不改設定）：先 `curl.exe -s https://<前端網址>/api/health` 記下 `version` → Render → 服務 → Events → 上一個 **Deploy live** → 「…」→ **Rollback to this deploy** → 等 Live → 再打 `/api/health` → 然後 **Manual Deploy → Deploy latest commit** 回最新 → 再打一次 | 退版後 `version` 變成上一個 commit、`db: ok`、`migration` 不變；回最新後 `version` 回到 main 的 commit | 退版只換線上的 image，main 上壞的程式還在，下次 push 又會部署壞的，所以退完要修 main。退版**不退資料庫**：壞的那版若跑了「刪欄位、改型別」的遷移，舊版程式可能壞，這就是關卡 5 的 expand / contract。Render 免費方案保留舊 image 可以退，k8s 版是 `rollout undo`（關卡 23） |
+| 4 | **本機 alembic 退版**（`RUNBOOK.md` 第 3 節情境 C；只在本機 `neondb`，**不碰正式**）：在 `backend`：`uv run alembic current` → `uv run alembic downgrade -1` → `uv run alembic current` → Neon（`jwt-auth-demo` 的 `neondb`）Tables 看表 → `uv run alembic upgrade head` → `current` | `0006 (head)` → `Running downgrade 0006 -> 0005` → `0005` → `processedevent` 表不見了（0006 的 `downgrade()` 是 `drop_table`） → `Running upgrade 0005 -> 0006` → `0006 (head)` | 這是關卡 5 看過的 `downgrade()` 真的跑一次：退一階跑那張單的 downgrade、升回去跑 upgrade，`alembic_version` 跟著變。**正式環境不手動 downgrade**，原則是 roll forward：再開一張單修正（RUNBOOK 第 3 節情境 B）；因為 downgrade 會刪資料（這裡 `processedevent` 整張表沒了），而且 Render 上跑的程式還是新版，會找不到表。本機練是為了知道那張單的兩個方向都對 |
+
+**跳過的兩樣，要明講**：Sentry（`/api/_boom` 要改 Render 的 `ENABLE_DEBUG_ENDPOINTS`，看一封 email 學習量少；關卡 20 動手玩 5 用本機 `/api/_boom` 看 ERROR log 就夠）；換 `JWT_SECRET`（`RUNBOOK.md` 第 4 節讀過知道結論就好：換了不會把大家登出，因為 refresh token 跟密鑰無關，只有手上的 access token 失效、下次換票自動拿新的）。
+
+**收尾（不出題）**：`request_id` 串前後端；`/api/health` 一個網址答三件事（活著、資料庫通、哪一版，`version` 對 main 的 commit）；還原是整個資料庫回到那一刻不是只有一筆，先用 Time Travel 看回到哪一刻損失最小，還原窗 6 小時所以發現得早最重要；沒有還原過的備份不算備份（6.2 的 `pg_dump` 週末 Mac 做）；程式退版按一下但不退資料庫、退完修 main；資料庫正式不退、roll forward。等他說下一關。
+**動手玩**：`LEARNING.md` 關卡 11 的 1（`/api/_boom` 看 Sentry，要改 Render 環境變數，先說）。
 
 ### 關卡 12：TanStack Query
 
