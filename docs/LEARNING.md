@@ -5,7 +5,7 @@
 1. 在本地一步步理解「access token + refresh token」登入架構
 2. 練完之後，這個專案就是之後其他專案做登入時的**參考範本**
 
-關卡 0～8 全部在本地完成；關卡 9 起會用到 GitHub Actions、Render、Vercel、Neon 這些**免費**的雲端服務，把專案真的上線。關卡 13 起把 repo 提升到專業水準（型別檢查、格式化、表單、樣式、前端測試、頻率限制）；18～20 是 SQL、HTTP、除錯的觀念關。全部 21 關（0～20）已完成。
+關卡 0～8 全部在本地完成；關卡 9 起會用到 GitHub Actions、Render、Vercel、Neon 這些**免費**的雲端服務，把專案真的上線。關卡 13 起把 repo 提升到專業水準（型別檢查、格式化、表單、樣式、前端測試、頻率限制）；18～20 是 SQL、HTTP、除錯的觀念關。關卡 0～25 全部完成（21～25 是 2026-10-22 加的基礎設施路線）。
 
 > 覺得每一關太硬：先看 [`PLAIN.md`](PLAIN.md)，每關三到五句白話，用「一家會員制的店」講完。
 > 要 AI 帶著做（2026-10-20 起的預設方式）：[`COACHING.md`](COACHING.md) 有每一關「一次一個指令」的帶做腳本；這份的「驗證方式」是課後自己對照用的。
@@ -34,6 +34,10 @@
 > **關卡 9 起改用 uv 管理 Python 套件**，不用再啟用 venv。前面關卡寫的指令請這樣讀：
 > `python -m pytest ...` → `uv run pytest ...`、`alembic ...` → `uv run alembic ...`、`uvicorn ...` → `uv run uvicorn ...`、
 > `python -m pip install -r requirements.txt` → `uv sync`。
+>
+> **關卡 10 起所有 API 搬到 `/api` 底下**：前面關卡寫的 `/auth/register`、`/me` 請讀成 `/api/auth/register`、`/api/me`；cookie 的 `Path=/auth` 現在是 `/api/auth`；`localhost:8000/docs` 仍在根路徑。
+> **關卡 8 起前端改用 Zustand + axios**：關卡 0～7 寫的 `App.tsx`、`AuthContext`、`AuthProvider`、`apiFetch` 已不存在，對應現在的 `auth/authStore.ts`、`authService.ts`、`api/client.ts`（攔截器）；關卡 6「之後其他專案怎麼用」是當時版本，現行搬家清單在 `CHAIN.md` 附錄 A。
+> **各關「N passed」是當時的測試數**，現在 67 個，以輸出為準。
 
 ---
 
@@ -221,6 +225,8 @@ bcrypt 的錯誤訊息確實建議 `my_password[:72]`，但截斷代表「前 72
 **前端 single-flight**：有了輪替之後，如果畫面同時發出 3 個請求、同時收到 401，會各自去 refresh。第一個把 A 換成 B，後兩個拿著 A 再去換，就被當成重複使用，使用者會被強制登出。所以同一時間只能有一個 refresh 請求，其他人等同一個結果。
 
 ### ⚠️ 開始前：升級資料表（一次性）
+
+> 2026-10-28 註記：這是當時的一次性步驟，早就做過了。現在 clone 的人不用做，`uv run alembic upgrade head`（setup 腳本會跑）會把表建到最新。
 
 `create_all` 只會建立**不存在**的表，**不會修改已經存在的表**。這關把 `token` 欄位改名為 `token_hash`，又新增了 `revoked` 欄位，所以要先手動刪表：
 
@@ -492,6 +498,8 @@ const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 | `DB_ECHO` | `false` | terminal 印出 SQL |
 | `VITE_API_URL`（前端） | `http://localhost:8000` | 後端網址 |
 
+> 2026-10-28 註記：上表是關卡 2 當時的設定；`VITE_API_URL` 現在預設 `/api`（關卡 10 同站），完整清單以 `backend/.env.example` 為準（現在 20 多項）。
+>
 > 改了 `.env` 之後要**重啟**（後端 `Ctrl+C` 再啟動、前端 `Ctrl+C` 再 `npm run dev`）。`--reload` 只會偵測程式碼的變動，不會重讀 `.env`。
 
 ### 驗證方式
@@ -792,6 +800,8 @@ python -m pytest
 
 ### ⚠️ 開始前（一次性）
 
+> 2026-10-28 註記：測試資料庫還是要建（setup 腳本會問 `TEST_DATABASE_URL`）；下面「安裝套件」的部分現在是 `uv sync`，`requirements-dev.txt` 已不存在。
+
 **1. 建立測試專用資料庫**
 
 測試每次執行都會**清空資料表**，所以絕對不能用你平常的資料庫。在 Neon 建一個新的：
@@ -1055,6 +1065,8 @@ Alembic 會在資料庫裡建一張小表 `alembic_version`，記住「**這個�
 
 ### ⚠️ 開始前：你的資料庫要做的事（一次性）
 
+> 2026-10-28 註記：當時資料庫是 `create_all` 建的，所以要 `stamp`。現在的資料庫從一開始就用遷移建，**不要照下面做**，直接 `uv run alembic upgrade head`。
+
 你的 Neon 資料庫**已經有** `user` 和 `refreshtoken` 兩張表（以前 `create_all` 建的）。所以不能直接「從頭建立」，否則會出現「表已經存在」的錯誤。在 `backend` 資料夾、確認有 `(venv)` 之後，依序執行：
 
 **1. 安裝 Alembic**
@@ -1273,6 +1285,8 @@ def downgrade() -> None:
 
 **改動的檔案**：`frontend/src/` 底下（新增 `api/`、`auth/`、`components/`、`utils/`，改寫 `App.tsx`、`main.tsx`，刪掉沒用到的 `App.css` 和 `assets/` 範本檔）
 
+> 2026-10-28 註記：這關的結構樹和檔名（`AuthContext`、`AuthProvider`、`apiFetch`、`styles.ts`、`utils/password.ts`）是當時版本，關卡 8、12、14、15 之後都已取代；現況看 `README.md`「專案結構」。
+
 ### 一句話
 
 **把 290 行、什麼都擠在一起的 `App.tsx`，拆成分工清楚的幾個檔案，變成之後其他專案可以直接複製的登入範本。**
@@ -1467,6 +1481,11 @@ return status === "authenticated"
 >
 > **第 12 關之後再加兩個檔案**：`src/api/queryClient.ts`、`src/auth/useMe.ts`，並在 `main.tsx` 包 `<QueryClientProvider client={queryClient}>`。使用者資料改用 `useMe().data` 拿（`useAuth()` 不再有 `user`）。新專案自己的資料照 `useMe.ts` 的樣子寫 `useQuery`，改資料用 `useMutation` + `invalidateQueries`（關卡 12 有範例）。完整清單見 `docs/CHAIN.md` 附錄。
 
+> **2026-10-28 註記：現行的搬家清單在 `CHAIN.md` 附錄 A。** 下面摺疊的是第 6 關當時的做法，檔名已不存在，只當歷史看。
+
+<details>
+<summary>第 6 關當時的做法（已過期）</summary>
+
 這關最重要的目的。新專案要做登入時：
 
 **1. 複製這幾個檔案過去**
@@ -1509,6 +1528,8 @@ export async function getPosts(): Promise<Post[]> {
 ```
 
 用 `apiFetch`，就**自動**帶上 token、自動處理 refresh，完全不用再想 token 的事。
+
+</details>
 
 ### 驗證方式
 
@@ -1593,6 +1614,8 @@ export async function getPosts(): Promise<Post[]> {
 ### 前端模板路線（關卡 7 起）
 
 從這關開始，一關加一個業界常用的套件，把前端變成之後所有專案的基礎模板。每一關都會對照「手寫版 vs 套件版」，原理是前面幾關學過的。
+
+> 2026-10-28 註記：下表是關卡 7 當時的規畫，Zod、Tailwind、Vitest 實際是關卡 14、15、16（關卡 13 改為工程品質基線），以路線圖為準。
 
 | 關卡 | 套件 | 取代 / 新增 |
 | --- | --- | --- |
@@ -2117,6 +2140,8 @@ raise HTTPException(...) from None   # from None：刻意不把 PyJWT 的原始�
 **`.dockerignore`**：跟 `.gitignore` 一樣的語法，但目的是「哪些東西不要進 image」。最重要的是 `.env`，裡面有密鑰，image 可能被推到別的地方，**絕對不能進去**。那正式環境的設定從哪來？從平台的環境變數（CI 的 `docker run -e ...` 就是在模擬這件事）。
 
 **你沒有本機 Docker，怎麼辦？** CI 的 `backend` job 就是完整的 Docker 體驗：`services` 起一個 Postgres container、`docker build` 做 image、`docker run` 跑起來、`curl` 打它、`docker logs` 看它印了什麼。四個核心指令都在 Actions 的 log 裡，而且壞了會紅。
+
+> 2026-10-28 註記：2026-10-22 起有第二台有 Docker 的 Mac（`HANDOFF.md` 第 1 節），關卡 21 起有「Mac 路線」；平日的 VM 仍然沒有 Docker，這段照樣成立。
 
 ### 觀念 4：CI（GitHub Actions）
 
@@ -2845,11 +2870,11 @@ minor、patch 通常可以，但先看一眼 changelog。CI 綠只代表「現�
 | `onChange={(e) => setEmail(e.target.value)}` | `{...register("email")}` | React Hook Form |
 | `canLogin = email.trim() !== "" && password !== ""` | `formState.isValid` | Zod 算、RHF 回報 |
 | `useState` 存錯誤訊息 + `try/catch` | `setError("root", { message })` | React Hook Form |
-
-> 關卡 15 修正：`setError("root")` 會把 `isValid` 設成 false，密碼打錯後按鈕會一直灰到使用者改了欄位，想用同一組帳密重試做不到。後端錯誤改回元件自己的 `useState`（`serverError`），表單狀態只管欄位。下面程式片段裡的 `setError` 是當時的版本。
 | `event.preventDefault()` | `handleSubmit(onSubmit)` | React Hook Form |
 | `utils/password.ts` 的 if 鏈 | `passwordSchema` | Zod |
 | 沒有「送出中」狀態 | `isSubmitting` | React Hook Form |
+
+> 關卡 15 修正：`setError("root")` 會把 `isValid` 設成 false，密碼打錯後按鈕會一直灰到使用者改了欄位，想用同一組帳密重試做不到。後端錯誤改回元件自己的 `useState`（`serverError`），表單狀態只管欄位。下面程式片段裡的 `setError` 是當時的版本。
 
 元件從「管狀態」變成「宣告規則 + 說送出後要做什麼」。欄位從兩個變十個，程式碼長度幾乎不變。
 
@@ -3389,7 +3414,7 @@ COMMIT
 ### 動手玩
 
 1. **讓登入變慢**：在測試資料庫拔掉 `ix_user_email`（`DROP INDEX ix_user_email;`），用 `TEST_DATABASE_URL` 當 `DATABASE_URL` 起後端，看 request log 的 `duration_ms`。登入從幾毫秒變幾十毫秒（5 萬筆）。建回來：`CREATE UNIQUE INDEX ix_user_email ON "user" (email);`。
-2. **用程式的方式加索引**：`models.py` 的 `RefreshToken.expires_at` 加 `index=True`，`uv run alembic revision --autogenerate --rev-id 0005 -m "index expires_at"`，看產生的遷移檔只有一行 `create_index`。**不要合併**，這是練習「改了 models 就要有遷移」的流程；看完 `git checkout -- .` 並刪掉產生的檔案。（想一想 Q1 會說為什麼不真的加。）
+2. **用程式的方式加索引**：`models.py` 的 `RefreshToken.expires_at` 加 `index=True`，`uv run alembic revision --autogenerate --rev-id 0005 -m "index expires_at"`（2026-10-28 註記：`0005` 已被關卡 24 的 outbox 遷移用掉，現在請用 `0007`），看產生的遷移檔只有一行 `create_index`。**不要合併**，這是練習「改了 models 就要有遷移」的流程；看完 `git checkout -- .` 並刪掉產生的檔案。（想一想 Q1 會說為什麼不真的加。）
 3. **看 ORM 送什麼**：`DB_ECHO=true`，前端按「重新取得我的資料」、改密碼、登出所有裝置，對照 terminal 的 SQL 和 `routes/auth.py` 的程式碼，每句找到對應。
 4. **故意寫一個 N+1**：Python 殼（`uv run python`）裡用 `async with AsyncSession(engine)` 查 20 個 user，再迴圈每個查 `count(RefreshToken)`，打開 `DB_ECHO` 數有幾句 SQL。再用一句 `select(User.email, func.count(RefreshToken.id)).join(...).group_by(User.id)` 做同樣的事，數一次。
 5. **pgexercises.com**：免費、瀏覽器裡直接練 Postgres，從 Basic 做到 Joins 就夠練習專案用。一天一節。
@@ -3621,7 +3646,7 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 | 4 | `docs/drills/04.patch` | 登入成功後**立刻**被登出，提示「登入已過期」；`pytest` 有紅 | 看 `/api/me` 的回應 `detail`；登入和 refresh 都 200 但 `/me` 401，問題在「驗」不在「簽」 |
 | 5 | `docs/drills/05.patch` | 等 access token 過期後（`JWT_EXPIRE_MINUTES=1`）**按一下畫面就被登出**；後端 log 有 `Refresh token reused` | 後端說「重複使用」，但你沒有兩個分頁。前端有幾個 `refresh` 請求？`npm test` 說什麼？ |
 
-做完每一題記下三件事：你先看了哪裡、第幾步定位到、哪個工具（或眼睛）抓到的。這就是 `QUESTIONS.md` 的素材。
+做完每一題記下三件事：你先看了哪裡、第幾步定位到、哪個工具（或眼睛）抓到的。這就是（練習專案 repo 的）`QUESTIONS.md` 的素材。
 
 ### 答案
 
@@ -3648,7 +3673,7 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 
 **原因**：`models.py` 的 `User` 多了 `nickname` 欄位，沒有產生遷移檔。本機測試用 `create_all` 建表，表裡有這個欄位，全綠；正式資料庫是用遷移建的，沒有這個欄位，`SELECT ... nickname` 直接 500 `column user.nickname does not exist`。
 **哪個工具抓到**：`uv run alembic check`（CI 的「遷移檢查」那步）：`New upgrade operations detected`。
-**修法**：`uv run alembic revision --autogenerate --rev-id 0005 -m "add user nickname"`，檢查產生的檔案，一起 commit。或者這次演練直接還原。
+**修法**：`uv run alembic revision --autogenerate --rev-id 0005 -m "add user nickname"`（2026-10-28 註記：`0005` 已被用掉，現在用 `0007`），檢查產生的檔案，一起 commit。或者這次演練直接還原。
 **對應**：故障演練清單第 4 條、關卡 11 動手玩 3。
 
 </details>
@@ -3675,7 +3700,7 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 
 ### 動手玩
 
-1. **自己出一題**：挑 `PLAN.md` 故障演練清單裡沒做的（例如第 11 條 `--host 127.0.0.1`、第 1 條少環境變數），改壞、`git diff > docs/drills/06.patch`、還原，隔一天再套上來找。或請 AI 出：「照 `docs/drills/README.md` 的格式，從 PLAN.md 的清單出第 N 條，只給我 patch 和症狀，不要說原因」。
+1. **自己出一題**：挑 `docs/drills/README.md` 題庫裡沒做的（2026-10-28 從 `PLAN.md` 搬過去）（例如第 11 條 `--host 127.0.0.1`、第 1 條少環境變數），改壞、`git diff > docs/drills/06.patch`、還原，隔一天再套上來找。或請 AI 出：「照 `docs/drills/README.md` 的格式，從 `docs/drills/README.md` 的題庫出第 N 條，只給我 patch 和症狀，不要說原因」。
 2. **git bisect**：假設不知道是哪個 commit 弄壞的。`git bisect start`、`git bisect bad HEAD`、`git bisect good <關卡 12 的 commit>`，每一步跑 `uv run pytest -q -x`，`git bisect good/bad` 回報，幾步之後它指出第一個壞的 commit。用第 4 題的 patch 做成一個 commit 在分支上練，練完 `git bisect reset` 並刪分支。
 3. **request_id 串起來**：前端 Console `fetch("/api/me")` 後看回應標頭的 `x-request-id`，到後端 log 搜同一個 id。正式環境到 Render Logs 搜。
 4. **讓測試抓第 2 題**：`test_rules.py` 加一個測試：`payload = decode_access_token(create_access_token(1))`，assert `payload["exp"] - payload["iat"] == settings.jwt_expire_minutes * 60`。套上 `02.patch` 跑一次，應該紅。這就是「修完加一個測試」。
@@ -4475,17 +4500,15 @@ Deploy Hook 的網址帶著密鑰，誰拿到都能叫 Render 重新部署（公
 
 ## 之後還可以自己摸的（不排關卡）
 
-> 2026-10-22 註記：關卡 21～24 是後來加的基礎設施路線（`PLAN-INFRA.md`），下表的 docker compose 已做成關卡 21，Codespaces 在有了第二台有 Docker 的機器後不需要。
-
-範例專案的程式到關卡 17 凍結（關卡 19 只多了 `Cache-Control: no-store`）；18～20 是觀念關（SQL、HTTP、除錯），全部 21 關（0～20）已完成。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的格式產出一關。
+範例專案已凍結，不加業務功能；關卡 0～25 全部完成（21～25 是 2026-10-22 加的基礎設施路線）。下面每一項都能用**任何 AI 工具**帶你做：把「開場提示的關鍵字」擴寫成一段，請它照 [`HANDOFF.md`](HANDOFF.md) 第 3 節的一關格式帶。要錢的（自訂網域）在 `HANDOFF.md` 第 5 節第 7 條列為刻意不碰，想做再說。
 
 | 主題 | 一句話 | 開場提示的關鍵字 |
 | --- | --- | --- |
-| docker compose | ✅ 已做成關卡 21：`infra/compose.yaml` 一個檔案起整套，profile 再多起 Prometheus、Grafana、Redpanda | 不用再開，看 `LEARNING.md` 關卡 21 |
-| 自訂網域與 DNS | 把 `*.vercel.app` 換成自己的網域，HTTPS 自動 | 「說明 A / CNAME 記錄差別、Vercel 怎麼接自訂網域、HTTPS 憑證誰發」 |
-| GitHub Codespaces | 瀏覽器裡的開發環境，有 Docker | 「幫這個 repo 寫 `.devcontainer`，讓 Codespaces 打開就能跑後端和前端」 |
 | 分頁之間同步登入狀態 | 關卡 6 Q4 提到的 `BroadcastChannel` | 「一個分頁登出，其他分頁立刻跟著登出」 |
-| Postgres Row Level Security | 授權檢查從程式搬到資料庫層 | 「說明 RLS 和在程式裡加 `WHERE user_id` 的取捨」 |
+| Postgres Row Level Security | 授權檢查從程式搬到資料庫層（`CHAIN.md` 環 7 有提） | 「說明 RLS 和在程式裡加 `WHERE owner_id` 的取捨」 |
+| 自訂網域與 DNS（要錢） | 把 `*.vercel.app` 換成自己的網域，HTTPS 自動 | 「說明 A / CNAME 記錄差別、Vercel 怎麼接自訂網域、HTTPS 憑證誰發」 |
+
+已經做掉、不用再列的：docker compose（關卡 21）、Codespaces（有了 Mac 之後不需要）。
 
 ---
 

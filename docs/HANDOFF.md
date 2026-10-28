@@ -30,7 +30,7 @@
 
 ## 2. 現在走到哪
 
-**進度的唯一來源是 `docs/LEARNING.md` 的「路線圖」表格**，不要在別處另外記。狀態（每條有自己的日期，新的蓋舊的）：
+**進度看三個地方，各管一件事**：哪些關卡做完了看 `docs/LEARNING.md` 的「路線圖」表格；重帶走到哪看下面「從頭帶一遍的進度」那條；練習專案走到哪看 `PLAN-FULLSTACK.md` 第 5 節。不要在別處另外記。狀態（每條有自己的日期，新的蓋舊的）：
 
 - 關卡 0～20 全部完成並合併到 `main`，正式環境在線上（Render + Vercel + Neon）。關卡 0～8 是直接 commit 到 main，關卡 9 在 PR #1 裡，關卡 10 起一關一個 PR（`git log --oneline --merges` 看得到）。關卡 18～20 是觀念關（SQL、HTTP、除錯），程式只有關卡 19 加了 `Cache-Control: no-store`，其餘是 `docs/labs/`、`docs/drills/`。
 - 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
@@ -38,7 +38,7 @@
 - 路線圖已無待做項目；`LEARNING.md` 末尾「之後還可以自己摸的」是不排關卡的延伸清單。`docs/drills/` 是故障演練的 patch，可以照 README 的格式再出新題。
 - **從頭帶一遍的進度**（2026-10-20 決定，排法在 `docs/COACHING.md` 第 2 節）：之前的關卡是 AI 做、他驗收，沒有一步一步帶過；現在從關卡 0 重新帶，仔細關 1～2 小時、快速關 20～30 分鐘。**目前走到：關卡 0～11 已帶完（2026-10-28；關卡 11 做了 log、備份還原、Render 退版、本機 alembic 退版四個演練），下一關是關卡 12（仔細走）**（每帶完一關改這行）。
 - **基礎設施路線（關卡 21～25）**（2026-10-22 決定，**同日做完**）：compose + E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖。程式、CI job、`COACHING.md` 關卡 21～24 的腳本（Mac / VM 兩條路線）、`PLAIN.md`、`LEARNING.md` 關卡 21～24、`CHAIN.md` 環 8～11、`ARCHITECTURE.md` 都已合併到 main（PR #39～#57）；25-D 的 `deploy.yml` 也已合併（#63），要用時學習者自己到 Render 啟用（選配，步驟在 `deploy.yml` 開頭）。小塊清單、進度表、免費方案查證在 `docs/PLAN-INFRA.md`，**進度只記在那裡**。帶法（2026-10-27 改）：重帶走完先開練習專案（`PLAN-FULLSTACK.md` 第 1 節），關卡 21～24 只走 VM 路線（看 CI 的 job log，每關一小時）；Mac 動手是選配，有興趣的週末再做。
-- **觀念關的帶做進度**（2026-10-20）：關卡 18（Neon SQL 實驗、含第 5 段鎖的示範）和關卡 19（curl 看請求回應、cookie 罐換票、舊票重用 401、Path 不帶 cookie、Bearer 打 `/api/me`、CORS 的 `Origin` 實驗）已帶學習者在本機親手跑過一遍；關卡 20 的 `docs/drills/` 演練當時沒做；重帶（上面那條）走到 20 時一起做，接手處看上面那條的進度。帶法照 `docs/COACHING.md`（一次一個指令，讓他貼輸出再解釋），程度校準見第 1 節。
+- **觀念關的帶做進度**（2026-10-20）：關卡 18（Neon SQL 實驗、含第 5 段鎖的示範）和關卡 19（curl 看請求回應、cookie 存放處換票、舊票重用 401、Path 不帶 cookie、Bearer 打 `/api/me`、CORS 的 `Origin` 實驗）已帶學習者在本機親手跑過一遍；關卡 20 的 `docs/drills/` 演練當時沒做；重帶（上面那條）走到 20 時一起做，接手處看上面那條的進度。帶法照 `docs/COACHING.md`（一次一個指令，讓他貼輸出再解釋），程度校準見第 1 節。
 - **下一步是練習專案**：學習者會自己開一個新 repo，題目是記帳本（2026-10-27 定，功能 1～3 的使用者故事草稿在 `docs/PLAN-FULLSTACK.md` 第 6 節，他要用自己的話重寫），照 `docs/CHAIN.md` 的七環再走一次；技術棧和本 repo 一樣（Python + React，搬模板，2026-10-27 定）；時間與功能順序在 `docs/PLAN-FULLSTACK.md` 第 1 節；環 8～11（基礎設施）選做。
 
 接手時先確認三件事：`git log --oneline -5` 的最新 commit 是哪一關、CI 是綠的（GitHub Actions 分頁）、線上 `/api/health` 的 `db` 是 `ok`（要開瀏覽器，本機確認不了）。最近一次確認：2026-10-22，main 的 CI 綠（關卡 21～25 的 PR 全部綠著合併）、線上 `/api/health` 的 `migration` 是 `0006`（學習者在 Render 確認）。
@@ -71,7 +71,7 @@
 5. **修 bug 先講根本原因**，再改。他要學的是找原因的方法，不是修好的結果。
 6. **不確定就問**。尤其是會影響架構的決定（例如 cookie 的 SameSite、要不要加一張表）。
 7. **弄壞是設計的一部分**。「動手玩」刻意讓東西壞掉。他回報「壞了」不是求救，先問他「你覺得為什麼」。
-8. **每三天一次集中問答**。練習專案期間他會在**練習專案 repo 根目錄**的 `QUESTIONS.md` 累積疑問（`PLAN.md`「練習專案的規則」第 4 條；本 repo 沒有這個檔）。
+8. **每三天一次集中問答**。練習專案期間他會在**練習專案 repo 根目錄**的 `QUESTIONS.md` 累積疑問（`CHAIN.md` 附錄 C 第 4 條；本 repo 沒有這個檔）。
 9. **不要替他寫練習專案**。練習專案的規則是：他下任務（可以直接貼 `CHAIN.md` 的任務描述），AI 做，他驗收。AI 在練習專案裡一樣只做被要求的事。
 
 ## 5. 已經定了的事（不要再問）
@@ -80,7 +80,7 @@
 
 1. 每天 4 小時。
 2. 只用免費方案：Render、Vercel、Neon、Sentry、GitHub Actions。不買網域。
-3. 技術棧固定：FastAPI + SQLModel + Alembic + pytest + uv + ruff + pyright + slowapi；React 19 + Vite + React Router + Zustand + axios + TanStack Query + React Hook Form + Zod + Tailwind + Vitest + MSW + Prettier。**練習專案用同一套**，換棧是 20 天後自己的事。
+3. 技術棧固定：FastAPI + SQLModel + Alembic + pytest + uv + ruff + pyright + slowapi；React 19 + Vite + React Router + Zustand + axios + TanStack Query + React Hook Form + Zod + Tailwind + Vitest + MSW + Prettier。**練習專案用同一套**（2026-10-27 再次確認）；Node 後端、Next.js 列為選配，練習專案做完再說（`PLAN-FULLSTACK.md` 第 0 節）。
 4. 正式環境**前後端同站**：Vercel rewrites 把 `/api/*` 轉到 Render，cookie 保持 `SameSite=Lax`。不用 `SameSite=None` 硬撐（理由見 `QA.md`）。
 5. 遷移在容器啟動時跑（`alembic upgrade head && uvicorn ...`），不用付費的 Pre-Deploy。
 6. CI 綠了才部署；main 有 branch protection，一律走 PR。「CI 綠了才部署」是用 Render Dashboard 的 Auto-Deploy: After CI Checks Pass（`ci.yml` 裡沒有 Deploy Hook，所以不是那條備案）。接手時到 Render → Settings → Build & Deploy 看一眼確認。
@@ -88,7 +88,7 @@
 8. 範例專案凍結。練習專案題目由學習者決定，AI 不要代選（`PLAN.md` 原本寫「待辦含分類」，2026-10-15 改為另行決定，PLAN 本文保留歷史）；2026-10-27 他從 AI 列的三個候選裡選了記帳本（`PLAN-FULLSTACK.md` 第 6 節）。環 1～6 跟題目無關，可以先走。
 9. 文件全中文；AI 指引放 `AGENTS.md`，`CLAUDE.md` 只指向它，避免綁定單一工具。
 10. **架構與程式碼要是現代開發的專業水準**（2026-10-15 補充）。「這是教學模板」不是降低標準的理由：型別檢查、格式化、lint、測試、CI 全綠才合併，安全細節（例如 bcrypt 不能擋住 event loop、註冊的競態要處理）照正式專案的標準做。教學註解是加在專業程式碼上，不是用來解釋為什麼偷懶。
-11. **會碰到付費門檻的事要提早說**（2026-10-15 補充）。部署平台的設定、第三方服務的方案，只要有可能跳出付費頁，動手前先告訴學習者「這一步可能要錢，免費替代方案是＿＿」，讓他決定。已知的邊界：Render 的「After CI Checks Pass」在免費方案不一定有（替代：Deploy Hook）、Render Pre-Deploy Command 要付費（已改用啟動時跑遷移）、Railway 沒有長期免費方案（已排除）、GitHub Actions 私有 repo 每月 2000 分鐘、Neon / Sentry / Vercel Hobby 的額度見 `PLAN.md` 查證表。
+11. **會碰到付費門檻的事要提早說**（2026-10-15 補充）。部署平台的設定、第三方服務的方案，只要有可能跳出付費頁，動手前先告訴學習者「這一步可能要錢，免費替代方案是＿＿」，讓他決定。已知的邊界：Render 的「After CI Checks Pass」在免費方案不一定有（替代：Deploy Hook）、Render Pre-Deploy Command 要付費（已改用啟動時跑遷移）、Railway 沒有長期免費方案（已排除）、GitHub Actions 私有 repo 每月 2000 分鐘、Neon / Sentry / Vercel Hobby 的額度見 `PLAN-INFRA.md` 第 8 節的查證表。
 12. **帶法是「帶著做」**（2026-10-20）：一次一個指令、他貼輸出、從輸出講，方法與每關腳本在 `docs/COACHING.md`。不要丟整關文件給他讀，不要描述畫面長相。全專案從關卡 0 重新帶一遍，仔細關與快速關的分法在 `COACHING.md` 第 2 節。
 13. **GitHub Actions 的分鐘數**（2026-10-22）：repo 已公開，標準 runner 不計分鐘；私有 repo 的分鐘數是整個帳號一池，把這套搬到私有專案時要注意。基礎設施的 job 一律放 `.github/workflows/infra.yml`，只在 PR 與手動觸發、只有 `infra/`、`backend/` 或 E2E 有改動才跑，不放進 `ci.yml`。省分鐘的做法與公開前做過的檢查記在 `docs/PLAN-INFRA.md` 第 7 節。
 
@@ -105,14 +105,14 @@
 | `docs/PLAIN.md` | 每一關的白話版，一關三到五句，統一用「一家會員制的店」的比喻 | 覺得正式版太硬時、開一關之前 | 新增關卡時加一段 |
 | `docs/TOUR.md` | 照「一個請求怎麼跑」讀現在的程式碼 | 接手、複習 | 請求流程或檔案清單變時 |
 | `docs/CHAIN.md` | 跟技術棧無關的任務書：七環主線 + 選做的環 8～11（基礎設施）+ 本技術棧搬家清單（v2） | 開練習專案、搬模板 | 練習專案踩到坑時 |
-| `docs/PLAN.md` | 20 天計畫原文、免費方案查證、故障演練清單、學習者的決定 | 要知道「為什麼這樣排」 | 不改，只在最上方加狀態註記 |
-| `docs/PLAN-INFRA.md` | 基礎設施路線（關卡 21～25）的計畫、小塊清單、進度表、之後每次開對話的範本、免費方案查證、Actions 省分鐘的選項 | 要帶關卡 21 起的任何一關之前（第 2 節讀法、第 4 節對話範本） | 路線已完成（2026-10-22，含 25-D）；學習者在 Render 啟用 25-D 時更新第 6 節 |
+| `docs/PLAN.md` | 20 天計畫（2026-10-12）的決定紀錄：當時的前提、核心想法、至今未變的決定、後來推翻的、學習者的決定（2026-10-28 縮減；免費方案表併入 `PLAN-INFRA.md` 第 8 節、故障演練題庫搬到 `drills/README.md`） | 要知道「為什麼這樣排」 | 不改 |
+| `docs/PLAN-INFRA.md` | 基礎設施路線（關卡 21～25）的決定紀錄：為什麼做、加 job 的規矩（第 2 節）、每一小塊做了什麼與 PR 編號（第 6 節）、Actions 分鐘數（第 7 節）、免費方案查證（第 8 節，含原 `PLAN.md` 的表） | 要加基礎設施的 job 之前；查免費方案 | 路線已完成（2026-10-22，含 25-D），只在修文件時動 |
 | `docs/ARCHITECTURE.md` | 整條鏈的地圖：四條路徑的圖、每塊怎麼證明與擴充、刻意不做的清單、面試 60 秒說法 | 接手第一天、面試前、想一眼看懂全貌時 | 每加一塊基礎設施更新第 1、2 節 |
 | `docs/PLAN-FULLSTACK.md` | 重帶走完之後的最小路線（五步、含時間估計）、差距目錄（先走／可晚／選配）、帶每一項的規矩、和 AI 合作的固定循環 | 重帶走完要排下一階段時、開練習專案前 | 每做完一步更新第 5 節 |
 | `docs/API.md` | 本模板的 API 慣例（路徑、認證與授權的狀態碼、錯誤與列表格式、標頭、健康端點）與新端點檢查表 | 練習專案第 3 步開始前複製成自己的；之後每個端點照它 | 慣例變時 |
 | `docs/DEBUGGING.md` | 症狀 → 原因 → 修法 | 壞掉時 | 每次踩到新坑 |
 | `docs/RUNBOOK.md` | 情境 → 步驟（退版、換密鑰、備份） | 維運時 | 流程變時 |
-| `docs/QA.md` | JWT 與部署的觀念問答 | 複習、面試前、想不通為什麼時 | 有新的「為什麼」時 |
+| `docs/QA.md` | 43 題一句話答案 + 詳見哪裡（2026-10-28 砍掉理由段，理由在被指到的地方） | 複習、面試前、想不通為什麼時 | 有新的「為什麼」時 |
 
 ## 7. 外部資源清單（只寫在哪，不寫密鑰）
 
@@ -136,7 +136,7 @@
 
 每一段都假設對方是一個沒有任何對話記憶的 AI，而且已經能讀這個 repo。
 
-**接手帶練習專案（題目還沒定，先做環 1～6）：**
+**接手帶練習專案（題目是記帳本，先做環 1～6）：**
 
 > 先讀 jwt-auth-demo 的 `AGENTS.md` 和 `docs/HANDOFF.md`。我是它的學習者，接下來要開一個新的練習專案，照 `docs/CHAIN.md` 的七環走一遍。題目是記帳本（`PLAN-FULLSTACK.md` 第 6 節），但環 1～6 跟題目無關，先走。新 repo 的 `AGENTS.md` 用 `CHAIN.md` 附錄 B 的範本。現在從環 1 開始：把 `CHAIN.md` 環 1「給 AI 的任務」整段當成我的任務，技術棧跟 jwt-auth-demo 一樣，列出你要做的事和驗收標準（照環 1 的四條），等我確認再動手。只做被要求的事，做完列出「我注意到但你沒要求、所以我沒做」的清單。commit 由我自己下。
 
@@ -168,7 +168,7 @@
 - `LEARNING.md` 已完成的關卡是歷史紀錄：裡面的檔名、指令是當時的版本（例如關卡 6 以前用 `App.tsx`、關卡 9 以前用 `pip`）。開頭和關卡 6 有換算說明，不要回去改寫。
 - `PLAN.md` 的 20 天時程已經過期（實際進度比它快），只當設計理由看，不當行事曆。
 - 兩個分頁同時重新整理可能觸發 refresh token 的重複使用偵測而雙雙登出（關卡 1 Q2、關卡 6 Q4），刻意沒解，練習專案知道有這回事就好。
-- 免費方案的條款會變；`PLAN.md` 的查證是 2026-10-12 的結果。
+- 免費方案的條款會變；查證表在 `PLAN-INFRA.md` 第 8 節（2026-10-12 與 10-22 的結果）。
 - 各關卡文件裡的「測試有幾個」是當時的數字（關卡 4 寫 34、關卡 11 寫 39、關卡 13 寫 42、關卡 17 寫 51、關卡 19 寫 52、關卡 24 起 67；前端關卡 16 寫 11），以 `uv run pytest -q`、`npm test` 的輸出為準。
 - `LEARNING.md` 的「驗證方式」是寫給人自己照著做的清單，不是帶做腳本；帶做用 `COACHING.md`。兩邊若對不上，以現在的程式為準，修 `COACHING.md`，`LEARNING.md` 只加註記。
 - 這份文件的第 2 節會過期。每次合併 PR、換工具、進度變，都要更新它。

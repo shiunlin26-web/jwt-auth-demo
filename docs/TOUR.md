@@ -1,4 +1,4 @@
-# 專案導覽：從零讀懂整個專案（到關卡 24）
+# 專案導覽：從零讀懂整個專案（到關卡 25）
 
 給**剛接手這個專案的人**，也給**複習用**。
 
@@ -112,8 +112,7 @@
 - 其他檔案都用 `from config import settings` 拿設定
 
 **⭐ `main.py`**
-- `CORSMiddleware`：允許 `localhost:5173`（前端）呼叫 `localhost:8000`（後端）。網址不同，瀏覽器預設會擋
-- `allow_credentials=True`：允許帶 cookie，refresh token 才送得過來
+- `CORSMiddleware`：只有「除錯時直接打後端網址」才用得到（`VITE_API_URL` 的逃生口）。平常本機走 Vite 代理、正式走 Vercel 轉發，前後端同站，不需要 CORS（關卡 10；`LEARNING.md` 關卡 19 觀念 4）
 - `include_router`：把 `routes/auth.py`、`routes/users.py` 的 API 掛上來
 - 【關卡 22】`setup_metrics(app)`、`setup_tracing(app)`：指標與追蹤，兩個開關預設關（第 16 站）
 - 【關卡 24】`lifespan`：`OUTBOX_WORKER=inline` 時在同一個程序開一個背景 task 跑 outbox worker（第 17 站）
@@ -131,13 +130,13 @@
 
 ## 第 2 站：資料表長怎樣
 
-**讀**：`models.py` → `migrations/versions/0001_...py` → `0002_...py`
+**讀**：`models.py` → `migrations/versions/`（`0001` 起六個檔，照順序）
 
 ### 一句話
 
-`models.py` 定義兩張表，**Alembic** 負責把定義變成資料庫裡真正的表。
+`models.py` 定義四張表（登入的 `user`、`refreshtoken`，加關卡 24 的 `outboxevent`、`processedevent`），**Alembic** 負責把定義變成資料庫裡真正的表。
 
-### 兩張表
+### 登入的兩張表（另外兩張見第 17 站）
 
 ```
 user                              refreshtoken
@@ -158,7 +157,7 @@ user                              refreshtoken
 - 為什麼需要它：舊做法 `create_all` **只會建新表，不會改已存在的表**（關卡 1 就因此出過 500）
 - 改資料表的固定流程：
   1. 改 `models.py`
-  2. `alembic revision --autogenerate --rev-id 0005 -m "說明"`：產生遷移檔
+  2. `uv run alembic revision --autogenerate --rev-id 0007 -m "說明"`：產生遷移檔（編號接在 `versions/` 現有最大的之後，現在是 `0006`）
   3. **打開遷移檔檢查**（autogenerate 不一定完全正確）
   4. `alembic upgrade head`：套用到資料庫
 - `0003` 加 nickname、`0004` 刪掉 nickname：這是你自己練習的紀錄，示範「改錯了就再寫一個遷移改回來」，**不要去改已經套用過的遷移檔**
@@ -396,7 +395,7 @@ cookie 裡的 refresh token
 
 ### 一句話
 
-把「手動點點看」寫成程式，`uv run pytest` 一次跑完所有情境（現在 52 個），改了程式馬上知道有沒有改壞。
+把「手動點點看」寫成程式，`uv run pytest` 一次跑完所有情境（現在 67 個，以輸出為準），改了程式馬上知道有沒有改壞。
 
 ### 重點
 
@@ -806,4 +805,4 @@ Dockerfile 做出一個 image；Render、compose、Kubernetes 都跑同一個 im
 - 每一站的「自我檢查」都答得出來，就代表你讀懂這個專案了
 - 想知道某一關**為什麼**這樣設計 → `LEARNING.md` 對應的關卡
 - 要把登入功能**搬到別的專案** → `CHAIN.md` 附錄 A 的搬家清單（`LEARNING.md` 關卡 6 那段是當時的舊版）
-- 下一步 → 關卡 0～24 全部完成了。要開練習專案 → `CHAIN.md`；基礎設施想親手跑 → `infra/README.md`、`COACHING.md` 關卡 21～24；整條鏈一頁看完 → `ARCHITECTURE.md`；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`
+- 下一步 → 關卡 0～25 全部完成了。要開練習專案 → `CHAIN.md`；基礎設施想親手跑 → `infra/README.md`、`COACHING.md` 關卡 21～24；整條鏈一頁看完 → `ARCHITECTURE.md`；換一個 AI 工具繼續 → 先讓它讀 `HANDOFF.md`

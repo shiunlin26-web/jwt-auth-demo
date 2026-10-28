@@ -85,7 +85,6 @@
 | 7 | 瀏覽器 `localhost:5173/register`，密碼打 `short` | 按鈕不能按、出現提示文字 | 前端驗證是體驗，後端驗證是安全，規則兩邊各一份 |
 | 8 | 在 `backend`：`uv run python -c "from schemas import UserCreate; UserCreate(email='a@b.com', password='abc')"` | traceback，最後一行 `ValidationError: 1 validation error for UserCreate`，上面兩行是 `pydantic/main.py` 的 `__init__` | Pydantic 在「建物件」那一刻丟錯，FastAPI 接住轉成 422，`register` 沒被呼叫。traceback 從最後一行往上讀（關卡 20 第 2 條）。`uv` 找不到：`$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"` |
 | 9 | 3 個中文字註冊：`-d '{\"email\":\"t@test.com\",\"password\":\"中文字\"}'`（先讓他猜一個錯還是兩個） | `422`，**只有一個** `string_too_short`，`input` 是中文 | `Field(min_length)` 先跑、`@field_validator` 後跑，前面沒過就停，所以一個欄位一次只報一個錯。**不要用 `python -c` 測中文**：PowerShell 會把中文變成 `???`，只有 curl 這條路中文活得下來 |
-
 | 10 | email 和密碼同時填壞：`-d '{\"email\":\"abc\",\"password\":\"abc\"}'` | `422`，`detail` 有**兩個**物件，`loc` 分別是 `email`、`password` | 陣列是為了裝多個欄位的錯；每個欄位仍然只報第一條沒過的規則。這是 Pydantic 的行為，不是 HTTP 的規定 |
 
 **收尾一句話**：422 格式錯、400 內容不能收、401 你是誰我不認得、500 我壞了。前三個是「你的問題」，最後一個是「我的問題」。
@@ -185,7 +184,7 @@
 | 4 | 打開 `tests/test_auth.py` 第 117 行，把函式貼給他，一行對一步 | `register` / `login` / 記 `old_cookie` / `refresh` = 關卡 1 第 1～2 步；`thief = make_client(cookies=...)` + `refresh` = 第 3 步；三個 `assert`（401、那句、`count == 0`）= 第 3、5 步；本人 `refresh` 401 = 第 4 步 | `client` = 帶 `-b -c` 的 curl、`make_client` = 第二個 cookie 存放處、`helpers.py` 的 `register`/`login` 帳號固定。測試的三段：**準備、動作、斷言**，讀任何測試都找這三段 |
 | 5 | `routes\auth.py` 第 229 行 `rt.revoked = True` 前面加 `#`，**存檔**（曾經沒存到，還是 4 passed：先 `Get-Content routes\auth.py \| Select-String -n "rt.revoked = True"` 看有沒有 `#`），`uv run pytest -q -x -k refresh_token` | `FAILED ...撤銷全部 - assert 200 == 401`、`1 failed, 1 passed` | 讀法：`assert 實際 == 預期`，左邊程式真的回的、右邊測試要的。拆三個小問題問：200 是誰 / 紅的是小偷那個 (a) 還是本人那個 (b)（第一個失敗就停）/ 拿掉蓋章後舊票 `revoked` 永遠 false，207 行 `if rt.revoked` 不走，小偷換成功 200。重點：登入、換票、`/me` 全部正常，**沒有任何錯誤訊息，只有測試抓得到** |
 | 6 | `git checkout -- routes/auth.py`，再跑一次 | `4 passed` | |
-| 7 | `conftest.py` 不出題，用白話講三件事：(1) 26～34 行：沒設 `TEST_DATABASE_URL` 或跟 `DATABASE_URL` 一樣就拒跑，因為下一件會清表；(2) 43～59 行 `clean_database` 標 `autouse=True`，每個測試前自動跑，第一次砍掉重建、之後 TRUNCATE，所以每個測試從空庫開始、`register` 永遠不撞；`yield` 上面是測試前、下面是測試後；(3) 60 行起 `client`：測試參數寫 `client` 就拿到一個「帶 cookie 存放處的 curl」，打記憶體裡的 app，`get_session` 被換成測試庫的版本。25 行 `limiter.enabled = False` 是因為測試從同一個 IP 打幾十次登入 | | 一句話：用錯庫就不跑、每個測試前清空、給你一個 client。讀測試時只要知道 `client` 從這來 |
+| 7 | `conftest.py` 不出題，用白話講三件事：(1) 26～34 行：沒設 `TEST_DATABASE_URL` 或跟 `DATABASE_URL` 一樣就拒跑，因為下一件會清表；(2) 44～60 行 `clean_database` 標 `autouse=True`，每個測試前自動跑，第一次砍掉重建、之後 TRUNCATE，所以每個測試從空庫開始、`register` 永遠不撞；`yield` 上面是測試前、下面是測試後；(3) 75 行起 `client`：測試參數寫 `client` 就拿到一個「帶 cookie 存放處的 curl」，打記憶體裡的 app，`get_session` 被換成測試庫的版本。25 行 `limiter.enabled = False` 是因為測試從同一個 IP 打幾十次登入 | | 一句話：用錯庫就不跑、每個測試前清空、給你一個 client。讀測試時只要知道 `client` 從這來 |
 
 **conftest.py 可以略過，而且要明講**（學習者問「一定要讀懂嗎」「什麼時候要知道、不會寫也要能抄」）：現在只要上面那張「測試裡寫什麼 → 拿到什麼」的表。要回來的時機是練習專案環 5 請 AI 寫第一個測試時，用三件事驗收：有拒用正式庫的保險絲、每個測試前清空或隔離、`client` 打的是真後端接的是測試庫。怎麼抄：`CHAIN.md` 附錄 A 的 `conftest.py` 那列（整個複製、改 TRUNCATE 的表名、關掉自己專案的外部服務）。每個專案的準備檔內容不同（rollback 代替 TRUNCATE、Docker Postgres 代替 Neon、TestClient 代替 AsyncClient），但「準備資料庫、接到測試庫、給一個 client」三件事都在；前端的 `src/test/setup.ts` + `server.ts` 是同一個東西。
 **學習者的程度（2026-10-27）**：讀得懂測試程式本身（三段式、`assert`、一行對一步），讀不懂 conftest 這種「準備用的」程式，這是正常的，不要逼。
@@ -256,7 +255,7 @@
 | --- | --- | --- | --- |
 | 1 | Console：`const { useAuthStore } = await import("/src/auth/authStore.ts"); useAuthStore.getState();` | 七樣：`accessToken`、`initialized: true`、`notice`、四個 `ƒ` | 他會問 `create<AuthState>()((set) => ({...}))` 的 `set` 是什麼、為什麼能塞這麼多層。講法：三層看（`create<AuthState>()` 回傳工廠 → 工廠收你的「說明書」函式並把 `set` 塞給它 → 說明書回傳盒子的初始內容和方法）；`set` 是**唯一合法的改盒子工具**，做兩件事：蓋欄位（沒給的不動）、通知看盒子的元件重畫；`set({ accessToken })` 是同名縮寫；`()()` 是 Zustand 給 TS 的固定寫法照抄；Java 對照是 class 三欄位四方法、改欄位要經過 `set` |
 | 2 | Console：`useAuthStore.getState().setNotice("我從 Console 改的");` | 頁面上方提示立刻變 | 問「為什麼畫面會變」→ `set` 的第二件事。誰在看盒子：`useAuth.ts:18` 的 `useAuthStore(...)`；誰在改：`authService.ts` 每個動作「先打 API 再改盒子」。資料流一條線：畫面 → `authService` → API → 改盒子 → 元件重畫。`initializeAuth` 是「重新整理還在登入」的來源，`finally` 裡 `setInitialized()` 讓守門員離開載入中 |
-| 3 | Console：`const m = await import("/src/api/auth.ts"); useAuthStore.getState().setAccessToken("bad"); await m.getMe();` | Network `me 401 → refresh 200 → me 200`，Console **沒紅字**，印出使用者物件 | 他會問「為什麼 refresh 後重打 me，是登入本來就會打嗎」→ 不是，第二個 `me` 是攔截器 `return api(original)` 重送的（`client.ts:96`），呼叫端只拿到最後的 200，`client.test.ts:40` 的測試名就是「呼叫端完全沒感覺」。登入本身不打 `/me`，那是關卡 12 的 `useMe` |
+| 3 | Console：`const m = await import("/src/api/auth.ts"); useAuthStore.getState().setAccessToken("bad"); await m.getMe();` | Network `me 401 → refresh 200 → me 200`，Console **沒紅字**，印出使用者物件 | 他會問「為什麼 refresh 後重打 me，是登入本來就會打嗎」→ 不是，第二個 `me` 是攔截器 `return api(original)` 重送的（`client.ts:97`），呼叫端只拿到最後的 200，`client.test.ts:40` 的測試名就是「呼叫端完全沒感覺」。登入本身不打 `/me`，那是關卡 12 的 `useMe` |
 
 **收尾一句話**：登入狀態放在一個全站共用的盒子，只能用 `set` 改、改了畫面自動重畫；兩個攔截器讓貼 token 和 401 換票重送對呼叫端透明。
 **收尾要講到**：資料流那條線（畫面 → authService → API → 改盒子 → 重畫；每個請求攔截器貼 token；401 換票重送；重新整理 `initializeAuth` 換票回盒子）/ 盒子裡有沒有 token 是前端認定登入的唯一依據。
@@ -301,7 +300,6 @@
 | --- | --- | --- | --- |
 | 1 | 拿關卡 10 用 curl 打線上 `/api/health` 時回應的 `X-Request-Id`，Render → 服務 → Logs → 搜那串 | 一行 JSON：`"request_id"` 同一個、`"time"` 和回應的 `Date` 一樣、`"path": "/api/health"`、`"status": 200`、`"duration_ms": 16.1` | 使用者回報問題時請他給 `X-Request-Id`，直接搜。欄位表：`status`（搜 500、一堆 401）、`duration_ms`（登入 100 上下正常、1 是沒比對、幾千是冷啟動）、`path`（同 IP 連打 login）、`level: ERROR`（沒接住的例外附 traceback）。本機文字、線上 JSON（`render.yaml` 的 `LOG_JSON=true`），欄位一樣 |
 | 2 | 備份還原演練，照 `RUNBOOK.md` 6.1 的 9 步一步一步給：註冊 `drill@example.com` 登出 → `jwt-auth-demo-prod` 的 SQL Editor 查到它、記時間 → `SELECT now();` 再 `DELETE` → 線上登入失敗 → Branches → main → Restore from history，時間選「建立之後、刪除之前」留一分鐘緩衝（Neon 選單是台灣時間就 +8）→ 線上登入成功 → `/api/health` 一樣 → 刪 `production_old_<時間>` 分支 → 清演練帳號 | 還原幾秒完成；多一個 `production_old_2026-...Z` 分支；登入回來；`db: ok`、`migration` 不變；Render 什麼都沒動 | **清演練帳號會撞外鍵**（`refreshtoken_user_id_fkey`，`models.py:23`）：登入後表裡有 refresh token 指著他，而且只要換過一次票就有蓋章的舊列留著，網站的「登出」只刪 cookie 那一列不夠。**先按「登出所有裝置」**（`revoke_all_refresh_tokens` 整排刪），再 `DELETE FROM "user"`。曾經叫他「登出再刪」是錯的，學習者自己試出「登出所有裝置」才對。正式專案有刪帳號功能時用 `ON DELETE CASCADE` 或先呼叫 `revoke_all`；這裡沒有，保留預設的「擋」是保護 |
-
 | 3 | **Render 退版**（`RUNBOOK.md` 第 2 節；5 分鐘，按按鈕不改設定）：先 `curl.exe -s https://<前端網址>/api/health` 記下 `version` → Render → 服務 → Events → 上一個 **Deploy live** → 「…」→ **Rollback to this deploy** → 等 Live → 再打 `/api/health` → 然後 **Manual Deploy → Deploy latest commit** 回最新 → 再打一次 | 退版後 `version` 變成上一個 commit、`db: ok`、`migration` 不變；回最新後 `version` 回到 main 的 commit | 退版只換線上的 image，main 上壞的程式還在，下次 push 又會部署壞的，所以退完要修 main。退版**不退資料庫**：壞的那版若跑了「刪欄位、改型別」的遷移，舊版程式可能壞，這就是關卡 5 的 expand / contract。Render 免費方案保留舊 image 可以退，k8s 版是 `rollout undo`（關卡 23） |
 | 4 | **本機 alembic 退版**（`RUNBOOK.md` 第 3 節情境 C；只在本機 `neondb`，**不碰正式**）：在 `backend`：`uv run alembic current` → `uv run alembic downgrade -1` → `uv run alembic current` → Neon（`jwt-auth-demo` 的 `neondb`）Tables 看表 → `uv run alembic upgrade head` → `current` | `0006 (head)` → `Running downgrade 0006 -> 0005` → `0005` → `processedevent` 表不見了（0006 的 `downgrade()` 是 `drop_table`） → `Running upgrade 0005 -> 0006` → `0006 (head)` | 這是關卡 5 看過的 `downgrade()` 真的跑一次：退一階跑那張單的 downgrade、升回去跑 upgrade，`alembic_version` 跟著變。**正式環境不手動 downgrade**，原則是 roll forward：再開一張單修正（RUNBOOK 第 3 節情境 B）；因為 downgrade 會刪資料（這裡 `processedevent` 整張表沒了），而且 Render 上跑的程式還是新版，會找不到表。本機練是為了知道那張單的兩個方向都對 |
 
@@ -414,7 +412,7 @@
 
 ### 關卡 18：SQL 與資料庫
 
-**搭配看的程式**：`backend/models.py`（`index=True`、`unique=True`）、`routes/auth.py` 的 `with_for_update()`（172）與 `delete_expired_refresh_tokens`、`docs/labs/18-sql.sql`
+**搭配看的程式**：`backend/models.py`（`index=True`、`unique=True`）、`routes/auth.py` 的 `with_for_update()`（194）與 `delete_expired_refresh_tokens`、`docs/labs/18-sql.sql`
 
 **前置**：Neon SQL Editor 能開；`docs/labs/18-sql.sql` 開著。帳號：這關用 `TEST_DATABASE_URL` 那個資料庫（會灌 5 萬筆假資料，Neon 免費方案夠用，實驗最後會清掉）。**先講名詞**（`LEARNING.md` 關卡 18「先認識幾個名詞」）再開始。
 
