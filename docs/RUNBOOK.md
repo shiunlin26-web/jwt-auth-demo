@@ -151,7 +151,4 @@ docker compose -f infra/compose.yaml down -v
 
 ## 8. 新人（或未來的你）接手
 
-1. 跑起來：Windows 用 `scripts\setup.ps1 -SkipTests`（`README.md`「每次開機怎麼把專案跑起來」），其他系統照 `README.md` 手動版
-2. 讀 `docs/TOUR.md` 照請求流程讀一遍程式
-3. 拿到 Render、Vercel、Neon、Sentry 四個平台的存取權（用 GitHub 帳號登入即可）
-4. 做一次第 0 節，確認自己看得懂 `/api/health` 和 Render Logs
+閱讀順序在 `HANDOFF.md` 第 0 節。維運的人多做兩件事：拿到 Render、Vercel、Neon、Sentry 四個平台的存取權（GitHub 帳號登入即可）；做一次本文第 0 節，確認自己看得懂 `/api/health` 和 Render Logs。

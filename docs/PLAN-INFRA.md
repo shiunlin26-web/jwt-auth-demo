@@ -130,4 +130,4 @@
 | Sentry | 錯誤追蹤 | Developer 方案：1 個使用者、每月 5000 個錯誤 | 夠用 |
 | 網域 | 自訂網址 | 不免費（首年促銷約 1 美元、續約約 11 美元） | **不買**，用 `*.vercel.app` |
 
-**刻意不做的**（會碰到付費或超出範圍）：Terraform（要雲端帳號與 state）、線上的 Kubernetes 叢集、託管 Kafka、Helm（kustomize 夠用）、前端 Dockerfile（前端留在 Vercel）、ArgoCD。每一個在 `ARCHITECTURE.md` 寫成「下一步往哪擴」。
+**刻意不做的清單**只放在 `ARCHITECTURE.md` 第 3 節（Terraform、線上的 Kubernetes、託管 Kafka、Helm、前端 Dockerfile、ArgoCD……每一個都寫成「下一步往哪擴」），這裡不重抄。
