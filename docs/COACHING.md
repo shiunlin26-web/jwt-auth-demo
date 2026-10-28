@@ -328,22 +328,21 @@
 **題目**（三題）：(1) `staleTime` 改 0 / `Infinity`，第 4 步怎麼變 → 每次切回都重抓 / 永遠不自動重抓只剩 `refetch` 和登出清；(2) 拿掉 `enabled`，登出後 Network 會出現什麼 → `me 401 → refresh 401 → clearSession`，已經登出還會再看到一次「登入已過期」；(3) 記帳本「本月支出清單」放哪、key 怎麼取 → Query，後端有正本；`["expenses", "2026-10"]`，從大到小排、月份進 key 各月一份快取、新增後 `invalidateQueries({ queryKey: ["expenses"] })` 一次全過期。
 **動手玩**：`LEARNING.md` 關卡 12 的 4（拿掉登出清快取，看 B 閃 A 的 email）。
 
-### 關卡 13：工程品質基線
+### 關卡 13：工程品質基線 — 快速走
 
-**搭配看的程式**：`backend/pyproject.toml`（ruff、pyright 設定）、`backend/security.py`（`DUMMY_PASSWORD_HASH`、`to_thread`）、`routes/auth.py` 的 `IntegrityError`、`.github/dependabot.yml`、`frontend/tsconfig.app.json`
+**搭配看的程式**：`backend/routes/auth.py:154～156`（`assert user.id is not None` 的註解）、`backend/models.py:10`（`id: int | None` 的理由）、`backend/security.py:42`（`DUMMY_PASSWORD_HASH`）、`backend/pyproject.toml`（ruff、pyright 設定）、`.github/dependabot.yml`
 
-**前置**：前後端套件裝好。
+**前置**：前後端套件裝好、後端開著。讀 `PLAIN.md` 關卡 13。**先講名詞**：lint（掃寫法：沒用的 import、到不了的程式）、formatter（只管排版，全自動改，沒有爭論）、型別檢查（不跑程式，看型別對不對，最常抓「這個值有時候是 None」）。關卡 9 跑過 ruff 兩個、關卡 4 跑過 pytest，這關補 pyright 和前端。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | 在 `backend`：`uv run ruff format --check .`、`uv run ruff check .`、`uv run pyright`、`uv run pytest -q` | 四個都綠；pyright `0 errors` | 推之前本機跑的四樣，CI 跑一樣的 |
-| 2 | 在 `frontend`：`npm run format:check`、`npm run lint`、`npm run typecheck`、`npm test` | 四個都綠 | |
-| 3 | `backend\routes\auth.py` 的 `login` 裡刪掉 `assert user.id is not None`，`uv run pyright` | 幾個 `error`，提到 `int \| None` | 型別檢查把「跑到才炸」提前到「存檔就知道」。改回來 |
-| 4 | 用不存在的 email 登入一次、用存在的 email 打錯密碼一次，看 terminal 的 request log `duration_ms` | 兩個都接近 100 毫秒 | `security.py` 的 `DUMMY_PASSWORD_HASH`：帳號不存在也假裝比對一次，不然用時間就能猜出哪些 email 有註冊 |
-| 5 | GitHub → Insights → Dependency graph → Dependabot | 三個 ecosystem | 套件更新由機器開 PR，CI 綠才合 |
+| 1 | 在 `backend`：`uv run pyright` | `0 errors, 0 warnings, 0 informations` | CI 的 Type check 那步 |
+| 2 | `routes\auth.py:156` 的 `assert user.id is not None` 整行刪掉，存檔，再 `uv run pyright`；然後 `git checkout -- routes/auth.py` | `3 errors`，指向後面用 `user_id` 的三行（`create_access_token`、`delete_expired_refresh_tokens`、`issue_refresh_token`），訊息有 `int \| None` | `models.py:10` 的 `id: int \| None`：剛 `User(...)` 還沒存進資料庫時真的是 None。那三個函式要 `int`。`assert` 做兩件事：對型別檢查器說「從這行起是 int」、執行時真的 None 就立刻炸。沒有它程式照跑、pytest 照綠（查出來的 user 永遠有 id），哪天傳進一個沒 commit 的物件才 500；pyright 把「哪天」提前到存檔當下 |
+| 3 | 在 `frontend`：`npm run format:check`、`npm run lint`、`npm run typecheck` | 三個都綠；eslint 和 tsc **沒輸出就是過** | 前端的三樣，`npm test` 留到關卡 16 |
+| 4 | 後端視窗開著，curl 登入兩次：不存在的 email `nobody@example.com`、存在的 email 打錯密碼；各跑兩三次，看 request log 的 `duration_ms` | **同一個範圍、差距沒有固定方向**（本機約 900～1100，第一次幾千是 Neon 冷啟動） | 兩條路都做「查一次資料庫 + 比對一次 bcrypt」：帳號不存在那條用 `DUMMY_PASSWORD_HASH` 對假雜湊照樣比一次。沒有它，不存在會少 100 毫秒、穩定地比較快，量幾十次就能列出哪些 email 有註冊。本機 Neon 來回的抖動比 100 毫秒大所以看不太出來；正式環境資料庫同機房（來回 1 毫秒）就很明顯。**不要預期「兩個都接近 100 毫秒」**（曾經這樣寫，本機看到的是 900 多） |
 
-**收尾**：四個檢查 + CI / 型別檢查提前抓錯 / 安全細節（timing）照正式專案做。
-**動手玩**：`LEARNING.md` 關卡 13 的 2、5。
+**收尾（不出題）**：四種檢查各抓一種錯，推之前八個指令全跑，CI 跑一樣的；型別檢查把「哪天會炸」提前到存檔當下，`assert` 是對它說「我保證」；安全細節照正式專案做（timing、`IntegrityError` 接住、`to_thread`、JWT `require exp`）。Dependabot 看 GitHub → Insights → Dependency graph 就好，另一個對話已加 CodeQL 與 audit。等他說下一關。
+**動手玩**：`LEARNING.md` 關卡 13 的 2（前端 strict）、5（註冊競態）。
 
 ### 關卡 14：Zod + React Hook Form
 
