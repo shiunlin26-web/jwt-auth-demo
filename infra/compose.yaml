@@ -119,6 +119,10 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      # 【關卡 22】Grafana 13 啟動後會在背景下載、更新一批預裝外掛（含 Prometheus datasource）。
+      # 更新的那一瞬間外掛程序會退出，CI 剛好在那時查 /api/ds/query 就回 404 plugin not registered（PR #87 遇過）。
+      # 關掉它：用 image 裡內建的版本就夠，而且不用看網路臉色，本機沒網路也能起
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
     volumes:
       # provisioning：資料來源與儀表板都從檔案載入（grafana/provisioning/、grafana/dashboards/）
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
