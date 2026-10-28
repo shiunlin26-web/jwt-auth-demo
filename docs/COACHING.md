@@ -360,21 +360,19 @@
 **收尾（不出題）**：規則一份在 `schemas/auth.ts`，驗證和型別都從它來；前端規則是體驗、後端是安全，兩份要一樣；`z.infer` 不用手寫 type。等他說下一關。
 **動手玩**：`LEARNING.md` 關卡 14 的 4（前後端規則不一致會怎樣）。
 
-### 關卡 15：Tailwind CSS
+### 關卡 15：Tailwind CSS — 快速走
 
-**搭配看的程式**：`frontend/src/components/ui.tsx`、`src/index.css`、`vite.config.ts`、`app/AppLayout.tsx`
+**搭配看的程式**：`frontend/src/components/ui.tsx`（`TextInput`、`Button` 的 `buttonVariants` 與 `variant?: keyof typeof buttonVariants`、`Hint`、`Alert`，每個顏色都有 `dark:` 版）、`src/index.css`（一行 `@import "tailwindcss"`）
 
-**前置**：前端跑起來。
+**前置**：前端跑起來。讀 `PLAIN.md` 關卡 15。他有前端經驗，抽一題確認後只做深色模式。
 
-| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| 步 | 操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `frontend\src\pages\HomePage.tsx` 的 `<h2` 加 `text-red-600`，存檔 | 標題立刻變紅，沒重新整理 | class 就是樣式，Vite 熱更新。改回來 |
-| 2 | DevTools → Rendering → `prefers-color-scheme: dark` | 底變深、字變淺 | `dark:` 開頭的 class。`components/ui.tsx` 每個顏色都有深色版 |
-| 3 | `npm run build`，`Get-ChildItem frontend\dist\assets\*.css \| Select-Object Name, Length` | 一個檔案，約 14 kB | 只打包用到的 class |
-| 4 | 打開 `components/ui.tsx` 找 `buttonVariants` | `primary`、`secondary`、`danger` 各一串 class | 共用元件，型別從物件的 key 推出來 |
+| 1 | 抽題：「`buttonVariants` 加一個 `ghost`，`<Button variant="ghost">` 型別會不會過？為什麼不用改 `ButtonProps`？」 | 會過，因為 `variant?: keyof typeof buttonVariants` 從物件的 key 推 | **出題前先看現在的程式**：2026-10-28 之前 `ButtonProps` 是手寫 union，文件卻寫 `keyof typeof`，題目前提錯了；當場讓學習者選，他選改程式（PR #94）。原則同 `z.infer`：型別從定義推，不手抄 |
+| 2 | DevTools → ⋮ → More tools → Rendering → `Emulate CSS media feature prefers-color-scheme` 選 `dark` | 底變深、字變淺、輸入框變深色，沒有白底白字 | `ui.tsx` 每個顏色後面那串 `dark:`。漏一個就會有白底白字（`LEARNING.md` 動手玩 2） |
 
-**收尾**：class 即樣式 / 深色每個顏色都要想 / 共用元件在 `ui.tsx`。
-**動手玩**：`LEARNING.md` 關卡 15 的 2、5。
+**收尾（不出題）**：class 即樣式、Vite 熱更新；深色每個顏色都要想；共用元件在 `ui.tsx`，加一種按鈕只改物件。等他說下一關。
+**動手玩**：`LEARNING.md` 關卡 15 的 2、3。
 
 ### 關卡 16：Vitest + MSW（前端測試）
 
