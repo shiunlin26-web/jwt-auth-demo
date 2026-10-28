@@ -7,14 +7,7 @@ JWT 登入的教學模板：FastAPI + React + Neon，部署在 Render + Vercel�
 
 ## 這個專案展示了什麼
 
-```
- 使用者 ── 瀏覽器 ──▶ Vercel（React）──/api/*──▶ Render（FastAPI 容器）──▶ Neon Postgres
-                                                      ├──▶ JSON log（request id）、Sentry
-                                                      ├──▶ /metrics、OTLP span ──▶ Prometheus + Grafana、OTel collector（compose）
-                                                      └──▶ outbox 表 ──▶ worker ──▶ Kafka（Redpanda）──▶ consumer（冪等）
- git push ──▶ GitHub Actions：ci.yml 全綠才合併；infra.yml 在 PR 上跑 compose、E2E、observability、k8s、messaging ──▶ main ──▶ Render、Vercel 自動部署
- 同一個 backend/Dockerfile 的 image 跑在三個地方：Render（線上）、infra/compose.yaml（本機整套）、infra/k8s/（kind 上 2 副本、零停機滾動更新、退版）
-```
+四條路徑（請求、部署、事件、觀測）的圖在 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 第 1 節，這裡只列每一段做了什麼、怎麼證明：
 
 | 這條鏈的一段 | 做了什麼 | 怎麼證明它會動 |
 | --- | --- | --- |
@@ -67,7 +60,7 @@ jwt-auth-demo/
 ├── .github/workflows/audit.yml  # 每週一：pip-audit、npm audit 掃套件的已知漏洞（不擋 PR）
 ├── .github/workflows/deploy.yml # 【關卡 25-D，選配】CI 綠後叫 Render 部署、等 /api/health 版本對上；沒設 secret 就跳過
 ├── .github/dependabot.yml     # 每週自動開 PR 更新套件
-├── docs/                      # PLAIN（每關白話版）、COACHING（帶做腳本）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環 + 選做四環的任務書）、QA、DEBUGGING、RUNBOOK、API（API 慣例）、PLAN（已過期的決定紀錄）、PLAN-INFRA（基礎設施路線的決定與 PR 紀錄）、PLAN-FULLSTACK（接下來的路）、ARCHITECTURE（整條鏈的地圖）
+├── docs/                      # 文件；每份是什麼、什麼時候看：docs/HANDOFF.md 第 6 節的文件地圖
 ├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
 ├── infra/                     # 關卡 21～24：compose、k8s（kustomize）、prometheus、grafana、otel；怎麼跑看 infra/README.md
 ├── scripts/setup.ps1          # 乾淨的 Windows 機器一鍵建置（裝工具、拉 main、.env、sync、測試）
@@ -127,7 +120,7 @@ cd frontend; npm run dev
 
 瀏覽器開 <http://localhost:5173>。連線字串打錯：`Ctrl+C`，`Remove-Item backend\.env -ErrorAction SilentlyContinue`，重跑第二行；其他症狀見 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)「安裝與啟動」。
 
-**Mac**（晚上與週末那台，有 Docker）：`bash scripts/setup.sh --skip-tests`，做的事和 `setup.ps1` 一樣，參數是 `--skip-tests`、`--env-file ~/jwt.env`。Mac 不會清空，之後再跑只是 `git pull` 加同步套件。開任何一關之前先跑 `bash scripts/doctor.sh`（Windows：`powershell -ExecutionPolicy Bypass -File scripts\doctor.ps1`），它會印出這台能做哪幾關；關卡 21 起的路線在 [`docs/PLAN-INFRA.md`](docs/PLAN-INFRA.md)。
+**Mac / Linux**：`bash scripts/setup.sh --skip-tests`，做的事和 `setup.ps1` 一樣，參數是 `--skip-tests`、`--env-file ~/jwt.env`。Mac 不會清空，之後再跑只是 `git pull` 加同步套件。開任何一關之前先跑 `bash scripts/doctor.sh`（Windows：`powershell -ExecutionPolicy Bypass -File scripts\doctor.ps1`），它會印出這台能做哪幾關；關卡 21 起的路線在 [`docs/PLAN-INFRA.md`](docs/PLAN-INFRA.md)。
 
 > 下面「需要先安裝」到「3. 啟動前端」是手動版，腳本做的就是這些事；想知道每一步為什麼、或不是 Windows，照手動版做。
 
@@ -142,9 +135,9 @@ cd frontend; npm run dev
 
 ## 1. 準備資料庫（二選一）
 
-### A. 使用 Neon（原本的做法）
+### A. Neon（免費雲端；正式環境也用它）
 
-在 Neon 建一個專案，按 **Connect** 複製連線字串，長得像這樣：
+`setup.ps1`／`setup.sh` 會問你連線字串並自動轉格式，這段是手動版。在 Neon 建一個專案，按 **Connect** 複製連線字串，長得像這樣：
 
 ```
 postgresql://neondb_owner:xxxx@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
@@ -162,20 +155,18 @@ postgresql://neondb_owner:xxxx@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmo
 postgresql+asyncpg://neondb_owner:xxxx@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?ssl=require
 ```
 
-### B. 使用本地 Postgres（Docker）
+### B. 本地 Postgres（有 Docker 的機器）
+
+用關卡 21 的 compose 只起資料庫：
 
 ```bash
-docker run -d --name jwt-demo-db \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=jwtdemo \
-  -p 5432:5432 \
-  postgres:16
+docker compose -f infra/compose.yaml up -d --wait postgres
 ```
 
 連線字串：
 
 ```
-postgresql+asyncpg://postgres:postgres@localhost:5432/jwtdemo
+postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/jwtdemo
 ```
 
 > 資料表會在下一步用 `alembic upgrade head` 建立。
@@ -195,8 +186,6 @@ cp .env.example .env              # Windows: copy .env.example .env
 
 > **不用再手動啟用 venv。** 之後所有指令都用 `uv run <指令>` 執行（例如 `uv run pytest`），
 > uv 會自動用 `backend/.venv` 裡的 Python 和套件，Windows、macOS 都一樣，也不會有「指令碼執行被停用」的問題。
->
-> 以前用 `python -m venv venv` 建的舊 `venv/` 資料夾可以直接刪掉。
 
 編輯 `backend/.env`，**必填的只有兩個**：
 
@@ -289,16 +278,16 @@ uv run pytest
 
 詳細說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 4。
 
-## 6. 程式碼檢查（ruff）與 CI
+## 6. 程式碼檢查與 CI
 
-```bash
-cd backend
-uv run ruff check .          # 找出沒用到的 import、排序錯的 import、常見 bug 寫法
-uv run ruff check --fix .    # 能自動修的直接修掉
-```
+推之前要跑的全部檢查（ruff、pyright、pytest、eslint、prettier、vitest、tsc、build）列在 [`AGENTS.md`](AGENTS.md)「常用指令」。推上 GitHub 之後 `.github/workflows/ci.yml` 自動跑同一套再加 Docker build/run/smoke，結果在 repo 的 **Actions** 分頁看；說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 9。
 
-推上 GitHub 之後，`.github/workflows/ci.yml` 會自動跑：後端 ruff（lint + format）、pyright、alembic check、pytest、Docker build/run/smoke；前端 eslint、prettier、vitest、tsc + vite build，
-結果在 repo 的 **Actions** 分頁看。說明見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 9。
+## 7. 部署（選用）
+
+後端在 Render（`render.yaml`）、前端在 Vercel（`frontend/vercel.json`）、資料庫在 Neon，全部免費方案。
+完整步驟、觀念與會踩的坑見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10；出問題先查 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)。
+上線後的維運（看 log、退版、換密鑰、備份與還原演練）見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，關卡 11。寫新端點前看 API 慣例：[`docs/API.md`](docs/API.md)。
+選配：`.github/workflows/deploy.yml` 把部署變成 GitHub 上的一步（CI 綠 → 叫 Render → 等線上版本對上，Environments 分頁有紀錄）；設了 secret `RENDER_DEPLOY_HOOK` 才啟用，步驟見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 25。
 
 ## API 一覽
 
@@ -324,13 +313,6 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 | 用途 | 呼叫受保護 API | 換新的 access token |
 | 輪替 | – | 每次 refresh 都發新的、舊的作廢；舊的被重複使用 → 該使用者所有 refresh token 全部撤銷 |
 
-## 7. 部署（選用）
-
-後端在 Render（`render.yaml`）、前端在 Vercel（`frontend/vercel.json`）、資料庫在 Neon，全部免費方案。
-完整步驟、觀念與會踩的坑見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 10；出問題先查 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)。
-上線後的維運（看 log、退版、換密鑰、備份與還原演練）見 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)，關卡 11。寫新端點前看 API 慣例：[`docs/API.md`](docs/API.md)。
-選配：`.github/workflows/deploy.yml` 把部署變成 GitHub 上的一步（CI 綠 → 叫 Render → 等線上版本對上，Environments 分頁有紀錄）；設了 secret `RENDER_DEPLOY_HOOK` 才啟用，步驟見 [`docs/LEARNING.md`](docs/LEARNING.md) 關卡 25。
-
 ## 每次 `git pull` 之後
 
 拿到新的程式碼後，視情況做這幾件事（不確定就全部跑一次，已經是最新的會自動跳過）：
@@ -343,34 +325,10 @@ uv run ruff check --fix .    # 能自動修的直接修掉
 
 或者直接 `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -SkipTests`，它會 `git pull` 並把這三件事都做一遍。
 
-## 學習路線
+## 文件
 
-一步步把這個專案練到接近生產級的過程，記錄在 [`docs/LEARNING.md`](docs/LEARNING.md)。
-要接手帶人（或換一個 AI 工具繼續）：先讀 [`docs/HANDOFF.md`](docs/HANDOFF.md)，帶做的方法與每關腳本在 [`docs/COACHING.md`](docs/COACHING.md)；要把這套搬到新專案：[`docs/CHAIN.md`](docs/CHAIN.md)（七環主線 + 選做的環 8～11）。
-基礎設施路線（關卡 21～25：compose 與 E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖）的計畫與進度在 [`docs/PLAN-INFRA.md`](docs/PLAN-INFRA.md)，怎麼親手跑在 [`infra/README.md`](infra/README.md)。
-重帶走完之後的最小路線（練習專案、約 8 週）：[`docs/PLAN-FULLSTACK.md`](docs/PLAN-FULLSTACK.md)。
+每份文件是什麼、什麼時候看：[`docs/HANDOFF.md`](docs/HANDOFF.md) 第 6 節的文件地圖。要接手帶人或換一個 AI 工具繼續：從 HANDOFF 第 0 節開始；學習路線與每一關：[`docs/LEARNING.md`](docs/LEARNING.md)；要把這套搬到新專案：[`docs/CHAIN.md`](docs/CHAIN.md) 附錄 A。
 
-## 常見問題
+## 壞掉了
 
-**安裝、啟動相關**
-
-- **`ModuleNotFoundError: No module named 'xxx'`**（例如 `pydantic_settings`、`pytest`、`sqlalchemy`）：
-  1. 指令前面有沒有加 `uv run`？直接打 `uvicorn`、`pytest` 會用到系統的 Python，找不到套件
-  2. 在 `backend` 重新跑一次 `uv sync`
-- **`uv: command not found` / `The term 'uv' is not recognized`**：還沒安裝 uv，見上方「需要先安裝」。**裝完一定要關掉終端機重開一個**，已經開著的視窗讀不到新的 PATH。重開後還是找不到，用 `$env:Path` 確認裡面有 `C:\Users\<你的帳號>\.local\bin`。
-- **`The SQLAlchemy asyncio module requires that the Python 'greenlet' library is installed`**：SQLAlchemy 2.1 起不再自動安裝 `greenlet`。`pyproject.toml` 已經寫了 `sqlalchemy[asyncio]`，在 `backend` 重新跑一次 `uv sync` 就好。
-- **啟動後端時出現 `ValidationError ... jwt_secret ... at least 32 characters`**：`.env` 的 `JWT_SECRET` 太短，用上面的指令重新產生一個。
-- **啟動後端時出現 `ValidationError ... Field required`**：`.env` 少了必填的設定（`DATABASE_URL` 或 `JWT_SECRET`），或是 `.env` 不在 `backend` 資料夾裡。
-- **`npm install` 出現 `EBADENGINE` 警告**：Node.js 版本太舊，請更新到 22.22 以上。
-
-**資料庫相關**
-
-- **`TypeError: connect() got an unexpected keyword argument 'sslmode'`（或 `'channel_binding'`）**：`DATABASE_URL` 要照「1. 準備資料庫」改過：開頭 `postgresql+asyncpg://`、`ssl=require`、刪掉 `channel_binding`。
-- **`socket.gaierror: getaddrinfo failed`**：連不到資料庫主機。通常是 `.env` 還是範本內容（主機名稱是 `host`），或 Neon 的主機名稱沒複製完整。
-- **`relation "user" does not exist` / `column ... does not exist`**：資料表還沒建立或不是最新版本，在 `backend` 執行 `alembic upgrade head`。
-
-**前端相關**
-
-- **前端請求 `/api/...` 回 500 或 `ECONNREFUSED`**：Vite 轉發不到後端，確認後端有在 8000 port 跑。
-- **重新整理後沒有自動登入**：DevTools → Application → Cookies 看 `http://localhost:5173` 底下有沒有 `refresh_token`，path 應該是 `/api/auth`。
-- **前端 console 出現 CORS 錯誤**：表示前端沒走代理、直接打後端了。檢查 `frontend/.env` 是不是設了 `VITE_API_URL`；平常不需要設。
+症狀 → 原因 → 修法都在 [`docs/DEBUGGING.md`](docs/DEBUGGING.md)，先查「安裝與啟動」那張表；上線後的維運（看 log、退版、換密鑰、備份與還原）在 [`docs/RUNBOOK.md`](docs/RUNBOOK.md)。
