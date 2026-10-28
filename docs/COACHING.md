@@ -291,22 +291,19 @@
 **收尾（不出題）**：瀏覽器只看到一個網域，Vercel 轉給 Render，Render 前面還有 Cloudflare；`version` 對上 commit 就是部署成功的證明；線上 cookie 多 `Secure`。等他說下一關。
 **動手玩**：`LEARNING.md` 關卡 10 的 2（故意跨站，要改 Vercel 設定，先說）。
 
-### 關卡 11：維護
+### 關卡 11：維護 — 快速走 + 備份還原演練
 
-**搭配看的程式**：`backend/main.py`（lifespan、request log middleware、`/api/health`、Sentry）、`backend/logging_config.py`、`docs/RUNBOOK.md`、`docs/DEBUGGING.md`
+**搭配看的程式**：`backend/main.py` 的 request log middleware（`request_id`、`duration_ms`）、`/api/health`；`docs/RUNBOOK.md` 第 0 節（上線後檢查清單）、第 6 節（備份還原演練）
 
-**前置**：線上網址、Render 後台能開。
+**前置**：Render 後台、Neon 後台能開。演練在**正式**的 Neon 專案 `jwt-auth-demo-prod` 做，只動一個演練帳號；用的是免費方案內的功能（6 小時還原窗、開分支），**不會跳付費頁**，先講。讀 `PLAIN.md` 關卡 11。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `curl.exe -s https://<前端網址>/api/health` | `db: ok`、`migration: 0006`、`version` 和 GitHub main 最新 commit 前幾碼一樣 | 一個網址回答三個問題：活著嗎、資料庫通嗎、跑的是哪一版 |
-| 2 | `backend\.env` 加 `LOG_JSON=true`，重啟，`curl.exe -s localhost:8000/api/ping` | terminal 一行 JSON：`"message": "request"`、`"path": "/api/ping"`、`"status": 200`、`"duration_ms"`、`"request_id"` | 正式環境就是這個格式，欄位可以搜。刪掉那行 |
-| 3 | Render → Logs，搜 `"status": 401` | 找到幾筆登入失敗或 refresh 失敗 | 看 `path` 分布就知道是誰在敲門 |
-| 4 | `uv run alembic check` | `No new upgrade operations detected.` | CI 的「遷移檢查」就是它 |
-| 5 | 打開 `docs/RUNBOOK.md` 第 0 節 | 一張上線後的檢查清單 | 貴的檢查寫成清單，便宜的寫成測試 |
+| 1 | 拿關卡 10 用 curl 打線上 `/api/health` 時回應的 `X-Request-Id`，Render → 服務 → Logs → 搜那串 | 一行 JSON：`"request_id"` 同一個、`"time"` 和回應的 `Date` 一樣、`"path": "/api/health"`、`"status": 200`、`"duration_ms": 16.1` | 使用者回報問題時請他給 `X-Request-Id`，直接搜。欄位表：`status`（搜 500、一堆 401）、`duration_ms`（登入 100 上下正常、1 是沒比對、幾千是冷啟動）、`path`（同 IP 連打 login）、`level: ERROR`（沒接住的例外附 traceback）。本機文字、線上 JSON（`render.yaml` 的 `LOG_JSON=true`），欄位一樣 |
+| 2 | 備份還原演練，照 `RUNBOOK.md` 6.1 的 9 步一步一步給：註冊 `drill@example.com` 登出 → `jwt-auth-demo-prod` 的 SQL Editor 查到它、記時間 → `SELECT now();` 再 `DELETE` → 線上登入失敗 → Branches → main → Restore from history，時間選「建立之後、刪除之前」留一分鐘緩衝（Neon 選單是台灣時間就 +8）→ 線上登入成功 → `/api/health` 一樣 → 刪 `production_old_<時間>` 分支 → 清演練帳號 | 還原幾秒完成；多一個 `production_old_2026-...Z` 分支；登入回來；`db: ok`、`migration` 不變；Render 什麼都沒動 | **清演練帳號會撞外鍵**（`refreshtoken_user_id_fkey`，`models.py:23`）：登入後表裡有 refresh token 指著他，而且只要換過一次票就有蓋章的舊列留著，網站的「登出」只刪 cookie 那一列不夠。**先按「登出所有裝置」**（`revoke_all_refresh_tokens` 整排刪），再 `DELETE FROM "user"`。曾經叫他「登出再刪」是錯的，學習者自己試出「登出所有裝置」才對。正式專案有刪帳號功能時用 `ON DELETE CASCADE` 或先呼叫 `revoke_all`；這裡沒有，保留預設的「擋」是保護 |
 
-**收尾**：health 三件事 / log 是 JSON 可以搜 / request_id 串前後端。
-**動手玩**：`LEARNING.md` 關卡 11 的 1（`/api/_boom` 看 Sentry，要改 Render 環境變數，先說）、4（退版）。
+**收尾（不出題）**：`request_id` 串前後端；`/api/health` 一個網址答三件事（活著、資料庫通、哪一版，`version` 對 main 的 commit）；還原是整個資料庫回到那一刻不是只有一筆，先用 Time Travel 看回到哪一刻損失最小，還原窗 6 小時所以發現得早最重要；沒有還原過的備份不算備份（6.2 的 `pg_dump` 週末 Mac 做）。等他說下一關。
+**動手玩**：`LEARNING.md` 關卡 11 的 1（`/api/_boom` 看 Sentry，要改 Render 環境變數，先說）、4（Render 退版）。
 
 ### 關卡 12：TanStack Query
 
