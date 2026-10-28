@@ -1,6 +1,6 @@
 # JWT Auth Demo
 
-練習前後端登入串接與 Refresh Token 的小專案。**每次都是乾淨機器？直接看「每次開機怎麼把專案跑起來」。**
+JWT 登入的教學模板：FastAPI + React + Neon，部署在 Render + Vercel，用來被複製到其他專案當登入的起點；同時是一條從登入一路到 CI、部署、Kubernetes、訊息佇列的學習路線（`docs/LEARNING.md`）。**每次都是乾淨機器？直接看「每次開機怎麼把專案跑起來」。**
 
 - **後端**：FastAPI + SQLModel（async）+ PostgreSQL（Neon 或本地 Postgres）
 - **前端**：React + TypeScript + Vite（React Router、Zustand、axios、TanStack Query、React Hook Form + Zod、Tailwind CSS）
@@ -18,7 +18,7 @@
 
 | 這條鏈的一段 | 做了什麼 | 怎麼證明它會動 |
 | --- | --- | --- |
-| 登入 | JWT access token + 輪替的 refresh token（HttpOnly cookie、重複使用偵測）、前後端同站代理 | `uv run pytest -q`（60 多個測試，以輸出為準）、`npm test` |
+| 登入 | JWT access token + 輪替的 refresh token（HttpOnly cookie、重複使用偵測）、前後端同站代理 | `uv run pytest -q`（67 個測試，以輸出為準）、`npm test` |
 | 上線 | Docker image；Render + Vercel + Neon 全免費方案；`/api/health` 報遷移版本與 commit | 線上開 `/api/health` |
 | CI/CD | ruff、pyright、alembic check、pytest、Docker smoke、eslint、prettier、vitest、tsc；CI 綠才部署 | Actions 的 **CI** workflow |
 | 本機整套與 E2E | `docker compose` 一個指令起整套；Playwright 在真瀏覽器走註冊 → 登入 → 重整 → 登出 | **Infra** workflow 的 `compose`、`e2e` job |
@@ -26,7 +26,7 @@
 | Kubernetes | kustomize 清單：遷移 Job、2 副本、探針、資源、非 root；換版期間 80 次請求全部 200、`rollout undo`、壞 image 被擋住 | `k8s` job |
 | 非同步訊息 | transactional outbox；worker 送 Kafka；consumer 同一筆只處理一次；線上免費方案用 inline worker | `messaging` job |
 
-整條鏈的地圖、每一塊怎麼擴充與換棧對照：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。每一段怎麼做、為什麼：[`docs/LEARNING.md`](docs/LEARNING.md) 關卡 0～24。
+整條鏈的地圖、每一塊怎麼擴充與換棧對照：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。每一段怎麼做、為什麼：[`docs/LEARNING.md`](docs/LEARNING.md) 關卡 0～25。
 
 ## 專案結構
 
@@ -67,7 +67,7 @@ jwt-auth-demo/
 ├── .github/workflows/audit.yml  # 每週一：pip-audit、npm audit 掃套件的已知漏洞（不擋 PR）
 ├── .github/workflows/deploy.yml # 【關卡 25-D，選配】CI 綠後叫 Render 部署、等 /api/health 版本對上；沒設 secret 就跳過
 ├── .github/dependabot.yml     # 每週自動開 PR 更新套件
-├── docs/                      # PLAIN（每關白話版）、COACHING（帶做腳本）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環 + 選做四環的任務書）、QA、DEBUGGING、RUNBOOK、PLAN、PLAN-INFRA（基礎設施路線）、ARCHITECTURE（整條鏈的地圖）
+├── docs/                      # PLAIN（每關白話版）、COACHING（帶做腳本）、LEARNING（每關）、TOUR（照請求讀程式）、HANDOFF（交接）、CHAIN（七環 + 選做四環的任務書）、QA、DEBUGGING、RUNBOOK、API（API 慣例）、PLAN（已過期的決定紀錄）、PLAN-INFRA（基礎設施路線的決定與 PR 紀錄）、PLAN-FULLSTACK（接下來的路）、ARCHITECTURE（整條鏈的地圖）
 ├── docs/labs/, docs/drills/   # 關卡 18 的 SQL 實驗、關卡 20 的故障演練 patch
 ├── infra/                     # 關卡 21～24：compose、k8s（kustomize）、prometheus、grafana、otel；怎麼跑看 infra/README.md
 ├── scripts/setup.ps1          # 乾淨的 Windows 機器一鍵建置（裝工具、拉 main、.env、sync、測試）

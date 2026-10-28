@@ -16,12 +16,9 @@
 | 症狀 | 原因 | 修法 | 關卡 |
 | --- | --- | --- | --- |
 | `uv: The term 'uv' is not recognized` | 剛裝好 uv，開著的終端機還是舊的 PATH | 關掉終端機重開；或在同一個視窗跑 `$env:Path = "C:\Users\<帳號>\.local\bin;$env:Path"`（`setup.ps1` 會自己處理） | 9 |
-| `setup.ps1` 第一步就 `找不到 winget` | 舊版腳本；精簡的 VM 沒有 winget | `git pull` 拿最新版，現在沒有 winget 會改從官網下載 zip | 工具 |
 | `setup.ps1` 問連線字串時打錯了 | Read-Host 沒有上一步 | `Ctrl+C` → `Remove-Item backend\.env -ErrorAction SilentlyContinue` → 重跑；已經寫入的話 `notepad backend\.env` 直接改 | 工具 |
 | `& .\scripts\setup.ps1` 說「指令碼執行被停用」 | Windows 預設的執行原則擋 `.ps1` | 用 `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -SkipTests` 執行 | 工具 |
 | `setup.ps1` 一跑就一堆 `Unexpected token`、`Missing closing '}'`，錯誤訊息裡的中文是亂碼 | PowerShell 5.1 讀沒有 BOM 的 UTF-8 檔案會用系統 ANSI 編碼（繁中是 CP950），中文全錯、全形符號被當成語法 | 檔案要存成 UTF-8 **with BOM**（repo 裡已是；`.editorconfig` 有 `[*.ps1] charset = utf-8-bom`）。自己寫 `.ps1` 時 VS Code 右下角選「UTF-8 with BOM」 | 工具 |
-| 腳本印了「完成」但後端起不來 | 舊版腳本：PowerShell 5.1 不會因為外部程式失敗而停 | `git pull` 拿最新版，現在每一步都檢查 exit code，失敗會停並印紅字 | 工具 |
-| `setup.ps1` 跑到 `alembic upgrade head` 報 `sslmode` / `channel_binding` / `getaddrinfo` | 連線字串格式或主機名稱錯（舊版腳本不會自動轉格式） | `notepad backend\.env` 改成 `postgresql+asyncpg://...?ssl=require`；新版腳本貼 Neon 原始格式會自動轉 | 工具 |
 | `uv run pytest` 要跑三、四分鐘 | 測試資料庫在 Neon（新加坡），每個測試好幾趟網路來回 | 正常。平常用 `setup.ps1 -SkipTests`；本機有 Postgres 的話把 `TEST_DATABASE_URL` 指到本機會變 20 秒 | 18 |
 | `ModuleNotFoundError: No module named 'xxx'` | 指令沒用 `uv run` 開頭，用到系統的 Python | 指令前加 `uv run`；在 `backend` 跑 `uv sync` | 9 |
 | `npm run dev` 報 `SyntaxError: The requested module 'node:util' does not provide an export named 'styleText'`，錯誤最後一行是 `Node.js v18.x` | 跑到的 Node 太舊。Vite 8 底層的 Rolldown 要 Node 20.19 以上（專案 `engines` 要求 `>=22.22`）。常見是機器預裝的舊 Node 排在 PATH 前面，或裝完新版沒重開終端機 | `where.exe node` 看第一行是哪一個；移除舊版（設定 → 應用程式 → Node.js）或把新版目錄移到 PATH 前面，重開終端機確認 `node -v`。新版 `setup.ps1` 遇到太舊的 Node 會自動重裝 | 工具 |
@@ -116,6 +113,6 @@
 | 症狀 | 原因 | 修法 | 關卡 |
 | --- | --- | --- | --- |
 | 同時發三個請求，使用者突然被登出 | 三個都去 refresh，第二、三個用了已輪替的舊 token → 被當成重複使用 | 前端 single-flight（`client.ts` 的 `refreshPromise`） | 1 |
-| 改了 `JWT_SECRET`，所有人都要重新登入 | access token 的簽章對不上 | 預期行為。換密鑰就是會這樣，排在流量低的時候做 | 2 |
+| 換了 `JWT_SECRET`，使用者會全部被登出嗎？ | 不會。access token 是 JWT，換了密鑰舊的全部失效；refresh token 是隨機字串、資料庫存雜湊，和密鑰無關 | 幾乎無感：下一個請求 401 → 前端自動 refresh → 拿到新密鑰簽的 access token。真的看到有人被登出，查的是 refresh token 過期或被撤銷，不是密鑰。`RUNBOOK.md` 第 4 節 | 11 |
 | 登出所有裝置後，另一台還能用幾分鐘 | access token 不查 DB，過期前都有效 | 預期行為。`JWT_EXPIRE_MINUTES` 越短影響越小 | 3 |
 | commit 之後讀物件屬性出現 `MissingGreenlet` | async SQLAlchemy 在 commit 後把屬性標成過期，再讀會偷偷查 DB | commit **前**先把要用的值存到變數 | 1 |
