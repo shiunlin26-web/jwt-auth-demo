@@ -98,7 +98,7 @@ jobs:
       # 報告上傳成 artifact：在 run 頁面最下面下載，解開後開 index.html，失敗的測試有每一步的截圖和 trace
       - name: 上傳 Playwright 報告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: frontend/playwright-report
