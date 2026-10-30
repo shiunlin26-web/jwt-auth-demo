@@ -48,6 +48,7 @@ spec:
             - --port
             - "8000"
             - --no-access-log
+            - --no-proxy-headers # 【關卡 17】客戶端 IP 只由 rate_limit.py 決定；sidecar 從 127.0.0.1 連進來，uvicorn 預設會信它的 X-Forwarded-For
           ports:
             - name: http
               containerPort: 8000

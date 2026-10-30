@@ -33,6 +33,12 @@ def get_client_ip(request: Request) -> str:
     本機沒有代理：hops=0，用 request.client.host；Render 一層：1；Vercel + Render：2（render.yaml）。
     hops 設太大（比實際代理層數多）會拿到攻擊者可控的值，設太小會拿到代理的 IP，兩種都要避免，
     開 ENABLE_DEBUG_ENDPOINTS 打 /api/_ip 可以看到實際的標頭內容來決定。
+
+    ⚠️ uvicorn 自己也會讀 X-Forwarded-For：它預設相信「連線來源是 127.0.0.1 / ::1」的請求帶的這個標頭，
+    在我們拿到 request 之前就把 request.client.host 改成標頭裡的值。所以本機用 localhost 打、hops=0，
+    request.client.host 其實已經是客戶端自己填的，換假 IP 就繞過（2026-10-30 帶關卡 17 時發現）。
+    Dockerfile 與 k8s 的啟動參數加了 --no-proxy-headers，讓 IP 只由這個函式決定；
+    本機要做頻率限制的實驗，啟動時也加 --no-proxy-headers。
     """
     hops = settings.trusted_proxy_hops
     forwarded = request.headers.get("X-Forwarded-For", "")

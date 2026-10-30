@@ -195,7 +195,7 @@
 
 ### 關卡 5：資料庫遷移（Alembic）
 
-**搭配看的程式**：`backend/models.py`（櫃子長什麼樣）；`backend/migrations/versions/0001～0006`（六張施工單，一檔一張；0002 最短最好讀）；`backend/Dockerfile:67` 的 CMD（啟動時先 `alembic upgrade head`）；`.github/workflows/ci.yml` 的「遷移檢查」那步
+**搭配看的程式**：`backend/models.py`（櫃子長什麼樣）；`backend/migrations/versions/0001～0006`（六張施工單，一檔一張；0002 最短最好讀）；`backend/Dockerfile:69` 的 CMD（啟動時先 `alembic upgrade head`）；`.github/workflows/ci.yml` 的「遷移檢查」那步
 
 **前置**：後端能連到本機那個 `neondb`；`uv` 找不到就先 `$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"`。這關不動 Neon 的資料，只看和產生檔案；真的 downgrade 留到關卡 11。
 
@@ -284,7 +284,7 @@
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `curl.exe -s -i https://<前端網址>/api/health` | `200`；`Server: Vercel`、`X-Render-Origin-Server: uvicorn`、`Rndr-Id`、`Cf-Ray: ...-HKG`、`X-Vercel-Id: hkg1::...`、`X-Request-Id`、`Cache-Control: no-store`、`X-Vercel-Cache: MISS`、`Strict-Transport-Security`；JSON `db: ok`、`migration: 0006`、`version` = main 最新 commit | 用標頭表講整條鏈：瀏覽器看到的是 Vercel；Vercel 背後真的打了 Render（uvicorn）；Render 前面還有 Cloudflare（`Cf-Ray`，關卡 17 的 `TRUSTED_PROXY_HOPS=2` 數的就是這些層）；`X-Request-Id` 與 `no-store` 是自己的 `main.py` 加的，真的到了線上；`X-Vercel-Cache: MISS` 是 `no-store` 的效果；HSTS 是 Vercel 加的。`version` 對上 `git log` 的 commit = 合併後 Render 自動部署成功；`migration: 0006` = 正式庫（`jwt-auth-demo-prod`）也升到最新 |
+| 1 | `curl.exe -s -i https://<前端網址>/api/health` | `200`；`Server: Vercel`、`X-Render-Origin-Server: uvicorn`、`Rndr-Id`、`Cf-Ray: ...-HKG`、`X-Vercel-Id: hkg1::...`、`X-Request-Id`、`Cache-Control: no-store`、`X-Vercel-Cache: MISS`、`Strict-Transport-Security`；JSON `db: ok`、`migration: 0006`、`version` = main 最新 commit | 用標頭表講整條鏈：瀏覽器看到的是 Vercel；Vercel 背後真的打了 Render（uvicorn）；Render 前面還有 Cloudflare（`Cf-Ray`，是 Render 的前門，算在 Render 那一側；關卡 17 的 `TRUSTED_PROXY_HOPS=2` 數的是 `X-Forwarded-For` 裡被接上去的段數，不是經過幾家公司）；`X-Request-Id` 與 `no-store` 是自己的 `main.py` 加的，真的到了線上；`X-Vercel-Cache: MISS` 是 `no-store` 的效果；HSTS 是 Vercel 加的。`version` 對上 `git log` 的 commit = 合併後 Render 自動部署成功；`migration: 0006` = 正式庫（`jwt-auth-demo-prod`）也升到最新 |
 | 2 | 瀏覽器開前端網址，F12 Network，用線上帳號登入，點 `login` → Response Headers 的 `set-cookie`；看 Network 裡 `/api/` 請求的網址 | `...; Path=/api/auth; SameSite=lax; Secure`（本機沒有 `Secure`）；全部 `vercel.app`，沒有 `onrender.com` | `COOKIE_SECURE` 在 Render 設 true、本機預設 false。瀏覽器從頭到尾不知道 Render 存在，cookie 的同站條件成立；前端直接打 `onrender.com` 的話 cookie 屬於另一個網域、refresh 不帶、重新整理就掉（`DEBUGGING.md` 第一批坑）。順便：`retry-after`、`x-ratelimit-*` 線上也在；`content-encoding: br` 是 Vercel 壓縮的 |
 
 **收尾（不出題）**：瀏覽器只看到一個網域，Vercel 轉給 Render，Render 前面還有 Cloudflare；`version` 對上 commit 就是部署成功的證明；線上 cookie 多 `Secure`。等他說下一關。
@@ -390,20 +390,31 @@
 
 ### 關卡 17：登入頻率限制（slowapi）
 
-**搭配看的程式**：`backend/rate_limit.py`、`main.py` 的 `rate_limit_exceeded` 與 `/api/_ip`、`routes/auth.py` 的 `@limiter.limit`、`tests/conftest.py` 的 `limiter.enabled`、`render.yaml`
+**搭配看的程式**：`backend/routes/auth.py:80`、`:135`（register、login 上的 `@limiter.limit`）、`backend/rate_limit.py`（`get_client_ip`，含 uvicorn 那段 ⚠️）、`backend/main.py:81～93`（自己寫的 429 回應，`detail` 形狀和其他錯誤一致）、`main.py` 的 `/api/_ip`、`backend/Dockerfile:69` 與 `infra/k8s/base/deployment.yaml` 的 `--no-proxy-headers`、`render.yaml` 的 `TRUSTED_PROXY_HOPS=2`
 
-**前置**：後端跑起來。
+**前置**：後端跑起來。讀 `PLAIN.md` 關卡 17。**先講名詞**：頻率限制（rate limit，超過回 429）、slowapi（端點上一行 `@limiter.limit("10/minute")`，計數存記憶體）、key（誰算同一個人，這裡用 IP）、代理（中間轉手的人，每轉一手在 `X-Forwarded-For` 尾巴接上「我看到的來源」）。每次改 `.env` 都要 `Ctrl+C` 重啟；一分鐘窗口內打過登入的話先等一分鐘。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `1..11 \| ForEach-Object { curl.exe -s -o NUL -w "%{http_code}\n" localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"a@b.com\",\"password\":\"x\"}' }` | 10 個 `401`，第 11 個 `429` | 一分鐘 10 次，`config.py` 的 `AUTH_RATE_LIMIT` |
-| 2 | 第 12 次用 `-i` 看標頭 | `retry-after: <秒>`、`x-ratelimit-remaining: 0` | 429 要告訴對方多久後再來 |
-| 3 | `.env` 加 `AUTH_RATE_LIMIT=3/minute`，重啟，再跑步驟 1 | 第 4 個就 `429` | 格式是 `次數/時間`。刪掉 |
-| 4 | `.env` 加 `TRUSTED_PROXY_HOPS=1`，重啟，步驟 1 的指令加 `-H "X-Forwarded-For: 1.2.3.4"` 跑到 429，再換 `5.6.7.8` | 換 IP 又能打 10 次 | hops 設得比實際代理層數多，攻擊者自己填 IP 就能繞過。`rate_limit.py`。刪掉 |
-| 5 | `render.yaml` 找 `TRUSTED_PROXY_HOPS` | `2` | Render 前面有兩層（Vercel、Render 的負載平衡）。正式環境用 `/api/_ip` 驗過 |
+| 1 | `1..11 \| ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"a@b.com\",\"password\":\"wrongpass\"}' }` | 10 個 `401`、第 11 個 `429` | `@limiter.limit` 在函式外，第 11 次不進 `login`、不跑 bcrypt（題目 1） |
+| 2 | 馬上同一行加 `-i` 打一次 | `429`、`x-ratelimit-limit: 10`、`x-ratelimit-remaining: 0`、`x-ratelimit-reset: <Unix 秒>`、`retry-after: 22`、`{"detail":"請求太頻繁，請稍後再試（上限 10 per 1 minute）"}` | `retry-after` 是 429 的標準標頭；`detail` 是 `main.py:81` 自己寫的，slowapi 預設回 `{"error":...}` 前端讀不到。然後講「這個人是誰」：線上請求經過 Vercel → Render 前門，程式看到的連線來源是 Render 內部、所有人一樣，所以要讀 `X-Forwarded-For`；最左邊客人能填，從右數 hops 段 |
+| 3 | 等窗口過，迴圈帶 `-H "X-Forwarded-For: 1.2.3.4"` 打 11 次，再單獨帶 `5.6.7.8` 打一次；先讓他猜 | **實際是 `429`、`401`**（不是文件原本預期的 `429`、`429`） | 預期錯了要直說，然後找根本原因，不要繞 |
+| 4 | `.env` 加 `ENABLE_DEBUG_ENDPOINTS=true`，重啟，`curl.exe -s localhost:8000/api/_ip -H "X-Forwarded-For: 1.2.3.4"` | `{"x_forwarded_for":"1.2.3.4","client_host":"1.2.3.4","trusted_proxy_hops":0,"rate_limit_key":"1.2.3.4"}` | **uvicorn 自己也讀這個標頭**：預設相信連線來源是 `127.0.0.1,::1` 的 `X-Forwarded-For`（`FORWARDED_ALLOW_IPS`），在程式拿到請求前把 `client_host` 改掉。本機 curl 從 127.0.0.1 連，被信了。線上 Render 連進容器的來源不是 127.0.0.1，不受影響 |
+| 5 | `Ctrl+C`，`uv run uvicorn main:app --reload --port 8000 --no-proxy-headers`，再打步驟 4 | `x_forwarded_for` 還是 `1.2.3.4`，`client_host`、`rate_limit_key` 變回 `127.0.0.1` | 兩層都讀會打架，只留一層：IP 只由 `rate_limit.py` 決定。這次之後 Dockerfile 與 k8s 都明寫了這個參數 |
+| 6 | 同一個後端（帶 `--no-proxy-headers`），重做步驟 3 | `429`、`429` | 這才是 `hops=0` 該有的樣子：換假 IP 沒用，全算在 127.0.0.1 |
+| 7 | `.env` 加 `TRUSTED_PROXY_HOPS=1`，重啟（帶 `--no-proxy-headers`），等窗口過，重做步驟 3；先讓他猜 | `429`、`401` | 本機沒代理卻設 1，最右邊那段是客人自己填的，換假 IP 就是新的人。hops 必須剛好等於實際段數：太多拿到客人可控的、太少拿到代理的（大家共用）。本機 0、線上 2 |
+| 收拾 | `.env` 刪 `TRUSTED_PROXY_HOPS=1` 和 `ENABLE_DEBUG_ENDPOINTS=true`，平常的指令重啟 | | |
 
-**收尾**：限的是 IP / 代理後面要算對層數 / 429 帶 Retry-After。
-**動手玩**：`LEARNING.md` 關卡 17 的 4。
+**他會問的（2026-10-30 實際問了）**：
+- 「請求先從 Vercel 再透過 vite config 的 proxy 轉到 Render？中間又經過 Cloudflare？」→ **線上沒有 Vite**：本機轉發是 Vite `proxy`、線上是 Vercel `rewrites`，同一件事。Cloudflare 是 Render 的前門，算在 Render 那一側；hops 數的是**標頭裡被接上去的段數**，不是經過幾家公司（關卡 10 曾說「hops 在數 Vercel、Cloudflare、Render 這些層」，不準）。
+- 「扣掉幾層剩下的就是真 IP？」→ 不是扣掉，是**從右數第 hops 段**（`ips[-hops]`）；攻擊者填在左邊的直接無視。
+- 「不同使用者的 IP 一不一樣？」→ 三個位置答案不同：`client.host` 大家一樣、倒數第 1 段（Vercel 出口）很多人共用、倒數第 2 段每人自己的公網 IP。
+- 「用兩個使用者的情境逐站講」→ 用 `LEARNING.md` 關卡 17 觀念 2 後面的「三個人同時登入」補充（小明、小美、阿壞的逐站表 + 四種取法對照），那是給他之後回頭看的。
+- 「hops 常用嗎、一定要知道嗎、叫什麼」→ 問題本身非常常見（後端在代理後面就要回答），名字各家不同（Express `trust proxy` 直接填層數、uvicorn `--forwarded-allow-ips`、nginx `set_real_ip_from`、Rails `trusted_proxies`），很少自己寫、部署時設一次；要知道到「會設、會用印 IP 的端點驗證」。技術名稱：rate limiting（slowapi 預設 fixed window）、HTTP 429 + `Retry-After`、trusted proxies。
+
+**收尾一句話**：同一個 IP 每分鐘最多 10 次，超過回 429；最左邊客人能填，從右數已知的代理段數取下一個；IP 只能由一個地方決定。
+**題目**（三題）：(1) 第 11 次有沒有跑 bcrypt → 沒有，限制在函式外，順便保護 CPU；(2) 本機 hops=0 帶 `5.6.7.8` 為什麼沒被擋、線上為什麼不會 → uvicorn 預設信任 `127.0.0.1,::1` 的 `X-Forwarded-For`，線上連線來源是 Render 內部；(3) 小明小美在同一個咖啡廳 Wi-Fi，小明錯 10 次小美第一次會怎樣 → 429，同一個公網 IP 共用額度，補法是再加每個帳號的限制或驗證碼。
+**動手玩**：`LEARNING.md` 關卡 17 的 2（改上限）、4（拿掉 conftest 的 `limiter.enabled = False`）。
 
 ### 關卡 18：SQL 與資料庫
 

@@ -64,4 +64,6 @@ EXPOSE 8000
 #    --host 0.0.0.0：聽所有網路介面。寫 127.0.0.1 的話容器外面連不進來（部署常見錯誤）
 #    --port ${PORT:-8000}：平台（Render 等）會用環境變數 PORT 告訴你要聽哪個 port，沒給就用 8000
 #    --no-access-log：【關卡 11】uvicorn 內建的每請求一行 log 關掉，改由 main.py 的 middleware 記（有 request id、耗時）
-CMD ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]
+#    --no-proxy-headers：【關卡 17】uvicorn 預設會相信「從 127.0.0.1 連進來」的 X-Forwarded-For，先把 client IP 改掉；
+#      客戶端 IP 只交給 rate_limit.py 的 TRUSTED_PROXY_HOPS 決定，兩層都讀會互相打架（k8s 的 sidecar 就是從 127.0.0.1 連進來）
+CMD ["sh", "-c", "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log --no-proxy-headers"]
