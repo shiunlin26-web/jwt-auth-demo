@@ -374,22 +374,19 @@
 **收尾（不出題）**：class 即樣式、Vite 熱更新；深色每個顏色都要想；共用元件在 `ui.tsx`，加一種按鈕只改物件。等他說下一關。
 **動手玩**：`LEARNING.md` 關卡 15 的 2、3。
 
-### 關卡 16：Vitest + MSW（前端測試）
+### 關卡 16：Vitest + MSW（前端測試）— 快速走
 
-**搭配看的程式**：`frontend/vitest.config.ts`、`src/test/setup.ts`、`src/test/server.ts`、`src/api/client.test.ts`、`src/auth/RequireAuth.test.tsx`、`src/components/LoginForm.test.tsx`
+**搭配看的程式**：`frontend/src/api/client.test.ts`（五個 `it`；`acceptOnly` 用 `server.use(...)` 臨時換掉 `/api/me` 與 `/api/auth/refresh`，並數呼叫次數）、`src/test/server.ts`（預設的假端點）、`src/test/setup.ts`（`afterEach` 還原）
 
-**前置**：`frontend` 套件裝好。
+**前置**：`frontend` 套件裝好。讀 `PLAIN.md` 關卡 16。**先講名詞**：Vitest（前端的 pytest，找 `*.test.ts(x)`）、MSW（前端的測試資料庫：程式照常 `axios.post`，MSW 在網路層接住、回寫好的假回應，不開後端、不連資料庫）。
 
 | 步 | 指令或操作 | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `npm test` | `11 passed`（數字以輸出為準），3 個檔案 | 測的是攔截器、守門員、登入表單 |
-| 2 | 打開 `src/api/client.test.ts`，讀每個 `it(` 的名稱 | 五個，其中有「single-flight」和「_retry」 | 關卡 1、8 用眼睛在 Network 看的事，現在機器看 |
-| 3 | `src/api/client.ts` 的 `if (!refreshPromise) {` 改成 `if (true) {`，`npm test` | `1 failed`，「single-flight」那個，訊息有 `refresh` 被呼叫 3 次 | 回歸測試：以後誰改壞這行，CI 立刻紅。改回來 |
-| 4 | 打開 `src/test/server.ts` | MSW 的假後端，一個路徑一個 handler | 測試不打真後端，所以 2 秒跑完 |
-| 5 | `npm run test:coverage` | 表格，`client.ts`、`RequireAuth.tsx`、`LoginForm.tsx` 接近 100% | 覆蓋率看哪裡沒測到，不是追 100% |
+| 1 | 在 `frontend`：`npm test` | `Test Files 3 passed`、`Tests 11 passed`；VM 上 `Duration` 可能三十幾秒，括號裡 `environment` 佔大半、`tests` 只有 1%，是 jsdom 啟動慢不是測試慢 | 五個 `client.test.ts` 的名字對回他親手看過的：帶 token（關卡 8 請求攔截器）、401 → refresh → 重送（**關卡 8 第 3 步**）、single-flight（**關卡 1 第 7 步**）、refresh 也失敗 → 清登入（關卡 3 第 3 題）、`_retry`（關卡 8 第 4 步）。他沒貼名字就直接列給他對 |
+| 2 | `src/api/client.ts:45` 的 `if (!refreshPromise) {` 改成 `if (true) {`，存檔，`npm test`；看完 `git checkout -- frontend/src/api/client.ts` 再 `npm test` | `1 failed`：`× single-flight：同時三個請求 401，只送一次 refresh`、`AssertionError: expected 3 to be 1`、`- Expected 1 / + Received 3`、`❯ src/api/client.test.ts:56:27` 指著 `expect(calls.refresh).toBe(1)`；改回來 `11 passed` | 讀法跟 pytest 一樣：Expected 是測試要的、Received 是實際的、箭頭是哪一行。`calls.refresh` 從 `acceptOnly` 來：MSW 的假 refresh 端點每被打一次就 +1，所以能數「前端送了幾次」，用真後端反而難數。跟他在 Network 數到的「3 個 401、1 個 refresh、3 個 200」同一件事，現在機器數、CI 每次數 |
 
-**收尾**：假後端 + 真前端程式 / 關鍵行為各一個測試 / 改壞立刻知道。
-**動手玩**：`LEARNING.md` 關卡 16 的 2、5。
+**收尾（不出題）**：Vitest 是前端的 pytest、MSW 是前端的測試資料庫，程式一行不改只是網路另一端換成假的；Network 看過的五件事各有一個測試在守；紅字一樣看 Expected / Received 和箭頭那行。等他說下一關。
+**動手玩**：`LEARNING.md` 關卡 16 的 2（拿掉 `_retry` 看 timeout）、5（自己寫 `RegisterForm.test.tsx`）。
 
 ### 關卡 17：登入頻率限制（slowapi）
 
