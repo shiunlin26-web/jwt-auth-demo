@@ -18,6 +18,8 @@ dist-ssr/
 # 編輯器
 .vscode/*
 !.vscode/extensions.json
+# 【工具】只有終端機 PATH 這一項（見檔案裡的註解），個人設定請放使用者設定
+!.vscode/settings.json
 .idea
 .DS_Store
 *.suo

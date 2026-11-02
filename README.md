@@ -103,6 +103,8 @@ powershell -ExecutionPolicy Bypass -File $HOME\jwt-auth-demo\scripts\setup.ps1 -
 - repo 是公開的，`git clone` 不用登入；之後要 `git push` 時才會跳瀏覽器登入 GitHub。
 - `-ExecutionPolicy Bypass -File` 是為了繞過 Windows 預設擋 `.ps1` 的設定；你的機器本來就允許的話，`& .\scripts\setup.ps1 -SkipTests` 也可以。
 - repo 還在（沒被清掉）的話只要第二行，腳本自己會 `git pull`。
+- **跑完之後其他終端機找不到 `uv`？** 腳本是另開一個 PowerShell 跑的，已經開著的 VS Code、Windows Terminal 還是舊的 PATH。VS Code 用「開啟資料夾」開 repo 根目錄並信任它，新開的終端機就找得到（`.vscode/settings.json` 處理了）；其他視窗整個關掉重開，或跑 `$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"`。
+- **跑腳本前先關掉正在跑的前端**（`npm run dev`、`npm test`），不然 `npm ci` 會 `EPERM` 失敗（`docs/DEBUGGING.md`）。
 
 腳本會：沒有 Node 與 uv 就裝、Node 比 `frontend/.nvmrc` 的大版號舊也重裝（舊版 Node 裝出來的 `node_modules` 少東西，見 `docs/DEBUGGING.md`；有 winget 用 winget，沒有就從官網下載 zip，不需要管理員權限）→ `git pull` → 設定 git 身分 → `uv sync` → 建立 `backend/.env`（問你 Neon 的兩個連線字串，**直接貼 Neon 後台的原始格式即可，會自動轉成 asyncpg 格式**；`JWT_SECRET` 自動產生）→ `alembic upgrade head` → `npm ci`。約三到五分鐘。**任何一步失敗會停在那一步印紅字**，不會印「完成」。
 

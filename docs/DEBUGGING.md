@@ -15,7 +15,8 @@
 
 | 症狀 | 原因 | 修法 | 關卡 |
 | --- | --- | --- | --- |
-| `uv: The term 'uv' is not recognized` | 剛裝好 uv，開著的終端機還是舊的 PATH | 關掉終端機重開；或在同一個視窗跑 `$env:Path = "C:\Users\<帳號>\.local\bin;$env:Path"`（`setup.ps1` 會自己處理） | 9 |
+| `uv: The term 'uv' is not recognized`（`node`、`npm` 同理） | `setup.ps1` 另開一個 PowerShell 裝工具、寫進使用者 PATH；**已經開著的程式**（VS Code、Windows Terminal）還拿著開啟當下的舊 PATH，從它們開的新終端機都找不到。`setup.ps1` 只修好它自己那個視窗 | **VS Code**：repo 的 `.vscode/settings.json` 已讓每個新終端機找得到（要用「開啟資料夾」開 repo 根目錄並信任；已開的終端機關掉重開）。**其他視窗**：整個 Windows Terminal 關掉重開（新分頁不夠），或在那個視窗跑 `$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"`（只對那個視窗有效） | 9、工具 |
+| `npm ci` 失敗：`EPERM: operation not permitted, unlink ...\rolldown-binding.win32-x64-msvc.node` | `npm ci` 先刪整個 `node_modules` 再裝；這個檔案（Vite 打包用的）正被執行中的程式載入，Windows 不准刪。最常見是另一個終端機的 `npm run dev` 或 `npm test` 還開著（2026-11-02 實際遇到） | 先把跑前端的終端機 `Ctrl+C` 關掉（`Get-Process node` 確認沒有了），再重跑 `setup.ps1` 或在 `frontend` 跑 `npm ci`。失敗那次 `node_modules` 已刪一半，前端在重裝前跑不起來 | 工具 |
 | `setup.ps1` 問連線字串時打錯了 | Read-Host 沒有上一步 | `Ctrl+C` → `Remove-Item backend\.env -ErrorAction SilentlyContinue` → 重跑；已經寫入的話 `notepad backend\.env` 直接改 | 工具 |
 | `& .\scripts\setup.ps1` 說「指令碼執行被停用」 | Windows 預設的執行原則擋 `.ps1` | 用 `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -SkipTests` 執行 | 工具 |
 | `setup.ps1` 一跑就一堆 `Unexpected token`、`Missing closing '}'`，錯誤訊息裡的中文是亂碼 | PowerShell 5.1 讀沒有 BOM 的 UTF-8 檔案會用系統 ANSI 編碼（繁中是 CP950），中文全錯、全形符號被當成語法 | 檔案要存成 UTF-8 **with BOM**（repo 裡已是；`.editorconfig` 有 `[*.ps1] charset = utf-8-bom`）。自己寫 `.ps1` 時 VS Code 右下角選「UTF-8 with BOM」 | 工具 |
