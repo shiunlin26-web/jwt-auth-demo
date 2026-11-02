@@ -3,6 +3,12 @@
 -- 怎麼用：一段一段貼進 Neon 的 SQL Editor（左邊選「測試用」的資料庫 jwtdemo_test），或本機 psql。
 -- ⚠️ 不要在正式資料庫跑：第 2 步會灌 5 萬個假帳號。
 -- 每一步的「要看什麼」寫在註解裡；對照 LEARNING.md 關卡 18。
+--
+-- 開始前先確認選對資料庫（不要靠看畫面）：應該回 jwtdemo_test
+--   SELECT current_database();
+-- 量時間的規矩：同一句第一次常常慢幾十倍（資料還不在記憶體，叫冷快取），每句跑兩次、看第二次。
+-- 看文字版計畫最後的 Execution Time，和 Buffers 那行：read = 去儲存層拿（冷）、hit = 記憶體裡就有（熱）。
+-- ⚠️ EXPLAIN ANALYZE（不管是寫在 SQL 裡還是 Neon 的按鈕）會真的執行；對 DELETE / UPDATE 用，資料就真的動了。只想看計畫用 EXPLAIN。
 
 -- ============================================================
 -- 1. 現在有哪些表、哪些索引
@@ -13,7 +19,7 @@ WHERE table_name IN ('user', 'refreshtoken')
 ORDER BY table_name, ordinal_position;
 
 -- 要看什麼：索引是「為了找得快而另外維護的一本目錄」。
--- 這裡會看到 4 個：user 的主鍵和 email、refreshtoken 的主鍵、token_hash、user_id。每一個都對應程式裡的一種查法。
+-- 這裡會看到 5 個：user 的主鍵和 email、refreshtoken 的主鍵、token_hash、user_id。每一個都對應程式裡的一種查法。
 SELECT tablename, indexname, indexdef
 FROM pg_indexes
 WHERE tablename IN ('user', 'refreshtoken')
@@ -31,8 +37,8 @@ FROM generate_series(1, 50000) AS g;
 INSERT INTO refreshtoken (token_hash, user_id, revoked, expires_at, created_at)
 SELECT md5('lab-' || g),
        (SELECT id FROM "user" WHERE email = 'u' || ((g % 50000) + 1) || '@lab.test'),
-       (g % 10 = 0),                                 -- 每 10 個有 1 個已撤銷
-       now() + (g % 14 - 7) * interval '1 day',      -- 一半已過期、一半沒過期
+       (g % 10 = 0),                                 -- 每 10 個有 1 個已撤銷（但集中在每 10 個人裡的 1 個人：u1、u11…4 張全撤銷，其他人 0 張）
+       now() + (g % 14 - 7) * interval '1 day',      -- 14 份裡 8 份過期（-7～-1 天，加上 +0 天 = 灌資料那一刻），約 57%
        now()
 FROM generate_series(1, 200000) AS g;
 
@@ -52,7 +58,7 @@ EXPLAIN ANALYZE SELECT * FROM "user" WHERE lower(email) = 'u12345@lab.test';
 -- 要看什麼：refresh 時 where(RefreshToken.token_hash == hash) 走 ix_refreshtoken_token_hash，Index Scan。
 EXPLAIN ANALYZE SELECT * FROM refreshtoken WHERE token_hash = md5('lab-777');
 
--- 把索引拔掉再查一次：Seq Scan，Execution Time 從 0.0x ms 變成幾十 ms。
+-- 把索引拔掉再查一次：Seq Scan，Execution Time 從 0.0x ms 變成十幾 ms（2026-11-02 實測熱的 11 ms，約 120 倍；冷的會更多）。
 -- 20 萬筆就差這麼多；正式環境每次 refresh 都要查一次，沒有索引整個登入系統會被拖垮。
 DROP INDEX ix_refreshtoken_token_hash;
 EXPLAIN ANALYZE SELECT * FROM refreshtoken WHERE token_hash = md5('lab-777');
@@ -64,7 +70,7 @@ CREATE UNIQUE INDEX ix_refreshtoken_token_hash ON refreshtoken (token_hash);
 -- ============================================================
 -- 錯的做法（N+1）：先查 20 個使用者，再「每個使用者查一次」token 數 → 1 + 20 = 21 次來回。
 -- ORM 很容易不小心寫成這樣：for user in users: len(user.tokens)。
--- 下面這句模擬其中「一次」；想像它被執行 20 次，每次都是一趟網路來回（Neon 在新加坡，每趟幾十毫秒）。
+-- 下面這句模擬其中「一次」；想像它被執行 20 次，每次都是一趟網路來回（Neon 在新加坡：本機從台灣連每趟幾十毫秒；Render 也在新加坡，每趟一兩毫秒）。
 SELECT count(*) FROM refreshtoken WHERE user_id = 1;
 
 -- 對的做法：一句 JOIN + GROUP BY，一次來回拿全部。
@@ -100,7 +106,7 @@ END $$;
 
 -- 分頁 B：A 按下 Run 之後馬上切過來按 Run（這句可以先貼好）
 -- 要看什麼：B 會卡住，直到 A 的 40 秒結束才回來。結果三欄：
---   started  = B 送出的時間；finished = B 拿到結果的時間；兩者相減就是 B 等鎖的秒數（應該是二三十秒）
+--   started  = B 送出的時間；finished = B 拿到結果的時間；兩者相減就是 B 等鎖的秒數（三十幾秒，看你切分頁多快；2026-11-02 實測 38.7 秒）
 --   revoked  = true：B 等到的是 A「改完之後」的值，不是它送出時的 false
 SELECT now() AS started,
        (SELECT revoked FROM refreshtoken WHERE token_hash = md5('lab-777') FOR UPDATE) AS revoked,
@@ -116,6 +122,7 @@ UPDATE refreshtoken SET revoked = false WHERE token_hash = md5('lab-777');
 -- ============================================================
 -- 要看什麼：程式是「某個使用者的」過期 token（走 ix_refreshtoken_user_id）；
 -- 這裡示範「全部使用者的」，走不了 user_id 索引，Seq Scan 20 萬筆。資料多了這種「全表清理」要排程、分批做。
+-- ⚠️ EXPLAIN ANALYZE 會真的刪（約 11 萬 4 千列，見第 2 段到期日的註解），只跑一次。
 EXPLAIN ANALYZE DELETE FROM refreshtoken WHERE expires_at < now();
 
 -- ============================================================
