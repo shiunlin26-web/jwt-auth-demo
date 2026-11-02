@@ -121,6 +121,29 @@
 **收尾一句話**：兩張票分工，短的常換、長的能作廢；換票舊票蓋章，舊票再現整排刪掉，前端保證同時只換一次。密碼猜得到所以要慢要鹽；票猜不到所以要快要固定；access token 不存所以用簽章。
 **收尾要講到**：refresh token 的一生（登入發、換票蓋章發新、舊的再現整排刪、本人查不到重登）/ 兩句 401 的差別 / 兩張票對照表（活多久、放哪、怎麼送、資料庫有沒有、怎麼驗、被偷怎樣）/ 三樣東西三種工具 / 偷到 bcrypt 雜湊不能直接登入，只能離線猜，外洩時全部重設是慣例。
 **他誤解過的地方（2026-10-21）**：「做 SHA-256 查表的是 access token」（是 refresh token；access token 不存資料庫）；「`Path=/` 會每個請求都換票」（只是每個請求都帶，`/api/me` 不讀它，行為不變、曝光變多）；「舊票被標記所以查不到」（重用偵測是刪除不是標記）；「鹽是扣掉密碼算出來的」（鹽直接寫在那串前面）；「加密」vs「簽章」；三個 refresh 裡「都拿舊票」（第一個成功，後兩個才是舊票）。
+**複習版：密碼、加鹽、雜湊（2026-11-02 學習者主動要求，約 40 分鐘，不用起後端）**。先分清楚三個詞：加密 = 保險箱，有鑰匙就打開；雜湊 = 絞肉機，沒有倒轉鍵；鹽 = 絞之前撒的隨機調味料。存密碼用雜湊不用加密（「密碼加密」是不精確的說法），再用 `security.py:11～20` 的三列表講三樣東西三種工具。全部在 `backend` 跑；`uv` 找不到看 `DEBUGGING.md` 第一列（他在 VS Code 開多個終端機每次都撞到，2026-11-02 起 `.vscode/settings.json` 處理了）。
+
+| 步 | 指令 | 預期（實際） | 看到之後講什麼 |
+| --- | --- | --- | --- |
+| 1 | `uv run python -c "import hashlib; print(hashlib.sha256(b'Passw0rd!x').hexdigest()); print(hashlib.sha256(b'Passw0rd!y').hexdigest())"` | `52c1e469...dcbb8`、`04315a31...06cdf`（和帶的人算的一字不差） | 特性一：同樣輸入永遠同樣輸出，在誰的電腦都一樣（公開的食譜，沒有隨機、沒有鑰匙）；特性二：差一個字整串翻掉（雪崩）；64 字 × 4 位元 = 256。接著講直接用 SHA-256 存密碼的兩個問題：同密碼同結果（彩虹表）、太快 |
+| 2 | `uv run python -c "import hashlib,time; t=time.time(); [hashlib.sha256(b'Passw0rd!%d' % i).hexdigest() for i in range(1000000)]; print(round(time.time()-t,2))"` | 一個數字（實際 `2.28`） | 100 萬個 2 秒多，一個約 0.000002 秒；破解工具用顯示卡每秒幾十億個 |
+| 3 | `uv run python -c "import bcrypt,time; t=time.time(); bcrypt.hashpw(b'Passw0rd!x', bcrypt.gensalt()); print(round(time.time()-t,2))"` | 一個數字（實際 `0.33`） | 慢約 14 萬倍；使用者登入一次感覺不到，小偷猜 100 萬次一顆 CPU 將近 4 天、還只破一個人。成本 12 = 2¹² = 4096 輪，加 1 翻倍。順帶關卡 13 的 `to_thread` |
+| 4 | `uv run python -c "import bcrypt; print(bcrypt.hashpw(b'Passw0rd!x', bcrypt.gensalt()).decode()); print(bcrypt.hashpw(b'Passw0rd!x', bcrypt.gensalt()).decode())"` | 兩行各 60 字、都 `$2b$12$` 開頭、後面完全不同 | 拆一行成四段表：`$2b$` 版本、`12$` 成本、22 字鹽、31 字結果 |
+| 5 | `uv run python -c "import bcrypt; h=bcrypt.hashpw(b'Passw0rd!x', bcrypt.gensalt()); print(h.decode()); print(bcrypt.hashpw(b'Passw0rd!x', h).decode()); print(bcrypt.checkpw(b'Passw0rd!y', h))"` | 第 1、2 行一模一樣，第 3 行 `False` | 這就是 `security.py:42` 的 `checkpw`：從字串讀出鹽和成本、用同一把鹽重絞、比後 31 字；網站從頭到尾不知道原始密碼。對回 `routes/auth.py:147～148`（先用 email 找人再比對） |
+
+最後不跑指令，講 refresh token 為什麼用 SHA-256：電腦隨機產生、2²⁵⁶ 種猜不完，慢沒有意義；手上只有票，只能拿雜湊直接查表（關卡 18 的 `ix_refreshtoken_token_hash`），bcrypt 每次不同就查不到。仍要雜湊是為了資料庫被偷時拿不到可用的票。
+
+**他問的（2026-11-02）**：
+- 「bcrypt 是先加鹽再雜湊嗎？」→ 觀念上對：`gensalt()` 擲鹽、`hashpw` 把密碼和鹽一起絞 4096 輪。嚴格說不是把鹽黏在密碼前面絞一次，是每一輪都攪進去，結論一樣。鹽不是祕密，寫在結果裡。
+- 「鹽記在哪？」→ 就在那 60 字的第 8～29 字，`user.hashed_password` 一欄存整串，沒有別的地方。
+- 「4096 次的結果就是最終字串？」→ 絞出來的只有最後 31 字；存的是版本 + 成本 + 鹽 + 31 字。
+- 「成本是 2 的 12 次方？」→ 對，也寫在字串裡，所以之後調高成本舊帳號照樣能比對。
+- 「這串被偷了會被破譯嗎？」→ 解不開（沒有倒轉），只能用字串裡的鹽一個一個猜：鹽讓彩虹表沒用、每人要分開猜；慢讓每猜一次 0.33 秒。弱密碼在常見清單前幾千個，幾十分鐘就中；長的隨機密碼實際上猜不到。外洩了還是要通知改密碼。
+- 「每次不同是因為加鹽嗎？」→ 完全是。同密碼 + 同鹽 + 同成本結果一定一樣（第 5 步）；refresh token 固定一把鹽就等於沒鹽，只剩白白慢。
+
+**收尾一句話**：存密碼用雜湊不用加密；bcrypt = 每人一把隨機鹽（彩虹表沒用）+ 故意慢；refresh token 隨機猜不到又要查表，所以用快而固定的 SHA-256。
+**題目**（他都答對）：(1) 小明小美同密碼，`hashed_password` 一樣嗎、只用 SHA-256 呢 → bcrypt 不同（各自 `gensalt()`）、SHA-256 一樣；(2) 登入時怎麼知道用哪把鹽、幾輪 → 從字串讀，`$2b$12$` 後 22 字是鹽、12 是成本；(3) refresh token 改 bcrypt，`/api/auth/refresh` 會怎樣 → 每次結果不同，`:193` 查不到，`:198` 回 `401 "Invalid refresh token"`，access token 一過期就被登出；用 `checkpw` 也不行，不知道要比哪一列，一張張比 20 萬張要 18 小時以上。
+
 **動手玩**：`LEARNING.md` 關卡 1 的 1、3（用關卡 16 的 `npm test` 也看得到）。
 
 ### 關卡 2：設定管理

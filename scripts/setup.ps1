@@ -209,4 +209,9 @@ Write-Host @"
     cd backend;  uv run uvicorn main:app --reload --port 8000
     cd frontend; npm run dev
     瀏覽器開 http://localhost:5173
+
+    找不到 uv / node？這個腳本是另開一個 PowerShell 跑的，剛裝的工具只有「之後開的」程式看得到：
+    - VS Code：用「開啟資料夾」開 repo 根目錄並信任它，新開的終端機就有（.vscode/settings.json 處理了）
+    - 其他 PowerShell / Windows Terminal：整個關掉重開（只開新分頁不夠），
+      或在那個視窗跑一次 `$env:Path = "`$env:USERPROFILE\.local\bin;`$env:Path"
 "@ -ForegroundColor Green
