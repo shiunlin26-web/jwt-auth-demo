@@ -3251,6 +3251,39 @@ X-Forwarded-For: <瀏覽器的 IP>, <Vercel 出口 IP>
 
 最後一列是已知的限制：直接打 Render 網址的人會被算成同一個 IP（互相影響），而且塞兩段假 IP 可以繞過。要堵這條路得讓 Render 只接受來自 Vercel 的流量，免費方案做不到；實務上通常靠 Cloudflare 這類前置層。**設定 hops 前先確認實際的標頭長什麼樣**：打開 `ENABLE_DEBUG_ENDPOINTS` 看 `/api/_ip`，從前端網址打一次、直接打 Render 網址一次，比較兩者。
 
+> **2026-10-30 註記（重帶關卡 17 時發現）**：
+> 1. 上表第二列「本機但有人自己填 → 不理它」**在本機實際不成立**。uvicorn 自己也會讀 `X-Forwarded-For`：它預設相信連線來源是 `127.0.0.1` / `::1` 的請求帶的這個標頭（`FORWARDED_ALLOW_IPS` 預設 `127.0.0.1,::1`），在我們的程式拿到請求之前就把 `request.client.host` 改掉。本機用 curl 打 `localhost`，`hops=0` 也擋不住換假 IP。學習者實測：`/api/_ip` 帶 `X-Forwarded-For: 1.2.3.4` 回 `"client_host":"1.2.3.4"`；啟動加 `--no-proxy-headers` 後變回 `127.0.0.1`。線上不受影響（Render 連進容器的來源不是 127.0.0.1），但從這次起 `Dockerfile` 與 `infra/k8s/base/deployment.yaml` 的啟動參數明寫 `--no-proxy-headers`，讓 IP 只由 `rate_limit.py` 決定（k8s 的 sidecar 就是從 127.0.0.1 連進來）。
+> 2. 最後一段「塞兩段假 IP 可以繞過」：一段就夠。直接打 Render 時標頭只有 Render 接的一段，攻擊者先填一段，就湊滿 2 段，`ips[-2]` 正好是假的那段。
+
+#### 補充（2026-10-30）：三個人同時登入，每一站發生什麼
+
+晚上九點三個人按登入：小明在家（公網 `111.1.1.1`）、小美在咖啡廳（`222.2.2.2`）、阿壞用 curl 自己加 `X-Forwarded-For: 9.9.9.9`（真實 `333.3.3.3`）。假設 Vercel 出口是 `76.76.0.9`，Render 內部轉給容器的是 `10.0.0.5`。
+
+每一站做兩件事：看「誰連進來」、在 `X-Forwarded-For` **尾巴接上**它，然後自己開一條新連線往下傳。代理只往尾巴接，不刪別人寫的。
+
+| 站 | 小明的 `X-Forwarded-For` | 小美的 | 阿壞的 |
+| --- | --- | --- | --- |
+| 客戶端發出 | （沒有） | （沒有） | `9.9.9.9`（自己填的） |
+| Vercel 接上它看到的來源 | `111.1.1.1` | `222.2.2.2` | `9.9.9.9, 333.3.3.3` |
+| Render 前門（Cloudflare + 負載平衡）接上它看到的 Vercel 出口 | `111.1.1.1, 76.76.0.9` | `222.2.2.2, 76.76.0.9` | `9.9.9.9, 333.3.3.3, 76.76.0.9` |
+| 到 uvicorn 時的 `request.client.host` | `10.0.0.5` | `10.0.0.5` | `10.0.0.5` |
+
+`hops=2` 從右數第 2 段：小明 `111.1.1.1`、小美 `222.2.2.2`、阿壞 `333.3.3.3`。阿壞填的在最左邊，數不到。從右邊數的那幾段是代理親眼看到的，客人改不了。
+
+| 取法 | 小明 | 小美 | 阿壞 | 結果 |
+| --- | --- | --- | --- | --- |
+| `request.client.host` | 10.0.0.5 | 10.0.0.5 | 10.0.0.5 | 三人共用 10 次 |
+| 最左邊 `ips[0]` | 111.1.1.1 | 222.2.2.2 | 9.9.9.9 | 阿壞每次換假的，無限次 |
+| 從右數第 1 段（hops 設 1） | 76.76.0.9 | 76.76.0.9 | 76.76.0.9 | 共用 Vercel 出口，等於第一列 |
+| **從右數第 2 段（hops=2）** | 111.1.1.1 | 222.2.2.2 | 333.3.3.3 | 一人一份 ✓ |
+
+幾個容易混的點：
+
+- **線上沒有 Vite**。本機轉發 `/api` 的是 Vite（`vite.config.ts` 的 `proxy`），線上是 Vercel（`vercel.json` 的 `rewrites`），做同一件事。
+- **Cloudflare 是 Render 的前門，算在 Render 那一側**。hops 數的是「標頭裡被代理接上去的段數」，不是經過幾家公司；當初用 `/api/_ip` 量出來是 2 段。
+- **同一個公網 IP 背後的人共用額度**：小明和小美在同一個 Wi-Fi，小明錯 10 次，小美第一次就 429。這是用 IP 當 key 的固有缺點；業界再加一層「每個帳號」的限制或驗證碼。
+- **名稱**：這關的技術叫 rate limiting（slowapi 預設 fixed window：每 60 秒一格），超過回 HTTP 429 + `Retry-After`；找真實 IP 這件事叫 trusted proxies。每個框架都有同樣的設定：Express `app.set("trust proxy", 2)`、uvicorn `--forwarded-allow-ips`、nginx `set_real_ip_from` + `real_ip_header`、Rails `trusted_proxies`。很少自己寫，部署時設一次，換平台或加 CDN 時再改，設完用印出 IP 的端點驗證。
+
 ### 觀念 3：限制的狀態存哪
 
 slowapi 預設存在記憶體：**單一實例**沒問題（免費方案就是一台，而且重啟就歸零也無所謂）。如果之後開兩台以上，每台各自計數，上限就變成兩倍，要改 `storage_uri` 指向 Redis（Upstash 有免費方案）。這和「session 存記憶體 vs 存 Redis」是同一個問題。
@@ -3299,7 +3332,7 @@ slowapi 內建的 429 回 `{"error": ...}`，前端的 `getErrorMessage` 讀的�
 
 ### 動手玩
 
-1. **把 hops 設錯**：本機 `.env` 加 `TRUSTED_PROXY_HOPS=1`，用 curl 帶 `-H "X-Forwarded-For: 1.2.3.4"` 打登入 11 次 → 429；再帶 `-H "X-Forwarded-For: 5.6.7.8"` → 又可以打 10 次。這就是「hops 比實際代理層數多，攻擊者就能自己換 IP」。刪掉那行。
+1. **把 hops 設錯**（2026-10-30 註記：後端要用 `uv run uvicorn main:app --reload --port 8000 --no-proxy-headers` 啟動，不然 hops=0 也會被繞過，原因見觀念 2 的註記）：本機 `.env` 加 `TRUSTED_PROXY_HOPS=1`，用 curl 帶 `-H "X-Forwarded-For: 1.2.3.4"` 打登入 11 次 → 429；再帶 `-H "X-Forwarded-For: 5.6.7.8"` → 又可以打 10 次。這就是「hops 比實際代理層數多，攻擊者就能自己換 IP」。刪掉那行。
 2. **改上限**：`.env` 加 `AUTH_RATE_LIMIT=3/minute`，第 4 次就 429。slowapi 的格式還有 `100/hour`、`5/second`、`10/minute;100/hour`（兩個同時）。刪掉。
 3. **拿掉 `response` 參數**：`routes/auth.py` 的 login 把 `response: Response` 暫時改名，跑一次登入會看到那句「must be an instance of starlette.responses.Response」。改回來。
 4. **看 conftest 的作用**：`conftest.py` 的 `limiter.enabled = False` 註解掉，`uv run pytest -q` 會有一堆 429 的失敗。改回來。
