@@ -3391,6 +3391,14 @@ slowapi 內建的 429 回 `{"error": ...}`，前端的 `getErrorMessage` 讀的�
 - **名字從哪來**：表名 `user` 是 class `User` 轉小寫（SQLModel）；索引名 `ix_user_email` 是 SQLAlchemy 看到 `index=True` 自動取的 `ix_<表>_<欄位>`；`refreshtoken_pkey`、`refreshtoken_user_id_fkey` 是 Postgres 自己的預設（`<表>_pkey`、`<表>_<欄位>_fkey`）。程式碼裡沒有任何一行寫過這些名字，但每一個都能往回找到 `models.py` 的一行和 `migrations/versions/0001` 的一句。
 - **`EXPLAIN ANALYZE` 要看哪個時間**：結果最後一行的 `Execution Time` 才是資料庫執行的時間；SQL Editor 自己顯示的「Query executed in xxx ms」包含到新加坡的網路來回，不要看。第一行的 `Index Scan` / `Seq Scan` 是「翻目錄」還是「一頁一頁翻」。
 
+> **2026-11-02 註記（重帶時實測）**：
+> - 先跑 `SELECT current_database();` 確認回 `jwtdemo_test`，比看畫面可靠。
+> - Neon SQL Editor 上方顯示的是 `Execution time` / `Planning` 兩行；要看的仍是文字版計畫最後的 `Execution Time`。
+> - **同一句第一次常慢幾十倍**（`34.6 ms` → 第二次 `0.075 ms`）：Neon 運算和儲存分開，資料還不在記憶體（冷快取）。每句跑兩次看第二次；文字版的 `Buffers: shared read=4` / `hit=4` 就是「去儲存層拿」/「記憶體裡就有」。
+> - 實測差距：`lower(email)` 約 90 倍（`6.7 ms`）、拔掉 `ix_refreshtoken_token_hash` 約 120 倍（`11 ms`，讀 2273 頁 vs 4 頁）。
+> - Run 旁邊的 `EXPLAIN ANALYZE` 按鈕和寫在 SQL 裡一樣**會真的執行**，輸出是 JSON；對 `DELETE` / `UPDATE` 用，資料就真的動了。只想看計畫按 `EXPLAIN`。
+> - 觀念 4 的「每趟幾十毫秒」是從本機（台灣）連；線上 Render 也在新加坡，每趟一兩毫秒。N+1 線上沒有本機那麼痛，但趟數一樣乘上去。
+
 ### 觀念 1：ORM 底下就是 SQL
 
 `DB_ECHO=true` 之後登入一次，你會看到大概四句（每句下面跟著一行 `[generated in ...] (參數...)`，那是真正送進去的值）：

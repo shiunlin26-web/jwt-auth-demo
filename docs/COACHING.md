@@ -418,21 +418,37 @@
 
 ### 關卡 18：SQL 與資料庫
 
-**搭配看的程式**：`backend/models.py`（`index=True`、`unique=True`）、`routes/auth.py` 的 `with_for_update()`（194）與 `delete_expired_refresh_tokens`、`docs/labs/18-sql.sql`
+**搭配看的程式**：`backend/models.py:11`、`:22`、`:23`（`index=True`、`unique=True`）、`backend/routes/auth.py:88`、`:143`（用 email 找人）、`:193`、`:249`（用雜湊找 refresh token）、`:62`、`:69～74`（用 user_id 刪）、`:194`（`with_for_update()`）、`:207`（重複使用偵測）、`backend/dependencies.py:31`（主鍵）、`docs/labs/18-sql.sql`
 
-**前置**：Neon SQL Editor 能開；`docs/labs/18-sql.sql` 開著。帳號：這關用 `TEST_DATABASE_URL` 那個資料庫（會灌 5 萬筆假資料，Neon 免費方案夠用，實驗最後會清掉）。**先講名詞**（`LEARNING.md` 關卡 18「先認識幾個名詞」）再開始。
+**前置**：Neon SQL Editor 能開，`docs/labs/18-sql.sql` 開著，不用起後端。讀 `PLAIN.md` 關卡 18。**名詞到那一步再講**（索引、系統表、`EXPLAIN ANALYZE`、N+1、交易、鎖、`FOR UPDATE`），開頭只講「一個 Neon 專案裡有好幾個資料庫」，附三列對照表（`-prod/neondb` 線上、`jwt-auth-demo/neondb` 本機、`jwt-auth-demo/jwtdemo_test` pytest）。這關只能在 `jwtdemo_test` 做；2026-10-20 第一次帶時在錯的資料庫查到「都沒有」，所以**第一步用 SQL 確認，不靠看畫面**。
+
+**量時間的規矩（2026-11-02 實測得來）**：同一句第一次常慢幾十倍（冷快取），**每句跑兩次、貼第二次**；他貼 Neon 上方的 `Execution time` / `Planning` 兩行時，請他改貼文字版計畫，看最後的 `Execution Time` 和 `Buffers`。
 
 | 步 | 操作（lab 的段落） | 預期 | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | 第 1 段 `pg_indexes` 查詢 | 看到 `ix_user_email`、`ix_refreshtoken_token_hash`、`*_pkey` | 系統表是「資料庫自己的目錄」；索引名字 `ix_<表>_<欄位>` 來自 `models.py` 的 `index=True` |
-| 2 | 第 2 段灌資料，再 `SELECT count(*) FROM "user";` | 約 `50001` | 假資料進去了 |
-| 3 | 第 3 段兩句 `EXPLAIN ANALYZE`，各看 `Execution Time` | 有索引：`Index Scan`、零點幾毫秒；拔掉索引：`Seq Scan`、幾十毫秒 | 看 `Execution Time` 那行，不是編輯器的秒數。索引是另外維護的目錄 |
-| 4 | 第 4 段 JOIN 一句 vs 21 句 | 一句就拿到 20 個使用者各幾張票 | N+1：每一趟都是一次來回 |
-| 5 | 第 5 段：分頁 A 跑 `DO $$ ... $$`（會等 40 秒），馬上在分頁 B 跑那句 `SELECT` | B 的 `finished - started` 約 30～40 秒、`revoked` 是 `t` | `FOR UPDATE` 是鎖：同一張票兩個人同時換，第二個要等第一個做完才看得到結果。`routes/auth.py` 的 `with_for_update()` |
-| 6 | 第 6、7 段清理，再 `count(*)` | `user`、`refreshtoken` 都回到實驗前 | 實驗資料不留 |
+| 1 | `SELECT current_database();` | `jwtdemo_test` | 選錯庫會灌 5 萬筆到別的地方；用一句 SQL 確認，比看畫面可靠。他第一次只貼了上方兩行時間，要再請他貼值 |
+| 2 | 第 1 段 `pg_indexes` 那句（貼 `tablename`、`indexname`） | 5 列：`ix_refreshtoken_token_hash`、`ix_refreshtoken_user_id`、`refreshtoken_pkey`、`ix_user_email`、`user_pkey` | 先講索引（書後面的索引頁）、系統表（樓層介紹牌）、`_pkey`（主鍵，Postgres 自動建）。逐個對回 `models.py` 哪一行、程式哪裡用它找；`UNIQUE` 和索引是兩件事（`user_id` 不唯一，一人多張）；`btree` 知道名字就好；`"user"` 加引號因為 `user` 是保留字 |
+| 3 | 第 2 段兩句 INSERT + count | `users 50001`、`tokens 200002`（多的 1 人 2 張是 pytest 最後一個測試留下的） | 先講 `generate_series`、`\|\|`。第二句 INSERT 每列都用 email 找人，20 萬次幾秒跑完，靠的就是 `ix_user_email` |
+| 4 | 第 3 段第一句（email），先講 `EXPLAIN ANALYZE`、`Index Scan`、`Seq Scan` | `Index Scan ... using ix_user_email`；**實際第一次 `34.6ms`**（預期是 <1 ms） | 預期錯了直說，提出猜測：Neon 運算和儲存分開，剛灌的資料不在記憶體 → 下一步驗證 |
+| 5 | 同一句再跑 | `0.075ms` | 冷快取 / 熱快取；比快慢要比熱的；Neon 閒置會關機，線上第一個請求也會這樣 |
+| 6 | 第 3 段第二句（`lower(email)`），跑兩次 | `Seq Scan on "user"`、`Rows Removed by Filter: 50000`、`Buffers: shared hit=468`、約 `6.7 ms`（約 90 倍） | 逐行讀文字版。索引照 email 原文排，`lower()` 的值不在目錄裡；要就建運算式索引。這個專案沒用 `lower()` |
+| 7 | 第 3 段 token_hash 那句，跑兩次 | `Index Scan using ix_refreshtoken_token_hash`；第一次 `read=4`、`2.5 ms`，第二次 `hit=4`、`0.089 ms` | **`Buffers` 的 `read` / `hit` 直接證明第 4、5 步的猜測**；20 萬筆只讀 4 頁；`Index Cond` 和 `Filter` 的差別；`dirtied` 忽略 |
+| 8 | `DROP INDEX ix_refreshtoken_token_hash;` 跑一次，查詢跑兩次 | `Seq Scan`、`Rows Removed by Filter: 200001`、`hit=2273`、**約 `11 ms`**（約 120 倍；原本預期「幾十 ms、幾百倍」偏高，因為全在記憶體） | 4 頁 vs 2273 頁的對照表；11 ms 也嚴重：每次換票都讀 18 MB、同時 100 人就 100 倍、表大 10 倍就慢 10 倍 |
+| 9 | `CREATE UNIQUE INDEX ...` 建回來，查一次 | 又是 `Index Scan`，`hit=1 read=3`（新索引是冷的） | 索引收一句：資料再多也只翻幾頁 |
+| 10 | 先講 N+1（跑倉庫 21 趟 vs 帶名單跑 1 趟），`EXPLAIN ANALYZE SELECT count(*) FROM refreshtoken WHERE user_id = 1;` 跑兩次 | `Aggregate` 包 `Index Only Scan using ix_refreshtoken_user_id`、`rows=2`、約 `0.09 ms` | 兩層由內往外讀；`Index Only`、`Aggregate`；id 1 是 pytest 那人；`Heap Fetches` 不用管。**一趟很快，慢在趟數 × 網路來回**：Render 與 Neon 同在新加坡（`render.yaml:15`）一趟一兩 ms，本機連過去幾十 ms（常見範圍，不是實測） |
+| 11 | 先講 `JOIN`、`LEFT JOIN`、`GROUP BY`、`FILTER`、`LIMIT`，第 4 段 JOIN 那句**不加 EXPLAIN** 先看結果 | 20 列；`1 test@example.com 2 0`、`u1@lab.test 4 4`、`u2`～`u4` 是 `4 0` | 他會看到 u1 全撤銷、u2～u4 都沒撤銷：`u1` 拿第 50000、100000…張，剛好都被 10 整除。總數仍是一成，分布不平均 |
+| 12 | 同一句加 `EXPLAIN ANALYZE`，跑兩次 | `Limit` → `GroupAggregate` → `Merge Left Join` → 兩個 `Index Scan`（`user_pkey`、`ix_refreshtoken_user_id`）；`rows=21`、`rows=79`、`hit=84`、約 `0.15 ms`；`Planning Time` 約 3.8 ms 比執行久 | 兩疊照順序排好的卡片一起往下翻；`Limit` 讓它提早停（21 = 20 人 + 多看 1 個才知道換組，79 = 2 + 19×4 + 1）；JOIN 要比較多種做法所以想得久。N+1 對照表收一句；ORM 對應 eager loading（`selectinload`），這個專案沒有這種查詢 |
+| 13 | 先講情境（同一張 refresh token 同時兩個換票請求，`routes/auth.py` 三個動作）與名詞（交易、鎖、`FOR UPDATE`），`SELECT revoked FROM refreshtoken WHERE token_hash = md5('lab-777');` | `false` | 改之前的值，等一下對照 |
+| 14 | 開分頁 B（先 `SELECT current_database();`），A 貼 `DO $$` 那段、B 貼三欄那句，A 按 Run 後馬上 B 按 Run | B：`finished - started` 約 **38.7 秒**、`revoked` 是 `t` | 對回 `:194` → `:229` → `:207`：只有一個請求換票成功，另一個被當成重複使用。**補：B 不加 `FOR UPDATE` 就不會等，會馬上讀到舊值 `false`**（只讀的人不等改的人），所以鎖要加在「讀、檢查、再改」的那一句 |
+| 15 | 第 6 段 `EXPLAIN ANALYZE DELETE ... WHERE expires_at < now();` **只跑一次** | `Seq Scan`、`rows=114289`、`Rows Removed by Filter: 85713`、下層 `read=2271`、約 `260 ms` | 先警告 `EXPLAIN ANALYZE` 真的會執行。**不是「一半」**：`g % 14 = 7` 那份到期時間就是灌資料那刻，也過期了，14 份裡 8 份 = 114287，加 pytest 那 2 張。`Delete` 層 `rows=0` 是因為它不回傳資料。程式的 `delete_expired_refresh_tokens` 多了 `user_id` 條件，走索引；全站清理要排程分批 |
+| 16 | 第 7 段三句，Run | `users 1`、`tokens 0` | 先刪 refresh token 再刪使用者（外鍵，關卡 11 撞過的）。下次 pytest 也會 TRUNCATE |
 
-**收尾**：索引是目錄、不是每欄都該有 / 一趟 SQL 一次來回 / 鎖讓同時改同一筆的人排隊。
-**動手玩**：`LEARNING.md` 關卡 18 的 3（`DB_ECHO=true` 對照 SQL 和程式）。
+**他會問的（2026-11-02 實際問了）**：
+- 「RUN 旁邊的 `EXPLAIN` 跟 `EXPLAIN ANALYZE` 按鈕差別？」→ `EXPLAIN` 不執行、只有估計值；`EXPLAIN ANALYZE` 真的跑一次、多了實際值，按鈕版輸出是 JSON（多了 Neon 自己的 `Prefetch`、`File Cache` 欄位）。**對 `DELETE` / `UPDATE` 按它資料會真的動**。他當時先按 Run 清完、再按 `EXPLAIN ANALYZE`，所以看到 `Actual Rows: 0`、`Rows Removed by Filter: 1`；順便講表只剩 1 列卻還讀 468 頁：刪除只是標記，要等 VACUUM 收空間，和「只讀的人看得到舊版本」是同一個設計。
+
+**收尾一句話**：索引是另外維護的目錄，看 `Buffers` 分冷熱；N+1 慢在趟數；同一列要讀、檢查、再改，讀的時候就鎖住。
+**題目**（三題）：(1) 拿掉 `models.py:23` 的 `index=True`，`routes/auth.py` 哪些動作會變成一列一列看 → 不只答「user_id」，要答動作：`revoke_all_refresh_tokens`（`:62`；換票時的重複使用偵測 `:208`、登出所有裝置 `:277`、改密碼 `:318`）與 `delete_expired_refresh_tokens`（`:69～74`；每次登入 `:166`）；(2) 第十四步 B 拿掉 `FOR UPDATE` 會怎樣 → 不等、讀到 A 提交前的 `false`，兩個換票請求都成功，重複使用偵測失效；(3) 怎麼判斷是冷熱不是查詢變快 → `Buffers` 那行，`read` 是去儲存層拿、`hit` 是記憶體裡就有，頁數一樣只是來源不同。
+**動手玩**：`LEARNING.md` 關卡 18 的 3（`DB_ECHO=true` 對照 SQL 和程式）。要起後端，先跑 `scripts\setup.ps1` 把套件更新到最新的 main。
 
 ### 關卡 19：HTTP 與瀏覽器規則
 
