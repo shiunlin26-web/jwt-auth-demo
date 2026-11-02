@@ -84,6 +84,7 @@
 | 症狀 | 原因 | 修法 | 關卡 |
 | --- | --- | --- | --- |
 | 登入回 429「請求太頻繁」，但只試了一兩次 | 頻率限制把所有人算成同一個 IP：`TRUSTED_PROXY_HOPS` 比實際代理層數少（正式環境要 2） | 開 `ENABLE_DEBUG_ENDPOINTS` 看 `/api/_ip` 的 `x_forwarded_for` 有幾段，據此設 hops | 17 |
+| 本機 `TRUSTED_PROXY_HOPS=0`，curl 帶 `X-Forwarded-For` 換假 IP 就繞過頻率限制；`/api/_ip` 的 `client_host` 是自己填的值 | uvicorn 預設相信從 `127.0.0.1` 連進來的 `X-Forwarded-For`，在程式拿到請求前就改了 `request.client.host` | 本機做這個實驗時啟動加 `--no-proxy-headers`（`Dockerfile` 與 k8s 已明寫）；線上不受影響，Render 連進容器的來源不是 127.0.0.1 | 17 |
 | 後端啟動或第一次登入就 500：`parameter \`response\` must be an instance of starlette.responses.Response` | 被 `@limiter.limit` 裝飾的端點少了 `response: Response` 參數 | 加上參數（slowapi 要用它塞標頭） | 17 |
 
 ## 基礎設施（關卡 21～24）
