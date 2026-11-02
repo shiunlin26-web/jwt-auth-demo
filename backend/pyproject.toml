@@ -15,7 +15,9 @@
 name = "jwt-auth-demo-backend"
 version = "0.1.0"
 description = "JWT 登入範例的後端（FastAPI + SQLModel + Alembic）"
-requires-python = ">=3.10"
+# 和 .python-version、Dockerfile、CI 實際跑的版本一致。原本寫 >=3.10，uv 會替 3.10、3.11 各算一套版本寫進 uv.lock，
+# 只支援 3.11 以上的修補版（例如 dnspython 2.9.0）在 3.10 那套就換不掉，GitHub 會一直標漏洞，但其實永遠不會裝到
+requires-python = ">=3.13"
 # 執行後端需要的套件（對應原本的 requirements.txt）
 dependencies = [
     "fastapi",
