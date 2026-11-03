@@ -491,6 +491,11 @@
 | 7 | 登入直接存變數：`$t = (curl.exe -s ...login... \| ConvertFrom-Json).access_token`；再一行：解第二段、`Replace('"sub":"9"','"sub":"1"')`、重包成 `$f`、`foreach ($x in $t, $f) { curl.exe -s -o NUL -w "%{http_code}`n" localhost:8000/api/me -H "Authorization: Bearer $x" }` | 印出 payload，`200`、`401` | **第一次做時 token 已過期**（回應時間晚於 `exp`），401 分不出是簽章還是過期，因為兩者故意回同一句（`dependencies.py:24～25`）→ 預期錯了直說，改做對照組。兩張只差 `sub`、都沒過期、結果不同 = 簽章。`JWT_SECRET` 外洩 = 任何人能假冒任何人 |
 | 8 | 先講來源、同源政策、CORS；`curl.exe -s -i localhost:8000/api/health -H "Origin: http://localhost:5173"` 和 `-H "Origin: http://evil.com"`，先讓他猜 | 都 `200`、內容一樣（`{"status":"ok","db":"ok","migration":"0006",...}`）；只有第一個有 `access-control-allow-origin`；兩個都有 `access-control-allow-credentials: true` | 後端沒擋，只是沒給許可，擋的是瀏覽器；curl 不理。CORS 保護用瀏覽器的使用者，不保護 API（保護 API 的是 token）。補：GET 會送到後端，POST + JSON 會先送 `OPTIONS` 預檢，沒許可連正式請求都不送。線上同源（Vercel 代理，`render.yaml:52`），根本不會發生 CORS |
 
+**他追問「用 `JWT_SECRET` 對第一段 + 改過的第二段重算簽章、跟第三段對不上」要詳細講（2026-11-03）**：
+- 簽的流程（`security.py:66` `jwt.encode`）：兩段 JSON 各轉 Base64 → 用點接成「要簽的內容」→ HMAC-SHA256(`JWT_SECRET`, 內容) → 轉 Base64 = 第三段。驗的流程（`:72` `jwt.decode`）：切三段 → 拿收到的「第一段.第二段」用自己的祕密重算 → 和第三段比，一樣才看 `exp`。後端不用記發過哪些 token，所以 access token 不用存資料庫。
+- HMAC 用剛複習過的 SHA-256 講：公開食譜加一味祕方，繼承「同輸入同輸出、差一字整串翻、倒推不回」，多了「沒祕方算不出」。反問：簽章若只用 SHA-256 沒祕方，攻擊者改完自己算一次填進去就好。
+- **動手**（在 `backend`，同一個終端機要有第 7 步的 `$t`、`$f`；換終端機變數就沒了，他第一次就撞到 `IndexError: list index out of range`）：`uv run python -c "import sys,hmac,hashlib,base64; from config import settings; sign=lambda h,p: base64.urlsafe_b64encode(hmac.new(settings.jwt_secret.encode(), (h+'.'+p).encode(), hashlib.sha256).digest()).rstrip(b'=').decode(); t=sys.argv[1].split('.'); f=sys.argv[2].split('.'); print(t[2]); print(sign(t[0],t[1])); print(sign(f[0],f[1]))" $t $f` → 三行 43 字，**第 1、2 行一模一樣**（親手重算 = 後端當初簽的），**第 3 行整串不同**（`$f` 要過關第三段就得填這串，算它需要 `JWT_SECRET`）。程式只讀祕密不印出來。
+
 **收尾一句話**：請求回應四部分；cookie 五個屬性各擋一件事；兩張票送法、去處、存不存都不同；access token 看得到改不了；CORS 只管瀏覽器讀不讀得到。收尾後問「哪一步要再講一次」。
 **題目**（他都答對）：(1) 前端打 `/api/me` 瀏覽器會帶 refresh token cookie 嗎、後端靠什麼認人 → 不會，`Path=/api/auth`；靠 `Authorization` 標頭的 access token（補：標頭是 axios 攔截器自己加的，cookie 是瀏覽器自動帶）；(2) 改 `sub` 冒充別人會怎樣、什麼時候會成功 → 401，除非拿到 `JWT_SECRET`（補：沒限定演算法的系統會被 `"alg":"none"` 騙，`security.py` 有 `algorithms=[...]`）；(3) `evil.com` 的 JS 對 `/api/health` 發 GET，有沒有送到、讀不讀得到 → 有送到、讀不到。
 **動手玩**：`LEARNING.md` 關卡 19 的 1（400 改 401 看攔截器做錯事）。
