@@ -3559,6 +3559,8 @@ Cache-Control: no-store                 ← 這關加的
 - CORS 擋的是「瀏覽器裡的 JS 讀回應」，curl、Postman、別的伺服器完全不受影響。**它不保護你的 API**，保護的是使用者（防止惡意網站用使用者的 cookie 偷讀別站資料）。
 - 這個專案同站之後（Vite proxy、Vercel rewrites），瀏覽器看到的永遠是同源，所以 `CORSMiddleware` 平常用不到，留著只是給「直接打後端」的除錯情境。
 
+> **2026-11-03 註記**：「請求會送出去」只對**簡單請求**成立（例如 `GET`、或表單格式的 `POST`）。像登入這種 `POST` + `Content-Type: application/json`，瀏覽器會先自動送一個 `OPTIONS` **預檢**（preflight）問「我可以嗎」，沒拿到許可，正式請求根本不送。重帶時的實測：`Origin: http://evil.com` 打 `/api/health` 一樣 `200`、內容一樣，只是少了 `access-control-allow-origin`。
+
 ### 觀念 5：快取，這關加的那一行
 
 瀏覽器、Vercel 的 CDN、公司的 proxy 都可能把 **GET** 的回應存起來下次直接給。`/api/me` 被存起來，同一台電腦換人登入，或同一個 proxy 後面的另一個人，就會拿到上一個人的資料。所以 `main.py` 的 middleware 對所有 API 回應加：
