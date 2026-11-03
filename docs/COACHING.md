@@ -475,22 +475,24 @@
 
 ### 關卡 19：HTTP 與瀏覽器規則
 
-**搭配看的程式**：`backend/routes/auth.py` 的 `set_refresh_cookie`（29～39）、`main.py` 的 request log middleware（`Cache-Control`）與 `CORSMiddleware`、`frontend/vercel.json`、`vite.config.ts` 的 `proxy`
+**搭配看的程式**：`backend/routes/auth.py:28～38`（`set_refresh_cookie`）、`backend/dependencies.py:10`（`HTTPBearer`，沒帶標頭回 `"Not authenticated"`）、`:24～28`（token 錯或過期都回同一句 `"Invalid or expired token"`）、`backend/security.py:63～65`（`sub`、`iat`、`exp`）、`:72`（`jwt.decode` 限定演算法）、`backend/main.py:95～101`（`CORSMiddleware`）、`:129`（`X-Request-ID`）、`:133`（`no-store`）、`backend/config.py:40`（`cors_origins`）、`:43`（`cookie_secure`）、`render.yaml:30`（`COOKIE_SECURE`）、`:52`（線上不用設 CORS 的理由）、`frontend/vercel.json`、`frontend/vite.config.ts:32`（`proxy`）
 
-**前置**：後端跑起來、帳號存在。2026-10-20 實際帶過的順序，照做。
+**前置**：後端跑起來（不用 `--no-proxy-headers`）、帳號 `t@test.com` 存在。讀 `PLAIN.md` 關卡 19。**先講名詞**：請求 / 回應的四個部分（請求行或狀態行、標頭、空行、內容，用寄信比喻），`-v` 的 `>`、`<`、`*`。CORS 的名詞（來源、同源政策、CORS、預檢）留到第 8 步再講。
 
-| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
+| 步 | 指令或操作 | 預期（2026-11-03 實際） | 看到之後講什麼 |
 | --- | --- | --- | --- |
-| 1 | `curl.exe -v localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` | `>` 四行請求、`<` 一串回應、最後一行 JSON | `>` 是你送的、`<` 是回來的、`*` 是 curl 碎念。請求行、標頭、空行、內容 |
-| 2 | 找 `< set-cookie:` 那行 | `HttpOnly; Max-Age=604800; Path=/api/auth; SameSite=lax`，本機沒有 `Secure` | 一個分號一個規則：JS 讀不到 / 7 天 / 只在 `/api/auth` 帶 / 跨站不帶 / 正式才限 https。`routes/auth.py` 第 34 行附近 |
-| 3 | 找 `x-ratelimit-remaining`、`cache-control: no-store`、`x-request-id` | 三行都在 | 關卡 17、19、11 各加的 |
-| 4 | 關卡 1 的步驟 1～4（cookie 存放處、換票、舊票重用、新票也失效） | 同關卡 1 | 用 curl 看最清楚 |
-| 5 | 重新登入 `-c jar.txt`，`curl.exe -v -b jar.txt localhost:8000/api/me` | `>` **沒有** `Cookie:` 行；`401`、`www-authenticate: Bearer` | Path 不是 `/api/auth` 就不帶；`/api/me` 要的是另一張票 |
-| 6 | `curl.exe -s -i localhost:8000/api/me -H "Authorization: Bearer <登入回的 access_token>"` | `200`，`id`、`email`、`last_login_at` | 兩張票分工：refresh 走 cookie 只到 `/api/auth`，access 走標頭打其他 API |
-| 7 | 把 access token 中間一段貼進 `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("<中間那段>"))` | `{"sub":"7","iat":...,"exp":...}` | 票誰都能看，所以不放祕密；第三段簽章防改。改一個字再打 `/api/me` 會 401 |
-| 8 | `curl.exe -s -i localhost:8000/api/health -H "Origin: http://localhost:5173"` 和 `-H "Origin: http://evil.com"` | 都 `200`、內容一樣；只有第一個有 `access-control-allow-origin` | CORS：伺服器照常處理，只是沒給許可，瀏覽器不讓 JS 讀。curl 不是瀏覽器所以不理。它保護使用者不保護 API |
+| 1 | `curl.exe -v localhost:8000/api/auth/login -H "Content-Type: application/json" -d '{\"email\":\"t@test.com\",\"password\":\"Passw0rd!x\"}'` | `*` 先試 `::1` 再連 `127.0.0.1`；`> POST /api/auth/login HTTP/1.1`、`Content-Length: 46`；`< HTTP/1.1 200 OK`、`set-cookie`、`x-ratelimit-*`、`vary: Origin`、`x-request-id`、`cache-control: no-store`；最後 JSON | 逐行對表：`-d` 讓 curl 自動用 POST；46 = JSON 的字數；`-v` 不印內容只說送出了。回應每一行標頭是哪一關加的（17、11、19、CORS）。`no-store` 為什麼：含 token 的回應被瀏覽器或代理存起來，下一個人會拿到。原本的第 3 步（三個標頭）在這步一起看完 |
+| 2 | 看 `set-cookie` 那行，**讓他自己**把 `routes/auth.py:30～38` 五個參數對到五段，再問 `604800` 幾天、`Secure` 為什麼沒出現 | `HttpOnly; Max-Age=604800; Path=/api/auth; SameSite=lax`，本機沒有 `Secure` | 他答對方向，要補精確：`HttpOnly` 瀏覽器照存照送、只是 JS 讀不到；`SameSite` 是「同站」不是「同網域」，`lax` 擋跨站 POST、點連結（GET 導覽）仍帶；`Max-Age` 是**瀏覽器**保留多久，後端 `expires_at` 是另一個時鐘；`Path` 是「網址開頭是 `/api/auth` 才帶」（他只答「api 端點」） |
+| — | 原本的第 4 步（關卡 1 換票四步）跳過：關卡 1 重帶時做過 | | |
+| 3 | `curl.exe -s -c jar.txt` 登入，再 `curl.exe -v -b jar.txt localhost:8000/api/me` | `>` 沒有 `Cookie:`；`401`、`www-authenticate: Bearer`、`{"detail":"Not authenticated"}`；沒有 `x-ratelimit-*` | `"Not authenticated"` 是 `HTTPBearer` 找不到標頭擋下的，`get_current_user` 沒跑（和 `"Invalid or expired token"` 不同）。**但沒有 `Cookie:` 也可能是 jar 沒存到**（他換了資料夾跑），要做對照組 |
+| 4 | 同資料夾 `curl.exe -v -b jar.txt -X POST localhost:8000/api/auth/refresh` | `> Cookie: refresh_token=...`；`200`、新的 `set-cookie`、`* Replaced cookie` | 對照組成立：帶不帶完全由 `Path` 決定。**提醒**：沒加 `-c jar.txt`，新票只換在 curl 記憶體，jar 裡是已撤銷的舊票，再拿去換就是重複使用（全刪）；關卡 1 用 `-b jar.txt -c jar.txt` 就是為此。換票也沒有頻率限制 |
+| 5 | 重新登入（`-c jar.txt` 順便換掉舊 jar），`curl.exe -s -i localhost:8000/api/me -H "Authorization: Bearer <access_token>"` | `200`，`{"id":9,"email":"t@test.com","created_at":...,"last_login_at":<剛剛>}` | 兩張票對照表（怎麼送、送到哪、活多久、JS 讀不讀得到、資料庫有沒有存）；最後一列帶出「沒存資料庫，後端怎麼知道是 9」 |
+| 6 | `$t = "<整個 token>"; [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($t.Split(".")[1]))` | `{"sub":"9","iat":...,"exp":...}`，差 `1800` | 先講三段與 Base64（不是加密）。**不要叫他手動剪中間那段**：他貼了整個 token，`FromBase64String` 報 non-base 64 character（點、`-`、`_`）；用 `Split(".")[1]`。對表 `sub`、`iat`（= 剛剛的 `last_login_at`）、`exp` 到 `security.py:63～65` |
+| 7 | 登入直接存變數：`$t = (curl.exe -s ...login... \| ConvertFrom-Json).access_token`；再一行：解第二段、`Replace('"sub":"9"','"sub":"1"')`、重包成 `$f`、`foreach ($x in $t, $f) { curl.exe -s -o NUL -w "%{http_code}`n" localhost:8000/api/me -H "Authorization: Bearer $x" }` | 印出 payload，`200`、`401` | **第一次做時 token 已過期**（回應時間晚於 `exp`），401 分不出是簽章還是過期，因為兩者故意回同一句（`dependencies.py:24～25`）→ 預期錯了直說，改做對照組。兩張只差 `sub`、都沒過期、結果不同 = 簽章。`JWT_SECRET` 外洩 = 任何人能假冒任何人 |
+| 8 | 先講來源、同源政策、CORS；`curl.exe -s -i localhost:8000/api/health -H "Origin: http://localhost:5173"` 和 `-H "Origin: http://evil.com"`，先讓他猜 | 都 `200`、內容一樣（`{"status":"ok","db":"ok","migration":"0006",...}`）；只有第一個有 `access-control-allow-origin`；兩個都有 `access-control-allow-credentials: true` | 後端沒擋，只是沒給許可，擋的是瀏覽器；curl 不理。CORS 保護用瀏覽器的使用者，不保護 API（保護 API 的是 token）。補：GET 會送到後端，POST + JSON 會先送 `OPTIONS` 預檢，沒許可連正式請求都不送。線上同源（Vercel 代理，`render.yaml:52`），根本不會發生 CORS |
 
-**收尾**：請求回應三層 / cookie 五個屬性 / 兩張票分工 / CORS 只管瀏覽器 / `no-store` 不存。收尾後問「哪一步要再講一次」。
+**收尾一句話**：請求回應四部分；cookie 五個屬性各擋一件事；兩張票送法、去處、存不存都不同；access token 看得到改不了；CORS 只管瀏覽器讀不讀得到。收尾後問「哪一步要再講一次」。
+**題目**（他都答對）：(1) 前端打 `/api/me` 瀏覽器會帶 refresh token cookie 嗎、後端靠什麼認人 → 不會，`Path=/api/auth`；靠 `Authorization` 標頭的 access token（補：標頭是 axios 攔截器自己加的，cookie 是瀏覽器自動帶）；(2) 改 `sub` 冒充別人會怎樣、什麼時候會成功 → 401，除非拿到 `JWT_SECRET`（補：沒限定演算法的系統會被 `"alg":"none"` 騙，`security.py` 有 `algorithms=[...]`）；(3) `evil.com` 的 JS 對 `/api/health` 發 GET，有沒有送到、讀不讀得到 → 有送到、讀不到。
 **動手玩**：`LEARNING.md` 關卡 19 的 1（400 改 401 看攔截器做錯事）。
 
 ### 關卡 20：讀 log 與除錯（故障演練）
