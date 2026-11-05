@@ -41,6 +41,8 @@
 
 唯一性衝突（email 重複）模板用 400；業界也常用 409。選一個，全專案一致；前端只讀 `detail`，兩者都能顯示。
 
+email 一律轉小寫再存、再比對（`schemas.py` 的 `normalize_email`，2026-11-05 起；舊資料由遷移 0007 轉好）：`Test@x.com` 和 `test@x.com` 是同一個帳號，回應裡的 `email` 也是小寫。新專案的使用者名稱、標籤這類「要唯一的字串」也要先決定大小寫規則。
+
 ## 4. 錯誤格式
 
 - 一律 `{"detail": ...}`，這是 FastAPI 的預設，前端 `getErrorMessage()`（`client.ts`）只認這個鍵。**不要自創別的鍵**（`error`、`message`）。

@@ -2509,6 +2509,7 @@ log 要你主動去翻。Sentry 反過來：程式丟出沒接住的例外時，
 4. **退版演練**：Render → Events → 找上一個成功的部署 → Rollback。看 `/api/health` 的 `version` 變成舊的 commit。再 Manual Deploy 回最新。
 5. **本機遷移退一版**：`uv run alembic downgrade -1` → `uv run alembic current` 看變 0003 → Neon 的 `user` 表 `nickname` 欄位回來了（0004 是刪它）→ `uv run alembic upgrade head`。
    > 2026-10-28 註記：關卡 24 之後 head 是 0006，`downgrade -1` 會到 0005，拿掉的是 `processedevent` 表（0006 的 `downgrade()` 是 `drop_table`），不是 `nickname`。帶做版本見 `COACHING.md` 關卡 11 步驟 4。
+   > 2026-11-05 再註記：head 變成 0007（email 轉小寫的資料遷移，`downgrade()` 不做事），`downgrade -1` 看不到任何變化；要看表消失用 `downgrade -2`。
 
 ### 想一想
 
@@ -3455,7 +3456,7 @@ COMMIT
 ### 動手玩
 
 1. **讓登入變慢**：在測試資料庫拔掉 `ix_user_email`（`DROP INDEX ix_user_email;`），用 `TEST_DATABASE_URL` 當 `DATABASE_URL` 起後端，看 request log 的 `duration_ms`。登入從幾毫秒變幾十毫秒（5 萬筆）。建回來：`CREATE UNIQUE INDEX ix_user_email ON "user" (email);`。
-2. **用程式的方式加索引**：`models.py` 的 `RefreshToken.expires_at` 加 `index=True`，`uv run alembic revision --autogenerate --rev-id 0005 -m "index expires_at"`（2026-10-28 註記：`0005` 已被關卡 24 的 outbox 遷移用掉，現在請用 `0007`），看產生的遷移檔只有一行 `create_index`。**不要合併**，這是練習「改了 models 就要有遷移」的流程；看完 `git checkout -- .` 並刪掉產生的檔案。（想一想 Q1 會說為什麼不真的加。）
+2. **用程式的方式加索引**：`models.py` 的 `RefreshToken.expires_at` 加 `index=True`，`uv run alembic revision --autogenerate --rev-id 0005 -m "index expires_at"`（2026-10-28 註記：`0005` 已被關卡 24 的 outbox 遷移用掉，現在請用 `0007`；2026-11-05 再註記：`0007` 也用掉了（email 轉小寫），改用 `0008`），看產生的遷移檔只有一行 `create_index`。**不要合併**，這是練習「改了 models 就要有遷移」的流程；看完 `git checkout -- .` 並刪掉產生的檔案。（想一想 Q1 會說為什麼不真的加。）
 3. **看 ORM 送什麼**：`DB_ECHO=true`，前端按「重新取得我的資料」、改密碼、登出所有裝置，對照 terminal 的 SQL 和 `routes/auth.py` 的程式碼，每句找到對應。
 4. **故意寫一個 N+1**：Python 殼（`uv run python`）裡用 `async with AsyncSession(engine)` 查 20 個 user，再迴圈每個查 `count(RefreshToken)`，打開 `DB_ECHO` 數有幾句 SQL。再用一句 `select(User.email, func.count(RefreshToken.id)).join(...).group_by(User.id)` 做同樣的事，數一次。
 5. **pgexercises.com**：免費、瀏覽器裡直接練 Postgres，從 Basic 做到 Joins 就夠練習專案用。一天一節。
@@ -3724,7 +3725,7 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 
 **原因**：`models.py` 的 `User` 多了 `nickname` 欄位，沒有產生遷移檔。本機測試用 `create_all` 建表，表裡有這個欄位，全綠；正式資料庫是用遷移建的，沒有這個欄位，`SELECT ... nickname` 直接 500 `column user.nickname does not exist`。
 **哪個工具抓到**：`uv run alembic check`（CI 的「遷移檢查」那步）：`New upgrade operations detected`。
-**修法**：`uv run alembic revision --autogenerate --rev-id 0005 -m "add user nickname"`（2026-10-28 註記：`0005` 已被用掉，現在用 `0007`），檢查產生的檔案，一起 commit。或者這次演練直接還原。
+**修法**：`uv run alembic revision --autogenerate --rev-id 0005 -m "add user nickname"`（2026-10-28 註記：`0005` 已被用掉，現在用 `0007`；2026-11-05 再註記：`0007` 也用掉了，改用 `0008`），檢查產生的檔案，一起 commit。或者這次演練直接還原。
 **對應**：故障演練清單第 4 條、關卡 11 動手玩 3。
 
 </details>
@@ -3872,6 +3873,8 @@ CI 的 `e2e` job（`infra.yml`）：compose 起後端 → `npm ci` → `npx play
 1. `docker compose -f infra/compose.yaml up -d --build --wait` 最後兩行是兩個 `Healthy`。
 2. `curl -s localhost:8000/api/health` 的 `migration` 是最新的遷移編號（現在 `0006`）。
 3. `docker compose -f infra/compose.yaml logs backend` 看得到 `Running upgrade … -> 0006` 與 `Application startup complete`。
+
+   > 2026-11-05 註記：最新的遷移變成 `0007`（email 轉小寫），上面兩條的 `0006` 現在是 `0007`。
 4. `npm run test:e2e`（在 `frontend/`）最後一行 `3 passed`。
 5. GitHub Actions 的 Infra workflow：`compose` job 的 Smoke test 有 `✅ compose 整套跑起來了`，`e2e` job 有 `3 passed`，run 頁面底部有 `playwright-report` artifact。
 
@@ -4216,7 +4219,7 @@ CI 的 `k8s` job 一條龍：`docker build` → `kind create cluster` → `kind 
 ### 驗證方式
 
 1. `kubectl -n jwt-auth-demo get pods`：兩個 `backend-… 1/1 Running`、一個 `backend-migrate-… 0/1 Completed`。
-2. `port-forward` 後 `curl localhost:8080/api/health` 的 `migration` 是最新的（`0006`）、`version` 是 `k8s`。
+2. `port-forward` 後 `curl localhost:8080/api/health` 的 `migration` 是最新的（`0006`；2026-11-05 註記：現在是 `0007`）、`version` 是 `k8s`。
 3. 換版期間 probe pod 的 80 次全部 `200`。
 4. `rollout undo` 後 image 回到 `jwt-backend:ci`；`rollout history` 多一個 revision。
 5. 壞 image 時 `get pods` 一個 `ErrImagePull`／`ImagePullBackOff`、兩個 `Running`，Service 仍回 `200`。
