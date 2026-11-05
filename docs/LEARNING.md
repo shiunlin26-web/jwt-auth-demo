@@ -3696,6 +3696,7 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 > - 第 2 題：現在是 67 個測試全綠（不是 52）。
 > - 第 3 題：**本機登入就 500**，因為本機的資料庫也是遷移建的；只有測試庫（`create_all`）有那個欄位。
 > - 第 4 題：畫面是 `Invalid or expired token`、**沒有被登出**：換票是成功的，「登入已過期」只在換票失敗時出現。
+> - 小實驗 `/api/_boom`：當天看到的 500 是純文字、沒有 `X-Request-ID`；同日改成 JSON `{"detail": "Internal Server Error"}` 並帶 `X-Request-ID`。request log 也多了 `user_id`（知道是誰的請求才有），可以直接統計每個人換票幾次。
 > - 第 5 題：不用等 token 過期，用關卡 1 動手的 Console 那行（把 access token 設成 `"bad"`、同時三個 `getMe()`）就能重現；三個 `refresh` 依序是 `200`、`401 Refresh token reused`、`401 Invalid refresh token`（第二個刪了全部，第三個查不到）。
 
 ### 答案

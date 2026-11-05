@@ -296,3 +296,22 @@ async def test_登入時會清掉過期的refresh_token(client):
             await session.exec(select(RefreshToken).where(RefreshToken.token_hash == "expired"))
         ).first()
     assert expired is None
+
+
+async def test_request_log會記下是誰的請求(client, caplog):
+    # 【關卡 20】只看 path 次數分不出是誰在換票；登入、換票、帶 access token 的請求要記 user_id
+    await register(client)
+    caplog.clear()
+    res = await login(client)
+    access_token = res.json()["access_token"]
+    await client.post("/api/auth/refresh")
+    me = await client.get("/api/me", headers=auth_header(access_token))
+    await client.get("/api/ping")
+
+    # middleware 用 extra= 加的欄位會掛在 LogRecord 上，從 __dict__ 拿
+    logged = {r.__dict__["path"]: r.__dict__ for r in caplog.records if r.getMessage() == "request"}
+    user_id = me.json()["id"]
+    assert logged["/api/auth/login"]["user_id"] == user_id
+    assert logged["/api/auth/refresh"]["user_id"] == user_id
+    assert logged["/api/me"]["user_id"] == user_id
+    assert "user_id" not in logged["/api/ping"]  # 不知道是誰就不記
