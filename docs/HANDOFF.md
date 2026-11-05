@@ -36,7 +36,7 @@
 - 還在分支上、尚未合併的工作：看 `git log --oneline origin/main..origin/<分支>`。慣例是一關一個 PR，CI 綠了就合併。
 - **範例專案（本 repo）已凍結**：不加業務功能（待辦、分類那種），只改文件、修 bug、合 Dependabot 的 PR。「教學用的延伸關卡」（例如分頁同步登出）**可以**做在本 repo，編號接在路線圖最後一關之後，照第 3 節的格式；業務功能一律在練習專案。它的用途是被複製到其他專案當登入模板。
 - 路線圖已無待做項目；`LEARNING.md` 末尾「之後還可以自己摸的」是不排關卡的延伸清單。`docs/drills/` 是故障演練的 patch，可以照 README 的格式再出新題。
-- **重帶的進度與接下來的順序**（2026-10-20 決定重帶，排法在 `docs/COACHING.md` 第 2 節；2026-10-27 決定順序；2026-11-05 把原本分開的三條合成這條）：之前的關卡是 AI 做、他驗收，沒有一步一步帶過，所以從關卡 0 重新帶，仔細關 1～2 小時、快速關 20～30 分鐘。**目前走到：關卡 0～20 已帶完（2026-11-05），重帶結束**（進度變時改這句）。接下來照 `PLAN-FULLSTACK.md` 第 1 節的五步走，順序是：
+- **重帶的進度與接下來的順序**（2026-10-20 決定重帶，排法在 `docs/COACHING.md` 第 2 節；2026-10-27 決定順序；2026-11-05 把原本分開的三條合成這條）：之前的關卡是 AI 做、他驗收，沒有一步一步帶過，所以從關卡 0 重新帶，仔細關 1～2 小時、快速關 20～30 分鐘。**目前走到：關卡 0～20 已帶完（2026-11-05），重帶結束；練習專案 `ledger` 同日開始，進度只記在 `PLAN-FULLSTACK.md` 第 5 節（含 5.1 搬模板的八塊）**（進度變時改這句）。接下來照 `PLAN-FULLSTACK.md` 第 1 節的五步走，順序是：
   1. **先開練習專案**（第 1 節第 2 步）：學習者自己開一個新 repo，題目是記帳本（2026-10-27 定，功能 1～3 的使用者故事草稿在 `PLAN-FULLSTACK.md` 第 6 節，他要用自己的話重寫），照 `docs/CHAIN.md` 的七環再走一次；技術棧和本 repo 一樣（Python + React，搬模板）；時間與功能順序在第 1 節；環 8～11（基礎設施）選做。
   2. **關卡 21～24 排在練習專案之後**（第 1 節第 5 步）：只走 VM 路線看 CI 的 job log，每關一小時、合計半天，任何時候都能做；Mac 動手是選配，有興趣的週末再做。這條路線（關卡 21～25：compose + E2E、指標與追蹤、Kubernetes、訊息佇列、架構地圖）2026-10-22 決定並同日做完：程式、CI job、`COACHING.md` 關卡 21～24 的腳本（Mac / VM 兩條路線）、`PLAIN.md`、`LEARNING.md` 關卡 21～24、`CHAIN.md` 環 8～11、`ARCHITECTURE.md` 都已合併到 main（PR #39～#57）；25-D 的 `deploy.yml` 也已合併（#63），要用時學習者自己到 Render 啟用（選配，步驟在 `deploy.yml` 開頭）。小塊清單、進度表、免費方案查證在 `docs/PLAN-INFRA.md`，**那條路線的進度只記在那裡**。
 - **觀念關的帶做進度**（2026-10-20）：關卡 18（Neon SQL 實驗、含第 5 段鎖的示範）和關卡 19（curl 看請求回應、cookie 存放處換票、舊票重用 401、Path 不帶 cookie、Bearer 打 `/api/me`、CORS 的 `Origin` 實驗）已帶學習者在本機親手跑過一遍；關卡 20 的 `docs/drills/` 演練當時沒做；重帶（上面那條）走到 20 時一起做，接手處看上面那條的進度。帶法照 `docs/COACHING.md`（一次一個指令，讓他貼輸出再解釋），程度校準見第 1 節。
@@ -91,6 +91,7 @@
 11. **會碰到付費門檻的事要提早說**（2026-10-15 補充）。部署平台的設定、第三方服務的方案，只要有可能跳出付費頁，動手前先告訴學習者「這一步可能要錢，免費替代方案是＿＿」，讓他決定。已知的邊界：Render 的「After CI Checks Pass」在免費方案不一定有（替代：Deploy Hook）、Render Pre-Deploy Command 要付費（已改用啟動時跑遷移）、Railway 沒有長期免費方案（已排除）、GitHub Actions 私有 repo 每月 2000 分鐘、Neon / Sentry / Vercel Hobby 的額度見 `PLAN-INFRA.md` 第 8 節的查證表。
 12. **帶法是「帶著做」**（2026-10-20）：一次一個指令、他貼輸出、從輸出講，方法與每關腳本在 `docs/COACHING.md`。不要丟整關文件給他讀，不要描述畫面長相。全專案從關卡 0 重新帶一遍，仔細關與快速關的分法在 `COACHING.md` 第 2 節。
 13. **GitHub Actions 的分鐘數**（2026-10-22）：repo 已公開，標準 runner 不計分鐘；私有 repo 的分鐘數是整個帳號一池，把這套搬到私有專案時要注意。基礎設施的 job 一律放 `.github/workflows/infra.yml`，只在 PR 與手動觸發、只有 `infra/`、`backend/` 或 E2E 有改動才跑，不放進 `ci.yml`。省分鐘的做法與公開前做過的檢查記在 `docs/PLAN-INFRA.md` 第 7 節。
+14. **練習專案的工具與帶法**（2026-11-05）：AI 在 VM 的 **VS Code 擴充套件**裡做（桌面版裝不了），權限模式 **Manual**（每個改動先看 diff）；帶的人（可以是另一個雲端對話，手上有 jwt-auth-demo 當參考答案）只讀 `ledger`、不推。**搬模板一塊一塊搬**、每塊證明會動再往下（`PLAN-FULLSTACK.md` 5.1）；**commit 訊息由帶的人給完整指令**，學習者自己 commit、push。帶做時先講再往下，不要在一則訊息裡塞兩步；要貼進檔案的文字單獨放在程式碼框裡，框外是說明（曾經把「改成…」的指示整句被貼進 `AGENTS.md`）。
 
 
 ## 6. 文件地圖
@@ -124,6 +125,7 @@
 | 服務 | 用途 | 位置 / 名稱 | 登入方式 |
 | --- | --- | --- | --- |
 | GitHub | 程式碼、CI、branch protection | `shiunlin26-web/jwt-auth-demo`，預設分支 `main` | 學習者帳號 |
+| GitHub | **練習專案** | `shiunlin26-web/ledger`（公開，2026-11-05 開），VM 上在 `C:\Users\sandbox\Desktop\ledger`；它自己的 Neon 專案也叫 `ledger`（本機 `neondb`、測試 `ledger_test`） | 學習者帳號 |
 | Render | 後端（Docker） | 服務 `jwt-auth-demo-backend`，新加坡區，`render.yaml` 描述；網址 `https://jwt-auth-demo-backend.onrender.com` | GitHub 登入 |
 | Vercel | 前端 | 專案 Root Directory 是 `frontend`，`frontend/vercel.json` 做 rewrites | GitHub 登入 |
 | Neon | Postgres | **兩個專案**（關卡 10 決定正式與開發分開）：`jwt-auth-demo-prod` 的 `neondb` 給 Render（連線字串填在 Render 的 `DATABASE_URL`，本機不碰）；`jwt-auth-demo` 的 `neondb` 是本機 `DATABASE_URL`、`jwtdemo_test` 是本機 `TEST_DATABASE_URL`（pytest 會清空）。SQL Editor 要先選對專案和資料庫 | GitHub 登入 |
@@ -144,6 +146,10 @@
 **接手帶練習專案（題目是記帳本，先做環 1～6）：**
 
 > 先讀 jwt-auth-demo 的 `AGENTS.md` 和 `docs/HANDOFF.md`。我是它的學習者，接下來要開一個新的練習專案，照 `docs/CHAIN.md` 的七環走一遍。題目是記帳本（`PLAN-FULLSTACK.md` 第 6 節），但環 1～6 跟題目無關，先走。新 repo 的 `AGENTS.md` 用 `CHAIN.md` 附錄 B 的範本。現在從環 1 開始：把 `CHAIN.md` 環 1「給 AI 的任務」整段當成我的任務，技術棧跟 jwt-auth-demo 一樣，列出你要做的事和驗收標準（照環 1 的四條），等我確認再動手。只做被要求的事，做完列出「我注意到但你沒要求、所以我沒做」的清單。commit 由我自己下。
+
+**接手帶練習專案（搬模板進行中，從某一塊繼續）：**
+
+> 先讀 jwt-auth-demo 的 `AGENTS.md`、`docs/HANDOFF.md`（第 1、4、5 節第 14 條）、`docs/PLAN-FULLSTACK.md` 第 5 節和 5.1、`docs/COACHING.md` 第 1 節。我是學習者，練習專案 `ledger` 正在一塊一塊搬模板，5.1 的表寫到哪一塊。請從下一塊繼續：先說那幾個檔案是什麼、搬過來改什麼，給我一個 PowerShell 指令複製（來源 `C:\Users\sandbox\Desktop\jwt-auth-demo`），我貼輸出，你講完我說「往下」才給下一步。commit 訊息你寫好完整指令給我，我自己 commit 和 push。你讀 `ledger` 用 GitHub 的公開 repo，不要推。
 
 **接手帶練習專案（題目已定，進入環 7）：**
 
