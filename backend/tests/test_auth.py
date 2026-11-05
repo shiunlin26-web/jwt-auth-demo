@@ -315,3 +315,16 @@ async def test_request_log會記下是誰的請求(client, caplog):
     assert logged["/api/auth/refresh"]["user_id"] == user_id
     assert logged["/api/me"]["user_id"] == user_id
     assert "user_id" not in logged["/api/ping"]  # 不知道是誰就不記
+
+
+async def test_email不分大小寫(client):
+    # 【關卡 20】EmailStr 只把網域轉小寫；Test@ 和 test@ 以前會是兩個帳號，用別的大小寫也登不進去
+    res = await register(client, email="Mixed.Case@Example.COM")
+    assert res.status_code == 201
+    assert res.json()["email"] == "mixed.case@example.com"  # 存進去的是小寫
+
+    res = await register(client, email="mixed.case@example.com")
+    assert res.status_code == 400  # 同一個人，不能再註冊一次
+
+    res = await login(client, email="MIXED.CASE@example.com")
+    assert res.status_code == 200  # 用哪種大小寫都登得進去

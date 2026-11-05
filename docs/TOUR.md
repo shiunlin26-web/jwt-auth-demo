@@ -157,7 +157,7 @@ user                              refreshtoken
 - 為什麼需要它：舊做法 `create_all` **只會建新表，不會改已存在的表**（關卡 1 就因此出過 500）
 - 改資料表的固定流程：
   1. 改 `models.py`
-  2. `uv run alembic revision --autogenerate --rev-id 0007 -m "說明"`：產生遷移檔（編號接在 `versions/` 現有最大的之後，現在是 `0006`）
+  2. `uv run alembic revision --autogenerate --rev-id 0008 -m "說明"`：產生遷移檔（編號接在 `versions/` 現有最大的之後，現在是 `0007`）
   3. **打開遷移檔檢查**（autogenerate 不一定完全正確）
   4. `alembic upgrade head`：套用到資料庫
 - `0003` 加 nickname、`0004` 刪掉 nickname：這是你自己練習的紀錄，示範「改錯了就再寫一個遷移改回來」，**不要去改已經套用過的遷移檔**
