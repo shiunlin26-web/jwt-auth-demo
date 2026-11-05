@@ -3691,6 +3691,13 @@ cookie 是瀏覽器自動帶的，這是優點（重新整理後還在）也是�
 
 做完每一題記下三件事：你先看了哪裡、第幾步定位到、哪個工具（或眼睛）抓到的。這就是（練習專案 repo 的）`QUESTIONS.md` 的素材。
 
+> **2026-11-05 註記（重帶時實測，和上表、下面答案不同的地方）**：
+> - 第 1 題：Chrome 的 Application → Cookies 列表**看不到** `refresh_token`（列表只列這頁載入過的網址用得到的 cookie，沒有網址以 `/auth` 開頭）；瀏覽器其實有存，Network → `refresh` → Cookies 分頁勾「show filtered out request cookies」看得到。pytest 紅的是 **5 個**不是 1 個。
+> - 第 2 題：現在是 67 個測試全綠（不是 52）。
+> - 第 3 題：**本機登入就 500**，因為本機的資料庫也是遷移建的；只有測試庫（`create_all`）有那個欄位。
+> - 第 4 題：畫面是 `Invalid or expired token`、**沒有被登出**：換票是成功的，「登入已過期」只在換票失敗時出現。
+> - 第 5 題：不用等 token 過期，用關卡 1 動手的 Console 那行（把 access token 設成 `"bad"`、同時三個 `getMe()`）就能重現；三個 `refresh` 依序是 `200`、`401 Refresh token reused`、`401 Invalid refresh token`（第二個刪了全部，第三個查不到）。
+
 ### 答案
 
 <details>

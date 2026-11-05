@@ -508,26 +508,34 @@
 
 ### 關卡 20：讀 log 與除錯（故障演練）
 
-**搭配看的程式**：`backend/main.py` 的 request log middleware 與 `/api/_boom`、`backend/logging_config.py`、`docs/DEBUGGING.md`、`docs/drills/README.md`、`LEARNING.md` 關卡 20 觀念 3 的表
+**搭配看的程式**：`backend/main.py:112～140`（request log middleware；`:119` 沒接住的例外記成 `request failed`）、`:215～224`（`/api/_boom`）、`backend/logging_config.py`（文字 / JSON 兩種格式）、`render.yaml:33`（線上 `LOG_JSON=true`）、`docs/DEBUGGING.md`、`docs/drills/README.md`、`LEARNING.md` 關卡 20 觀念 1（流程）、觀念 3（哪個工具抓哪種錯）
 
-**前置**：前後端跑起來；`uv run pytest -q`、`npm test` 綠（基準線）；`git status` 乾淨。**不要先看 patch 內容。** 每題的流程一樣，下面寫一次，第 1 題照做，之後每題只給症狀。
+**前置**：讀 `PLAIN.md` 關卡 20。**先講名詞**：patch（`git apply` 套上，**不要先打開看**）、基準線（弄壞前先確認本來是好的）；再列除錯流程六步。基準線三步，一次一步：`git pull` + `git status` 乾淨 → 在 `backend` `uv run pytest -q`（約 4 分半，`67 passed`）→ 在 `frontend` `npm test`（`11 passed`）。
 
-| 步 | 指令或操作 | 預期 | 看到之後講什麼 |
-| --- | --- | --- | --- |
-| 1 | `git apply docs/drills/01.patch` 然後 `git status` | 一個檔案 `modified` | 允許的提示：壞在哪個檔案 |
-| 2 | 重啟後端，瀏覽器登入、重新整理 | 掉登入 | 先問他：「你覺得是哪一段壞：refresh 沒送、送了被拒、還是回了前端沒收？」不要先講答案 |
-| 3 | DevTools → Network 點 `refresh` → Request Headers | 有沒有 `Cookie:` | 沒有 = 瀏覽器沒帶 = cookie 的屬性出問題（關卡 19 步驟 5） |
-| 4 | `uv run pytest -q` | 有紅的，名稱和 refresh 有關 | 哪個工具抓到了。對照 `LEARNING.md` 關卡 20 觀念 3 的表 |
-| 5 | 他說出原因後，`git diff` 對答案 | `path="/api/auth"` 變 `"/auth"` | 修完要能說根本原因 |
-| 6 | `git checkout -- backend frontend`，`git status` 乾淨 | | 下一題 |
+**每題的流程**（2026-11-04～05 實際帶法）：`git apply docs/drills/0N.patch` + `git status`（**只看檔名**，請他猜這個檔案管什麼）→ 重現（瀏覽器 + 終端機 A 先按幾下 Enter 空行，貼空行後的 log）→ **用 log 分段**（哪個請求、幾號、`duration_ms`）→ 他說根本原因、先猜哪個工具抓得到 → 跑那個工具 → `git diff` 對答案（**按 `q` 離開 pager**，他第一次以為 `:` 是錯誤）→ `git checkout -- backend frontend` + `git status` 乾淨。每題收「先看了哪裡 / 第幾步定位 / 哪個工具抓到」。
 
-五題的症狀與答案在 `LEARNING.md` 關卡 20 的「演練」表和折疊區。每題記三件事：先看了哪裡、第幾步定位、哪個工具抓到。**第 2 題全綠但壞了**是重點，帶到那題時用 `[Text.Encoding]` 解 token 看 `exp - iat`。
+| 題 | 檔案 | 實際症狀與 log（2026-11-04～05） | 定位 | 誰抓到 |
+| --- | --- | --- | --- | --- |
+| 1 | `routes/auth.py` | 重新整理掉登入；log `refresh 401`、**7 ms**（沒碰資料庫 → 查表前就回）；Response `No refresh token`、Request Headers 沒有 `Cookie:`；**Application → Cookies 列表看不到 `refresh_token`**；登入回應 `set-cookie ... Path=/auth` | 他猜「沒送」→ log 證明有送、被拒 → 沒帶 cookie → `Path` 不符 | **pytest 紅 5 個**（不是文件寫的 1 個）：換票、重複使用（`200 == 401`，小偷的 cookie 不受 Path 限制）、登出（`1 == 0`）、登出只影響自己、改密碼 |
+| 2 | `security.py` | 畫面一切正常；log 反覆 `me 401 → refresh 200 → me 200`，401 都 2～10 ms。他說「手動按了不準」要求乾淨重測：登入後等滿 1 分鐘按一次「重新取得我的資料」→ 一樣三行 | 解開 token：`$t = (curl.exe ...login... \| ConvertFrom-Json).access_token; $j = ...FromBase64String($t.Split(".")[1]) \| ConvertFrom-Json; $j; $j.exp - $j.iat` → **`30`**；他推出「單位被改成秒」 | **沒有工具**，pytest `67 passed` 全綠 |
+| 3 | `models.py` | **本機登入就 500**（本機 `neondb` 是遷移建的，文件寫「程式正常」不成立）；traceback 最後一行 `column user.nickname does not exist`，`[SQL: ...]` 多了 `"user".nickname` | 最後一行就是答案；他答出「要產生遷移檔」「測試用 `create_all` 所以抓不到」 | **`alembic check`**：`New upgrade operations detected: [('add_column', None, 'user', Column('nickname', ...))]`；pytest 全綠 |
+| 4 | `security.py` | 畫面顯示 **`Invalid or expired token`**，**沒有被登出**（文件寫「登入已過期」不成立：那句只在換票失敗時出現，`client.ts:91`；這題換票成功，重送 `/me` 再 401 被 `_retry` 擋下，錯誤丟給畫面）；log `login 200 → me 401 → refresh 200 → me 401`，`retry: 1` 再一輪 | 分段：簽 ✅ 驗 ❌，剛簽好的也被拒、2 ms → 驗簽章那步 | **pytest 紅 8 個**，全部需要驗 access token；`KeyError: 'last_login_at'` 是同一原因的另一種長相；`test_rules.py` 的 `InvalidAlgorithmError: The specified alg value is not allowed` 最直接。他打開檔案看到了 `HS512`：不算錯，但指出錯誤訊息本身就指到那裡 |
+| 5 | `frontend/src/api/client.ts` | **不用等過期**：登入 → Network 清空 → Console 貼關卡 1 第 7 步那行（`setAccessToken("bad")` + 三個 `getMe()`）。被登出；3 個 `refresh`：`200`（680 ms）、`401 Refresh token reused`（991 ms）、`401 Invalid refresh token`（1031 ms） | 兩個 401 慢是在等 `FOR UPDATE` 的鎖（關卡 18）；第二個刪了全部，第三個查不到所以是 `Invalid`。「只有一個分頁卻 reused」→ 前端自己送了三次 | **npm test**：`expected 3 to be 1`，`client.test.ts:56`；pytest 抓不到。他說「要跑 CI 才知道」→ CI 跑的就是本機同一個指令 |
 
-**另外兩個小實驗**：
-- `backend\.env` 加 `LOG_JSON=true` 和 `ENABLE_DEBUG_ENDPOINTS=true`，重啟，`curl.exe -s -i localhost:8000/api/_boom` → `500`；terminal 找 `"level": "ERROR"` 那筆，從**最後一行**往上讀到 `main.py` 的哪一行。看完刪掉兩行。
-- 用步驟裡任何一個回應的 `x-request-id`，在 terminal 的 log 搜同一個 id。
+**碰到的坑**：
+- `allow pasting` 只在 Chrome 跳警告時打；沒警告時打會 `SyntaxError: Unexpected identifier 'pasting'`，無害。
+- 在 repo 根目錄跑 `uv run pytest -q` → `ModuleNotFoundError: No module named 'models'`、`ERROR collecting`、`1 error in 1.99s`（一個測試都沒跑）→ 要在 `backend`。
+- 第 1 題「Application 看不到 cookie」：帶的人用 Playwright 實驗確認瀏覽器**有存** `path=/auth`，但按網址查（`/`）是空的；Application 列表列的是「這頁載入過的網址用得到的」cookie。讓他自己看到：Network → `refresh` → **Cookies** 分頁勾「show filtered out request cookies」（他用這個看到了），或 Console `await fetch("/auth/x")` 再回 Application。教訓：列表空的不代表沒存，看 `set-cookie` 和 Request Headers。
 
-**收尾**：先問哪段壞再問為什麼 / 看錯誤最後幾行 / 哪個工具抓哪種錯 / 全綠不等於沒壞。
+**兩個小實驗**：
+- `backend\.env` 加 `LOG_JSON=true`、`ENABLE_DEBUG_ENDPOINTS=true`，**重啟**，`curl.exe -s -i localhost:8000/api/_boom` → `500`、**純文字** `Internal Server Error`、**沒有 `x-request-id`**（例外穿過加標頭的 middleware）。log 一行 JSON：`"level": "ERROR"`、`"message": "request failed"`、`request_id`、`path`、`duration_ms`、**沒有 `status`**；`exception` 從最後讀：`RuntimeError: 演練：這是故意丟出來的錯誤`，往前是 `raise` 那行與 `main.py` 行號。
+- `curl.exe -s -i localhost:8000/api/health` 的 `x-request-id`，在終端機 `Ctrl+F` 搜同一個值 → 一行 `status 200`；`duration_ms 2251` 是 Neon 閒置後醒來（觀念 2 的表「幾秒 = 資料庫或冷啟動」）。
+- 收拾：刪兩行、重啟。他問「`LOG_JSON` 為什麼不用留」→ 線上由 `render.yaml:33` 設，本機預設 `False` 給人看；`ENABLE_DEBUG_ENDPOINTS` 才是一定要關的（`_boom` 灌爆 Sentry、`_ip` 洩漏標頭），`render.yaml` 故意沒設。
+
+**他問的**：「log 只看 path 次數，怎麼知道是同一個人在換票？」→ 看比例（換票 vs 登入、vs 在線人數）；`refreshtoken` 每次換票新增一列，`SELECT user_id, count(*) ... WHERE created_at > now() - interval '1 hour' GROUP BY user_id`；程式 bug 對每個人一樣，抽一張 token 就夠；根本解是換票 log 帶 `user_id`（沒做，列入清單）。「為什麼 `minutes` 改 `seconds` 不會被發現？」→ pyright（型別對）、ruff（語法對）、pytest（拿到就用）、使用者（攔截器自動換票）都放過；只有 code review 看得出 `seconds=settings.jwt_expire_minutes` 單位對不上；防法：檢查數值的測試、名稱帶單位、上線看數字。
+
+**收尾一句話**：先分段再問原因；錯誤從最後一行往上讀；每種工具只抓一類錯，CI 全綠只代表測過的沒壞。
+**題目**（他都答對）：(1) AI 說 CI 全綠能直接信嗎 → 不能，第 2 題；補：親自確認改的行為 + 叫它補一個測試；(2) 使用者說一直被登出，第一步 → 看 log 哪個請求 401；補：還要看 `detail`（`No refresh token` / `me 401` 在 `refresh 200` 後 / `reused`，對應第 1、4、5 題）、拿 `x-request-id` 搜；(3) `models.py` 加欄位 pytest 全綠，為什麼線上 500、推之前做什麼 → 測試用 `create_all`、要產生遷移檔；補：`--autogenerate --rev-id 0007`、檢查內容、`upgrade head`、`alembic check` 過、和 `models.py` 一起 commit。
 **動手玩**：`LEARNING.md` 關卡 20 的 4（讓測試抓第 2 題）。
 
 ### 關卡 21：docker compose 與 Playwright E2E
