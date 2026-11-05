@@ -123,13 +123,31 @@
 
 | 步 | 狀態 | 日期 | 備註 |
 | --- | --- | --- | --- |
-| 1 重帶剩下的關卡 | 進行中 | | 進度看 `HANDOFF.md` 第 2 節 |
+| 1 重帶剩下的關卡 | **已做**（2026-11-05） | | 關卡 0～20 帶完；21～24 留到第 5 步 |
 | 1' 備份還原演練 | **已做**（2026-10-28） | | 照 `RUNBOOK.md` 第 6 節做完九步：還原成功、Render 沒動；清演練帳號要先「登出所有裝置」（第 9 步已補） |
-| 2 練習專案 v1 環 1～6 | 待做 | | 題目記帳本（第 6 節）；技術棧 Python + React，搬模板 |
+| 2 練習專案 v1 環 1～6 | **進行中**（2026-11-05 開始） | | repo `shiunlin26-web/ledger`（公開）。環 1 和環 2 合併成「一塊一塊搬模板」，八塊的表和走到哪在下面 5.1 |
 | 3 練習專案 v1 功能 1～3 | 待做 | | 功能 2 起 AI 當 reviewer |
 | 4 練習專案 v2 功能 4～8 | 待做 | | 角色 → 忘記密碼 → OAuth → 上傳 → Redis；⚠️ 的先講 |
 | 5 關卡 21～24 VM 路線 | 待做 | | 半天 |
 | 之後：雲、22-C、Mac 動手 | 待做 | | 看需要 |
+
+### 5.1 搬模板的八塊（環 1 + 環 2，2026-11-05 學習者決定的帶法）
+
+學習者的要求：**新專案是獨立的，模板一塊一塊搬，每塊搬完跑一個指令證明它會動、講那塊是什麼，再搬下一塊**；不是 AI 一次倒六十個檔案。每塊一個 commit，**commit 訊息由帶的人給完整指令，學習者自己 commit 和 push**（他 2026-11-05 明說「你幫我想訊息，不要給我想」，這條蓋過第 4 節「他寫 commit 訊息」）。複製用 PowerShell 的 `Copy-Item`，來源是 VM 上的 `C:\Users\sandbox\Desktop\jwt-auth-demo`，`ledger` 在 `C:\Users\sandbox\Desktop\ledger`。**jwt-auth-demo 只在搬家這幾天需要在 VM 上**，第 7 塊搬完 `setup.ps1` 之後每次開機只 clone `ledger`。搬的內容照 `CHAIN.md` 附錄 A，一個檔案都不改（要改的只有附錄 A 標出來的那幾處）。帶做時每塊先說檔案是什麼、搬過來改什麼，複製完先講再往下，學習者要求「看完再往下」。
+
+| 塊 | 搬什麼 | 證明它會動 | 狀態 |
+| --- | --- | --- | --- |
+| 0 | Neon 專案 `ledger`（Singapore、pooler 連線字串）+ SQL Editor `CREATE DATABASE ledger_test` | 拿到連線字串 | ✅ 2026-11-05 |
+| 1 | `backend/pyproject.toml`（`name` 改 `ledger-backend`、`description` 改）、`uv.lock`、`.python-version`、根目錄 `.gitignore` | `uv sync` → `Installed 71 packages` | ✅ commit 9e39d36 |
+| 2 | 後端程式本體 16 個檔：`config.py`、`database.py`、`logging_config.py`、`.env.example`、`models.py`、`schemas.py`、`security.py`、`dependencies.py`、`rate_limit.py`、`main.py`、`metrics.py`、`tracing.py`、`outbox.py`、`routes/` 三個；`backend/.env` 填 `DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`（`ledger_test`） | `uv run uvicorn main:app --reload --port 8000`；`curl.exe` 打 `/api/ping` 回 `{"message":"pong"}`、`/api/health` 回 `db: ok`、`migration: unknown`；`git status` 看不到 `.env` | ✅ commit 281fde6。**待修**：VM 上的 jwt-auth-demo 比 main 舊（少 PR #115），`schemas.py`、`dependencies.py`、`main.py`、`routes/auth.py` 四個要先 `git pull` 再重抄一次，一個 `修正：` commit |
+| 3 | `alembic.ini`、`migrations/env.py`、`migrations/script.py.mako`（**不搬** `versions/`） | `uv run alembic revision --autogenerate --rev-id 0001 -m "init"`（Detected added table 四次）→ `upgrade head` → `alembic check` → `/api/health` 的 `migration` 變 `0001` | 待做 |
+| 4 | `tests/` 整個資料夾、`pytest.ini` | `uv run pytest -q` → `67 passed` | 待做 |
+| 5 | `frontend/`：`package.json`（`name` 改）、lock、`.nvmrc`、設定檔、`index.html`（`<title>`）、`src/` 全部、`public/`、`vercel.json`（`destination` 改成 `ledger-backend.onrender.com`，第 7 塊 `render.yaml` 的 `name` 要對上） | `npm ci`、`npm run dev`；按按鈕打 `/api/health` 看到 `db: ok`；Network 的網址是 `localhost:5173/api/...` | 待做 |
+| 6 | `src/test/`、三個 `*.test.ts(x)` | `npm test` → `11 passed` | 待做 |
+| 7 | `.github/workflows/ci.yml`、`dependabot.yml`、`codeql.yml`、`audit.yml`、`.editorconfig`、`.gitattributes`、`backend/Dockerfile`、`.dockerignore`、`render.yaml`（`name` 改 `ledger-backend`）、`scripts/`（`setup.ps1` 第 8～9 行 clone 網址與資料夾名改 `ledger`）、`docs/DEBUGGING.md`、`docs/RUNBOOK.md`、`README.md`（自己寫，含「每次開機」兩行） | push 後 Actions 的 CI 綠 | 待做 |
+| 驗收 | 環 1 的四條 + 環 2 的五條（`CHAIN.md`）一起驗。注意：模板的 `/api/ping` 不查資料庫，查的是 `/api/health`，環 1 第 1 條看 `health`；環 1 第 4 條「連線字串改錯啟動就失敗」在模板只對**缺** `DATABASE_URL` 成立（pydantic 驗必填），密碼錯要到 `/api/health` 才看得到 `db: error` | | 待做 |
+
+八塊都綠之後，環 3～6（容器、上線、CI、維護）照 `CHAIN.md` 原本的分法走，外部步驟照附錄 A「搬家後第一次要做的外部步驟」。
 
 ## 6. 練習專案：記帳本，功能 1～3 的使用者故事（草稿，他要用自己的話重寫）
 
