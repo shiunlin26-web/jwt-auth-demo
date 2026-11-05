@@ -292,7 +292,14 @@ jobs:
           ready=$(kubectl -n $NS get pods -l app=backend --no-headers | grep -c ' 1/1 ' || true)
           [ "$ready" -ge 2 ] || { echo "❌ 舊 pod 不到兩個 Ready（$ready）"; exit 1; }
           echo "✅ 兩個舊 pod 仍 Ready（$ready）"
-          kubectl -n $NS run probe2 --image=curlimages/curl:8.12.1 --restart=Never --rm -i -- curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 http://backend/api/ping | tee code.txt
+          # 不用 run --rm -i 直接讀輸出：curl 太快結束時，kubectl 常常還沒接上 pod 的輸出，code.txt 是空的、這一步偶發紅
+          # （2026-11-05 遇到：後端 log 有這次 ping 而且是 200）。改成和上面的 probe 一樣：跑完再讀 log。
+          # || true：連不上時 curl 照樣印 000，pod 仍是 Succeeded，下面的 grep 才看得到失敗的原因，不會變成 wait 逾時
+          kubectl -n $NS run probe2 --image=curlimages/curl:8.12.1 --restart=Never -- \
+            sh -c 'curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 http://backend/api/ping || true'
+          kubectl -n $NS wait --for=jsonpath='{.status.phase}'=Succeeded pod/probe2 --timeout=60s
+          kubectl -n $NS logs probe2 | tee code.txt
+          kubectl -n $NS delete pod probe2
           grep -q '^200$' code.txt || { echo "❌ 壞版本期間 Service 打不通"; exit 1; }
           echo "✅ 壞版本期間 Service 照常回 200"
           kubectl -n $NS rollout undo deployment/backend
