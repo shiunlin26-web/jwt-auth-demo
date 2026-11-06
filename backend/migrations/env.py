@@ -18,7 +18,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 
-import models  # noqa: F401  載入 User、RefreshToken，SQLModel.metadata 才會有它們
+import models  # noqa: F401  載入 models.py 所有 table=True 的 class，SQLModel.metadata 才會有它們
 from config import settings
 
 config = context.config
