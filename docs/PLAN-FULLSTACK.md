@@ -133,7 +133,7 @@
 
 ### 5.1 搬模板的八塊（環 1 + 環 2，2026-11-05 學習者決定的帶法）
 
-學習者的要求：**新專案是獨立的，模板一塊一塊搬，每塊搬完跑一個指令證明它會動、講那塊是什麼，再搬下一塊**；不是 AI 一次倒六十個檔案。每塊一個 commit，**commit 訊息由帶的人給完整指令，學習者自己 commit 和 push**（他 2026-11-05 明說「你幫我想訊息，不要給我想」，這條蓋過第 4 節「他寫 commit 訊息」）。複製用 PowerShell 的 `Copy-Item`，來源是 VM 上的 `C:\Users\sandbox\Desktop\jwt-auth-demo`，`ledger` 在 `C:\Users\sandbox\Desktop\ledger`。**jwt-auth-demo 只在搬家這幾天需要在 VM 上**，第 7 塊搬完 `setup.ps1` 之後每次開機只 clone `ledger`。搬的內容照 `CHAIN.md` 附錄 A，一個檔案都不改（要改的只有附錄 A 標出來的那幾處）。帶做時每塊先說檔案是什麼、搬過來改什麼，複製完先講再往下，學習者要求「看完再往下」。
+學習者的要求：**新專案是獨立的，模板一塊一塊搬，每塊搬完跑一個指令證明它會動、講那塊是什麼，再搬下一塊**；不是 AI 一次倒六十個檔案。每塊一個 commit，**commit 訊息由帶的人給完整指令，學習者自己 commit 和 push**（他 2026-11-05 明說「你幫我想訊息，不要給我想」，這條蓋過第 4 節「他寫 commit 訊息」）。複製用 PowerShell 的 `Copy-Item`，來源是 VM 上的 `C:\Users\sandbox\Desktop\jwt-auth-demo`，`ledger` 在 `C:\Users\sandbox\Desktop\ledger`。**jwt-auth-demo 只在搬家這幾天需要在 VM 上**，第 7 塊搬完之後每次開機只 clone `ledger`。`scripts/` 2026-11-06 從第 7 塊提前到第 5 塊之後（5'）：`setup.ps1` 第 1 步讀 `frontend/.nvmrc`、第 5 步 `npm ci`，前端搬完才跑得動。在 5' 之前，新 VM 由帶的人給一段手動指令（沒有 uv 才裝、git 身分、`uv sync`、建 `.env`：只問 `DATABASE_URL`，`TEST_DATABASE_URL` 由它把資料庫名換成 `ledger_test`；印 `.env` 時遮密碼，最後 `uv run alembic current` 要是 `0001 (head)`）。**提醒他不要貼 `Read-Host` 那一行**，那行會顯示原始網址含密碼。搬的內容照 `CHAIN.md` 附錄 A，一個檔案都不改（要改的只有附錄 A 標出來的那幾處）。帶做時每塊先說檔案是什麼、搬過來改什麼，複製完先講再往下，學習者要求「看完再往下」。
 
 | 塊 | 搬什麼 | 證明它會動 | 狀態 |
 | --- | --- | --- | --- |
@@ -143,8 +143,9 @@
 | 3 | `alembic.ini`、`migrations/env.py`、`migrations/script.py.mako`（**不搬** `versions/`） | `uv run alembic revision --autogenerate --rev-id 0001 -m "init"`（Detected added table 四次、added index 五次，`versions/` 由 Alembic 自己建）→ `upgrade head` → `alembic check`（前面多兩行 `Detected sequence ... assuming SERIAL and omitting` 不是錯，最後一行 `No new upgrade operations detected.`）→ `/api/health` 的 `migration` 變 `0001` | ✅ commit 7ba2ab3（訊息開頭標 `環 2：`，遷移是環 2 的驗收） |
 | 4 | `tests/` 整個資料夾、`pytest.ini` | `uv run pytest -q` → `67 passed` | 待做 |
 | 5 | `frontend/`：`package.json`（`name` 改）、lock、`.nvmrc`、設定檔、`index.html`（`<title>`）、`src/` 全部、`public/`、`vercel.json`（`destination` 改成 `ledger-backend.onrender.com`，第 7 塊 `render.yaml` 的 `name` 要對上） | `npm ci`、`npm run dev`；按按鈕打 `/api/health` 看到 `db: ok`；Network 的網址是 `localhost:5173/api/...` | 待做 |
+| 5' | `scripts/`（`setup.ps1` 第 8～9 行 clone 網址與資料夾名改 `ledger`）、`.gitattributes`（讓 `*.ps1`、`*.sh` 存成 LF）。2026-11-06 從第 7 塊提前 | 新 VM：clone `ledger` → `powershell -ExecutionPolicy Bypass -File ...\ledger\scripts\setup.ps1 -SkipTests` 跑到印出「完成」 | 待做 |
 | 6 | `src/test/`、三個 `*.test.ts(x)` | `npm test` → `11 passed` | 待做 |
-| 7 | `.github/workflows/ci.yml`、`dependabot.yml`、`codeql.yml`、`audit.yml`、`.editorconfig`、`.gitattributes`、`backend/Dockerfile`、`.dockerignore`、`render.yaml`（`name` 改 `ledger-backend`）、`scripts/`（`setup.ps1` 第 8～9 行 clone 網址與資料夾名改 `ledger`）、`docs/DEBUGGING.md`、`docs/RUNBOOK.md`、`README.md`（自己寫，含「每次開機」兩行） | push 後 Actions 的 CI 綠 | 待做 |
+| 7 | `.github/workflows/ci.yml`、`dependabot.yml`、`codeql.yml`、`audit.yml`、`.editorconfig`、`backend/Dockerfile`、`.dockerignore`、`render.yaml`（`name` 改 `ledger-backend`）、`docs/DEBUGGING.md`、`docs/RUNBOOK.md`、`README.md`（自己寫，含「每次開機」兩行） | push 後 Actions 的 CI 綠 | 待做 |
 | 驗收 | 環 1 的四條 + 環 2 的五條（`CHAIN.md`）一起驗。注意：模板的 `/api/ping` 不查資料庫，查的是 `/api/health`，環 1 第 1 條看 `health`；環 1 第 4 條「連線字串改錯啟動就失敗」在模板只對**缺** `DATABASE_URL` 成立（pydantic 驗必填），密碼錯要到 `/api/health` 才看得到 `db: error` | | 待做 |
 
 八塊都綠之後，環 3～6（容器、上線、CI、維護）照 `CHAIN.md` 原本的分法走，外部步驟照附錄 A「搬家後第一次要做的外部步驟」。
