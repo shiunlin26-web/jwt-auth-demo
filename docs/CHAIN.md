@@ -427,6 +427,7 @@
 | `AGENTS.md` | 用附錄 B 的範本，不要直接複製本 repo 的（它有學習專案專屬的規矩） |
 | `docs/DEBUGGING.md`、`docs/RUNBOOK.md` | 複製過去當起點，練習專案踩到的坑加上去 |
 | `scripts/setup.sh`、`scripts/doctor.sh`、`scripts/doctor.ps1` | 不用改（裡面沒有 repo 網址，都是從目前所在的 repo 動作） |
+| `.vscode/settings.json` | 不用改。讓 VS Code 每個新終端機都找得到 `setup.ps1` 裝的 uv、Node、git（`setup.ps1` 印的「完成」提示會提到它；`.gitignore` 的 `!.vscode/settings.json` 就是為它留的）。2026-11-09 搬 ledger 時發現原本漏列 |
 | `infra/`、`.github/workflows/infra.yml` | 環 8～11 才要，可以先不搬。搬的話：compose 的 `name`、k8s 的 namespace、image 名、Grafana 儀表板 JSON 的 `uid` 與 `title` 改成新專案的 |
 | `frontend/e2e/`、`frontend/playwright.config.ts` | 環 8 才要；測試裡的文案（按鈕、標題、placeholder）換成新專案的 |
 | `backend/worker.py`、`consumer.py` | 環 11 才要（compose 裡獨立的 worker 與 consumer 程序）；不用改。`metrics.py`、`tracing.py`、`outbox.py` 不在這裡，它們是必搬的，見後端表 |
