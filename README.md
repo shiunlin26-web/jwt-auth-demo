@@ -11,7 +11,7 @@ JWT 登入的教學模板：FastAPI + React + Neon，部署在 Render + Vercel�
 
 | 這條鏈的一段 | 做了什麼 | 怎麼證明它會動 |
 | --- | --- | --- |
-| 登入 | JWT access token + 輪替的 refresh token（HttpOnly cookie、重複使用偵測）、前後端同站代理 | `uv run pytest -q`（67 個測試，以輸出為準）、`npm test` |
+| 登入 | JWT access token + 輪替的 refresh token（HttpOnly cookie、重複使用偵測）、前後端同站代理 | `uv run pytest -q`（70 個測試，以輸出為準）、`npm test` |
 | 上線 | Docker image；Render + Vercel + Neon 全免費方案；`/api/health` 報遷移版本與 commit | 線上開 `/api/health` |
 | CI/CD | ruff、pyright、alembic check、pytest、Docker smoke、eslint、prettier、vitest、tsc；CI 綠才部署 | Actions 的 **CI** workflow |
 | 本機整套與 E2E | `docker compose` 一個指令起整套；Playwright 在真瀏覽器走註冊 → 登入 → 重整 → 登出 | **Infra** workflow 的 `compose`、`e2e` job |
