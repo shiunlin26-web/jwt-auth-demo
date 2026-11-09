@@ -141,12 +141,41 @@
 | 1 | `backend/pyproject.toml`（`name` 改 `ledger-backend`、`description` 改）、`uv.lock`、`.python-version`、根目錄 `.gitignore` | `uv sync` → `Installed 71 packages` | ✅ commit 9e39d36 |
 | 2 | 後端程式本體 16 個檔：`config.py`、`database.py`、`logging_config.py`、`.env.example`、`models.py`、`schemas.py`、`security.py`、`dependencies.py`、`rate_limit.py`、`main.py`、`metrics.py`、`tracing.py`、`outbox.py`、`routes/` 三個；`backend/.env` 填 `DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`（`ledger_test`） | `uv run uvicorn main:app --reload --port 8000`；`curl.exe` 打 `/api/ping` 回 `{"message":"pong"}`、`/api/health` 回 `db: ok`、`migration: unknown`；`git status` 看不到 `.env` | ✅ commit 281fde6；修正 commit afc6986（VM 上的 jwt-auth-demo 比 main 舊、少 PR #115，`schemas.py`、`dependencies.py`、`main.py`、`routes/auth.py` 四個 `git pull` 後重抄） |
 | 3 | `alembic.ini`、`migrations/env.py`、`migrations/script.py.mako`（**不搬** `versions/`） | `uv run alembic revision --autogenerate --rev-id 0001 -m "init"`（Detected added table 四次、added index 五次，`versions/` 由 Alembic 自己建）→ `upgrade head` → `alembic check`（前面多兩行 `Detected sequence ... assuming SERIAL and omitting` 不是錯，最後一行 `No new upgrade operations detected.`）→ `/api/health` 的 `migration` 變 `0001` | ✅ commit 7ba2ab3（訊息開頭標 `環 2：`，遷移是環 2 的驗收） |
-| 4 | `tests/` 整個資料夾、`pytest.ini` | `uv run pytest -q` → `67 passed` | 待做 |
+| 4 | `tests/` 整個資料夾、`pytest.ini` | `uv run pytest -q` → `70 passed`（PR #115 加了 3 個；連 Neon 約 5 分鐘） | 進行中：2026-11-06 跑出 70 passed 但沒 commit 就換 VM，要重抄再 commit |
 | 5 | `frontend/`：`package.json`（`name` 改）、lock、`.nvmrc`、設定檔、`index.html`（`<title>`）、`src/` 全部、`public/`、`vercel.json`（`destination` 改成 `ledger-backend.onrender.com`，第 7 塊 `render.yaml` 的 `name` 要對上） | `npm ci`、`npm run dev`；按按鈕打 `/api/health` 看到 `db: ok`；Network 的網址是 `localhost:5173/api/...` | 待做 |
 | 5' | `scripts/`（`setup.ps1` 第 8～9 行 clone 網址與資料夾名改 `ledger`）、`.gitattributes`（讓 `*.ps1`、`*.sh` 存成 LF）。2026-11-06 從第 7 塊提前 | 新 VM：clone `ledger` → `powershell -ExecutionPolicy Bypass -File ...\ledger\scripts\setup.ps1 -SkipTests` 跑到印出「完成」 | 待做 |
 | 6 | `src/test/`、三個 `*.test.ts(x)` | `npm test` → `11 passed` | 待做 |
 | 7 | `.github/workflows/ci.yml`、`dependabot.yml`、`codeql.yml`、`audit.yml`、`.editorconfig`、`backend/Dockerfile`、`.dockerignore`、`render.yaml`（`name` 改 `ledger-backend`）、`docs/DEBUGGING.md`、`docs/RUNBOOK.md`、`README.md`（自己寫，含「每次開機」兩行） | push 後 Actions 的 CI 綠 | 待做 |
 | 驗收 | 環 1 的四條 + 環 2 的五條（`CHAIN.md`）一起驗。注意：模板的 `/api/ping` 不查資料庫，查的是 `/api/health`，環 1 第 1 條看 `health`；環 1 第 4 條「連線字串改錯啟動就失敗」在模板只對**缺** `DATABASE_URL` 成立（pydantic 驗必填），密碼錯要到 `/api/health` 才看得到 `db: error` | | 待做 |
+
+**5' 之前，新 VM 的手動建置**（2026-11-09 定稿；學習者要「直接給指令」，不用一步一步帶）。前提：桌面已經 clone 好 `ledger` 和 `jwt-auth-demo`。整段一次貼進 PowerShell；程式碼全英文，因為 PowerShell 指令列的中文會變 `?`。會問 git 身分（沒設才問）和一次 Neon 網址（原始格式即可）：
+
+```powershell
+$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+}
+if (-not (git config user.email)) {
+    git config --global user.name (Read-Host "git user.name")
+    git config --global user.email (Read-Host "git user.email (same as GitHub)")
+}
+Set-Location C:\Users\sandbox\Desktop\ledger\backend
+uv sync
+if (-not (Test-Path .env)) {
+    $db = (Read-Host "Paste ledger DATABASE_URL from Neon").Trim() -replace '^postgres(ql)?://', 'postgresql+asyncpg://' -replace 'sslmode=require', 'ssl=require' -replace '[&?]channel_binding=require', ''
+    $test = $db -replace '/[^/?]+\?', '/ledger_test?'
+    if ($test -eq $db) { throw "TEST_DATABASE_URL must differ from DATABASE_URL" }
+    $secret = uv run python -c "import secrets; print(secrets.token_urlsafe(32))"
+    Set-Content .env -Encoding ascii -Value "DATABASE_URL=$db", "JWT_SECRET=$secret", "TEST_DATABASE_URL=$test"
+}
+Get-Content .env | ForEach-Object { $_ -replace ':[^:@/]+@', ':***@' -replace '^JWT_SECRET=.*', 'JWT_SECRET=(hidden)' }
+uv run alembic current
+```
+
+- 預期：三行 `.env`（密碼與 `JWT_SECRET` 遮掉，`TEST_DATABASE_URL` 的資料庫名是 `ledger_test`），最後一行 `0001 (head)`（之後的塊加了遷移就是最新那號）
+- 叫他**從 `DATABASE_URL=` 那行開始貼**，`Read-Host` 那行會顯示含密碼的原始網址
+- 第一行只修這個視窗的 PATH；換視窗跑 `uv` 出現 `not recognized` 就再貼第一行（`DEBUGGING.md` 第 18 行）
+- **每塊證明會動就馬上 commit + push 再做別的**：2026-11-06 第 4 塊跑出 `70 passed` 還沒 commit 就換 VM，`tests/` 跟著舊 VM 消失，要重抄
 
 八塊都綠之後，環 3～6（容器、上線、CI、維護）照 `CHAIN.md` 原本的分法走，外部步驟照附錄 A「搬家後第一次要做的外部步驟」。
 

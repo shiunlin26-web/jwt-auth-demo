@@ -396,7 +396,7 @@
 | `tests/` 整個資料夾（`conftest.py`、`helpers.py`、`test_auth.py`、`test_rules.py`、`test_health.py`、`test_rate_limit.py`、`test_register_cap.py`、`test_metrics.py`、`test_outbox.py`、`test_tracing.py`）、`pytest.ini` | 不用改。`conftest.py` 的 `TRUNCATE` 那行要把新專案的表名加進去（現在已經有四張） |
 | `Dockerfile`、`.dockerignore`、`.env.example` | 不用改 |
 
-搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`；`.env.example` 裡 `TEST_DATABASE_URL` 那行是註解掉的，取消註解再填）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"`（預期印出 Detected added table 四次：`outboxevent`、`processedevent`、`user`、`refreshtoken`）→ `uv run alembic upgrade head` → `uv run alembic check`（預期 `No new upgrade operations detected.`）→ `uv run pytest -q`（67 個測試應該全綠，數字以輸出為準）→ `uv run uvicorn main:app --reload --port 8000`，開 `/api/health` 要看到 `"migration":"0001"`。
+搬完先跑：`uv sync` → 設 `.env`（`DATABASE_URL`、`JWT_SECRET`、`TEST_DATABASE_URL`；`.env.example` 裡 `TEST_DATABASE_URL` 那行是註解掉的，取消註解再填）→ `uv run alembic revision --autogenerate --rev-id 0001 -m "init"`（預期印出 Detected added table 四次：`outboxevent`、`processedevent`、`user`、`refreshtoken`）→ `uv run alembic upgrade head` → `uv run alembic check`（預期 `No new upgrade operations detected.`）→ `uv run pytest -q`（70 個測試應該全綠，數字以輸出為準）→ `uv run uvicorn main:app --reload --port 8000`，開 `/api/health` 要看到 `"migration":"0001"`。
 
 ### 前端（`frontend/`）
 
